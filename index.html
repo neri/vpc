@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Virtual Playground</title>
+    <script src="lib/xterm.js"></script>
+    <link rel="stylesheet" href="lib/xterm.css">
+    <style>
+        @font-face {
+            font-family: 'TerminalWebFont';
+            unicode-range: U+0-7F;
+            src: url('register.ttf');
+        }
+        #screen_container {
+            /* font-family: TerminalWebFont, 'Liberation Mono', 'DejaVu Sans Mono', 'Courier New', monospace;
+            font-size: 16px;
+            line-height: 16px; */
+            display: none;
+            cursor: text;
+            width: 720px;
+            height: 408px;
+        }
+        
+        #click_to_start {
+            background: lightgray;
+            color: darkgray;
+            width: 720px;
+            line-height: 400px;
+            text-align: center;
+            cursor: pointer;
+        }
+        
+        #click_to_start p {
+            margin: 0;
+            display: inline-block;
+            vertical-align: middle;
+        }
+        
+        address {
+            text-align: right;
+            font-size: smaller;
+            font-style: normal;
+            color: darkgray;
+        }
+    </style>
+    <script>
+        const sab_index_sleep = 0;
+        const sab_index_key = 1;
+        
+        window.addEventListener('DOMContentLoaded', () => {
+            document.querySelector('#click_to_start').addEventListener('click', e => {
+                startEmu();
+            });
+        });
+        
+        const startEmu = () => {
+            document.querySelector('#screen_container').style.display = 'block';
+            document.querySelector('#click_to_start').style.display = 'none';
+            
+            this._sab = new SharedArrayBuffer(256);
+            const term = new Terminal({convertEol: true, rendererType: 'canvas'});
+            term.open(document.querySelector('#terminal'));
+            window.term = term;
+            term.onKey((e) => {
+                let sab = new Int32Array(this._sab);
+                Atomics.store(sab, sab_index_key, (e.key.length ? e.key.charCodeAt(0) : 0)
+                | (e.domEvent.keyCode << 16));
+                Atomics.notify(sab, sab_index_key);
+            });
+            term.focus();
+            
+            const worker = new Worker('worker.js');
+            window.worker = worker;
+            
+            worker.onmessage = message => {
+                switch (message.data.command) {
+                    case 'loaded':
+                    worker.postMessage({ command: 'sab', sab: this._sab });
+                    break;
+                    case 'write':
+                    term.write(message.data.data);
+                    break;
+                    default:
+                    throw message;
+                }
+            };
+        }
+    </script>
+</head>
+<body>
+    
+    <h1>Virtual Playground (alpha)</h1>
+    
+    <div id="emulatorFrame">
+        <div id="click_to_start"><p>はじめるときはここをクリック...</p></div>
+        <div id="screen_container">
+            <div id="terminal"></div>
+        </div>
+    </div>
+    
+    <hr>
+    <address>
+        POWERED by 
+        <a href="https://github.com/neri/vpc">VPC</a>
+        / <a href="https://github.com/xtermjs/xterm.js/">xterm.js</a>
+    </address>
+</body>
+</html>

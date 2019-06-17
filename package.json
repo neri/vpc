@@ -1,0 +1,22 @@
+{
+  "name": "vpc",
+  "version": "1.0.0",
+  "description": "",
+  "main": "worker.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/neri/vpc.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/neri/vpc/issues"
+  },
+  "homepage": "https://github.com/neri/vpc#readme",
+  "dependencies": {
+    "xterm": "^3.14.2"
+  }
+}
