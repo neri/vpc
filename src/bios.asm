@@ -1,10 +1,20 @@
 ; Virtual Playground BIOS
 ; Copyright (C) 2019 Nerry
+
 [CPU 8086]
 [BITS 16]
 [ORG 0]
 
+%define SEG_BIOS 0xFC00
+%define SIZE_BIOS 0x4000
 %define ARGV 0x0080
+
+_HEAD:
+    dw SEG_BIOS, SIZE_BIOS
+
+banner:
+    db 0x1b, "[H", 0x1b, "[J"
+    db "BIOS v0.0", 10, 0
 
 _aux_out:
     push ds
@@ -41,69 +51,73 @@ _INIT:
     mov ax, 0x3F8
     mov [ss:0x0400], ax
 
-	mov si, banner
-	call puts
+    mov si, banner
+    call puts
 
-	sti
+    sti
 .prompt:
-	mov di, ARGV
-	mov al, '#'
-	call _aux_out
+    mov di, ARGV
+    mov al, '#'
+    call _aux_out
 .loop:
-	call _aux_in
-	or al, al
-	jnz .skip
-	hlt
-	jmp .loop
+    call _aux_in
+    or al, al
+    jnz .skip
+    hlt
+    jmp .loop
 .skip:
-	cmp al, 13
-	jz .crlf
-	ss stosb
-	call _aux_out
-	jmp .loop
+    cmp al, 13
+    jz .crlf
+    cmp al, 127
+    jz .del
+    ss stosb
+    call _aux_out
+    jmp .loop
+.del:
+    mov al, 8
+    call _aux_out
+    jmp .loop
 .crlf:
-	xor al, al
-	ss stosb
-	mov al, 13
-	call _aux_out
-	mov al, 10
-	call _aux_out
+    xor al, al
+    ss stosb
+    mov al, 13
+    call _aux_out
+    mov al, 10
+    call _aux_out
 
-	mov si, ARGV
+    mov si, ARGV
 .loop_cmd:
-	ss lodsb
-	or al, al
-	jz .end
-	cmp al, ' '
-	jz .loop_cmd
-	cmp al, 'r'
-	jnz .no_cmd_r
-	mov dx, 0x0CF9
-	out dx, al
+    ss lodsb
+    or al, al
+    jz .prompt
+    cmp al, ' '
+    jz .loop_cmd
+    cmp al, 'r'
+    jnz .no_cmd_r
+    mov dx, 0x0CF9
+    out dx, al
 .no_cmd_r:
 .end:
-	mov si, bad_cmd_msg
-	call puts
-	jmp .prompt
+    mov si, bad_cmd_msg
+    call puts
+    jmp .prompt
 
 
 puts:
 .loop:
-	lodsb
-	or al, al
-	jz .end
-	call _aux_out
-	jmp .loop
+    lodsb
+    or al, al
+    jz .end
+    call _aux_out
+    jmp .loop
 .end:
-	ret
+    ret
 
-banner:
-	db "BIOS v0.0", 10, 0
 
 bad_cmd_msg:
-	db "Bad command or file name", 10, 0
+    db "Bad command or file name", 10, 0
 
-	times 0xFFF0 - ($-$$) db 0
+    times SIZE_BIOS - 16 - ($-$$) db 0
 __RESET:
-    jmp 0xF000:_INIT
-	times 0x10000 - ($-$$) db 0
+    jmp SEG_BIOS:_INIT
+    times SIZE_BIOS - ($-$$) db 0

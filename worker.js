@@ -97,7 +97,7 @@ fetch('./lib/vcpu.wasm')
         });
     })
     .then(buffer => {
-        env.emit(0xF0000, new Uint8Array(buffer));
+        env.emit(0xFC000, new Uint8Array(buffer));
         postMessage({command: 'loaded'});
     })
     .catch(reason => {
@@ -110,8 +110,9 @@ onmessage = e => {
         case 'sab':
             env._sab = e.data.sab;
             setTimeout(() => {
-                console.log('Ok, now starting CPU...');
+                console.log('CPU started');
                 env.instance.exports.run(1);
+                console.log('CPU halted');
             }, 10);
             break;
         default:
