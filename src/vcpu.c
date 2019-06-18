@@ -301,22 +301,19 @@ static void OUT16(cpu_state *cpu, uint16_t port, uint16_t value) {
     }
 }
 
-static int INPORT8(cpu_state *cpu, uint16_t port) {
+static uint8_t INPORT8(cpu_state *cpu, uint16_t port) {
     switch (port) {
         case 0x03F8:// UART I/O
-            cpu->AL = vpc_readKey();
-            return 0;
+            return vpc_readKey();
         default:
-            cpu->AL = 0xFF;
-            return 0;
+            return 0xFF;
     }
 }
 
-static int INPORT16(cpu_state *cpu, uint16_t port) {
+static uint16_t INPORT16(cpu_state *cpu, uint16_t port) {
     switch (port) {
         default:
-            cpu->AX = 0xFFFF;
-            return 0;
+            return 0xFFFF;
     }
 }
 
@@ -546,7 +543,7 @@ static void ADD(cpu_state *cpu, operand_set *set, int c) {
             value = dst + src + c;
             cpu->AF = (dst & 15) + (src & 15) + c > 15;
             cpu->CF = (uint8_t)dst > (uint8_t)value || (c && !(src + 1));
-            *(uint8_t *)set->opr1 = SETF8(cpu, value);
+            *set->opr1b = SETF8(cpu, value);
             break;
         }
         case 1:
@@ -572,7 +569,7 @@ static void SUB(cpu_state *cpu, operand_set *set, int c, int cmp) {
             cpu->AF = (dst & 15) - (src & 15) - c < 0;
             cpu->CF = (uint8_t)dst < (uint8_t)src + c || (c && !(src + 1));
             SETF8(cpu, value);
-            if (!cmp) *(uint8_t *)set->opr1 = value;
+            if (!cmp) *set->opr1b = value;
             break;
         }
         case 1:
@@ -593,9 +590,9 @@ static void OR(cpu_state *cpu, operand_set *set) {
     switch (set->size) {
         case 0:
         {
-            value = *(uint8_t *)set->opr1 | set->opr2;
+            value = *set->opr1b | set->opr2;
             cpu->CF = 0;
-            *(uint8_t *)set->opr1 = SETF8(cpu, value);
+            *set->opr1b = SETF8(cpu, value);
             break;
         }
         case 1:
@@ -613,10 +610,10 @@ static void AND(cpu_state *cpu, operand_set *set, int test) {
     switch (set->size) {
         case 0:
         {
-            value = *(uint8_t *)set->opr1 & set->opr2;
+            value = *set->opr1b & set->opr2;
             cpu->CF = 0;
             SETF8(cpu, value);
-            if (!test) *(uint8_t *)set->opr1 = value;
+            if (!test) *set->opr1b = value;
             break;
         }
         case 1:
@@ -635,9 +632,9 @@ static void XOR(cpu_state *cpu, operand_set *set) {
     switch (set->size) {
         case 0:
         {
-            value = *(uint8_t *)set->opr1 ^ set->opr2;
+            value = *set->opr1b ^ set->opr2;
             cpu->CF = 0;
-            *(uint8_t *)set->opr1 = SETF8(cpu, value);
+            *set->opr1b = SETF8(cpu, value);
             break;
         }
         case 1:
@@ -942,6 +939,11 @@ static int cpu_eval(cpu_state *cpu) {
                 cpu->gpr[inst & 7] = POP16(cpu);
                 return 0;
 
+            // case 0x60: // PUSHA
+            // case 0x61: // POPA
+            // case 0x62: // BOUND or EVEX
+            // case 0x63: // ARPL or MOVSXD
+
             case 0x64: // prefix FS:
                 seg = &cpu->FS;
                 break;
@@ -962,9 +964,77 @@ static int cpu_eval(cpu_state *cpu) {
                 PUSH16(cpu, FETCH16(cpu));
                 return 0;
 
+            // case 0x69: // IMUL reg, r/m, imm16
+
             case 0x6A: // PUSH imm8
                 PUSH16(cpu, MOVSXB(FETCH8(cpu)));
                 return 0;
+
+            // case 0x6B: // IMUL reg, r/m, imm8
+
+            case 0x6C: // INSB
+            {
+                sreg_t *_seg = SEGMENT(&cpu->ES);
+                int rep = prefix & PREFIX_REPZ;
+                if (rep && cpu->CX == 0) return 1;
+                do {
+                    WRITE_MEM8(_seg, cpu->DI, INPORT8(cpu, cpu->DX));
+                    if (cpu->DF) {
+                        cpu->DI--;
+                    } else {
+                        cpu->DI++;
+                    }
+                } while (rep && --cpu->CX);
+                return 0;
+            }
+
+            case 0x6D: // INSW
+            {
+                sreg_t *_seg = SEGMENT(&cpu->ES);
+                int rep = prefix & PREFIX_REPZ;
+                if (rep && cpu->CX == 0) return 1;
+                do {
+                    WRITE_MEM16(_seg, cpu->DI, INPORT16(cpu, cpu->DX));
+                    if (cpu->DF) {
+                        cpu->DI -= 2;
+                    } else {
+                        cpu->DI += 2;
+                    }
+                } while (rep && --cpu->CX);
+                return 0;
+            }
+
+            case 0x6E: // OUTSB
+            {
+                sreg_t *_seg = SEGMENT(&cpu->DS);
+                int rep = prefix & PREFIX_REPZ;
+                if (rep && cpu->CX == 0) return 1;
+                do {
+                    OUT8(cpu, cpu->DX, READ_MEM8(_seg, cpu->SI));
+                    if (cpu->DF) {
+                        cpu->SI--;
+                    } else {
+                        cpu->SI++;
+                    }
+                } while (rep && --cpu->CX);
+                return 0;
+            }
+
+            case 0x6F: // OUTSW
+            {
+                sreg_t *_seg = SEGMENT(&cpu->DS);
+                int rep = prefix & PREFIX_REPZ;
+                if (rep && cpu->CX == 0) return 1;
+                do {
+                    OUT16(cpu, cpu->DX, READ_MEM16(_seg, cpu->SI));
+                    if (cpu->DF) {
+                        cpu->SI -= 2;
+                    } else {
+                        cpu->SI += 2;
+                    }
+                } while (rep && --cpu->CX);
+                return 0;
+            }
 
             case 0x70: // JO d8
                 JCC(cpu, MOVSXB(FETCH8(cpu)), cpu->OF);
@@ -1032,6 +1102,7 @@ static int cpu_eval(cpu_state *cpu) {
 
             case 0x80: // alu r/m, imm8
             case 0x81: // alu r/m, imm16
+            // case 0x82: // undocumented
             case 0x83: // alu r/m, imm8 (sign extended)
             {
                 int opc = (inst >> 3) & 7;
@@ -1076,8 +1147,23 @@ static int cpu_eval(cpu_state *cpu) {
                 AND(cpu, &set, 1);
                 return 0;
 
-            // case 0x86: // xchg r/m, reg8
-            // case 0x87: // xchg r/m, reg16
+            case 0x86: // xchg r/m, reg8
+            {
+                MODRM_W(cpu, seg, 0, &set);
+                int temp = *set.opr1b;
+                *set.opr1b = LOAD_REG8(cpu, set.opr2);
+                MOVE_TO_REG8(cpu, set.opr2, temp);
+                return 0;
+            }
+
+            case 0x87: // xchg r/m, reg16
+            {
+                MODRM_W(cpu, seg, 1, &set);
+                int temp = READ_LE16(set.opr1);
+                WRITE_LE16(set.opr1, cpu->gpr[set.opr2]);
+                cpu->gpr[set.opr2] = temp;
+                return 0;
+            }
 
             case 0x88: // MOV rm, r8
             case 0x89: // MOV rm, r16
@@ -1086,7 +1172,7 @@ static int cpu_eval(cpu_state *cpu) {
                 MODRM_W_D(cpu, seg, inst & 1, inst &2, &set);
                 switch (set.size) {
                 case 0:
-                    *(uint8_t *)set.opr1 = set.opr2;
+                    *set.opr1b = set.opr2;
                     break;
                 case 1:
                     WRITE_LE16(set.opr1, set.opr2);
@@ -1389,11 +1475,18 @@ static int cpu_eval(cpu_state *cpu) {
                         return cpu_status_ud;
                 }
  
-            // case 0xC8: // ENTER imm16, imm8
-                // if (cpu->cpu_gen < cpu_gen_80186) return 0;
+            case 0xC8: // ENTER imm16, imm8
+            {
+                int param1 = FETCH16(cpu);
+                int param2 = FETCH8(cpu);
+                if (param2 != 0) return cpu_status_ud;
+                PUSH16(cpu, cpu->BP);
+                cpu->BP = cpu->SP;
+                cpu->SP -= param1;
+                return 0;
+            }
 
             case 0xC9: // LEAVE
-                if (cpu->cpu_gen < cpu_gen_80186) return cpu_status_ud;
                 cpu->SP = cpu->BP;
                 cpu->BP = POP16(cpu);
                 return 0;
@@ -1412,7 +1505,11 @@ static int cpu_eval(cpu_state *cpu) {
                 INVOKE_INT(cpu, FETCH8(cpu));
                 return 0;
 
-            // case 0xCE: // INTO
+            case 0xCE: // INTO
+                if (cpu->OF) {
+                    INVOKE_INT(cpu, 4);
+                }
+                return 0;
 
             case 0xCF: // IRET
             {
@@ -1487,10 +1584,12 @@ static int cpu_eval(cpu_state *cpu) {
                 return 0;
 
             case 0xE4: // IN AL, imm8
-                return INPORT8(cpu, FETCH8(cpu));
+                cpu->AL = INPORT8(cpu, FETCH8(cpu));
+                return 0;
             
             case 0xE5: // IN AX, imm8
-                return INPORT16(cpu, FETCH16(cpu));
+                cpu->AX = INPORT16(cpu, FETCH16(cpu));
+                return 0;
 
             case 0xE6: // OUT imm8, AL
                 OUT8(cpu, FETCH8(cpu), cpu->AL);
@@ -1524,10 +1623,12 @@ static int cpu_eval(cpu_state *cpu) {
                 return 0;
 
             case 0xEC: // IN AL, DX
-                return INPORT8(cpu, cpu->DX);
+                cpu->AL = INPORT8(cpu, cpu->DX);
+                return 0;
 
             case 0xED: // IN AX, DX
-                return INPORT16(cpu, cpu->DX);
+                cpu->AX = INPORT16(cpu, cpu->DX);
+                return 0;
 
             case 0xEE: // OUT DX, AL
                 OUT8(cpu, cpu->DX, cpu->AL);
@@ -1860,6 +1961,12 @@ void cpu_reset(cpu_state *cpu, int gen) {
     cpu->EIP = 0x0000FFF0;
     cpu->CS.sel = 0xF000;
     cpu->CS.base = 0x000F0000;
+    cpu->CS.attrs = 0x009B;
+    cpu->DS.attrs = 0x0093;
+    cpu->ES.attrs = 0x0093;
+    cpu->SS.attrs = 0x0093;
+    cpu->FS.attrs = 0x0093;
+    cpu->GS.attrs = 0x0093;
     for (int i = 0; i < 6; i++) {
         cpu->sregs[i].limit = 0x0000FFFF;
     }
