@@ -37,6 +37,8 @@ typedef enum cpu_status_t {
     cpu_status_icebp,
     cpu_status_ud,
     cpu_status_gpf,
+    cpu_status_div,
+    cpu_status_fpu,
 } cpu_status_t;
 
 typedef uint32_t paddr_t;
@@ -501,7 +503,8 @@ static void MODRM_W_D(cpu_state *cpu, sreg_t *seg, int w, int d, operand_set *se
     }
 }
 
-static void MODRM_W(cpu_state *cpu, sreg_t *seg, int w, operand_set *set) {
+static int MODRM_W(cpu_state *cpu, sreg_t *seg, int w, operand_set *set) {
+    int result = 0;
     modrm_t modrm;
     if (MODRM(cpu, seg, &modrm)) {
         if (w) {
@@ -509,11 +512,13 @@ static void MODRM_W(cpu_state *cpu, sreg_t *seg, int w, operand_set *set) {
         } else {
             set->opr1 = LEA_REG8(cpu, modrm.rm);
         }
+        result = 3;
     } else {
         set->opr1 = mem + modrm.linear;
     }
     set->size = w ? 1 : 0;
     set->opr2 = modrm.reg;
+    return result;
 }
 
 static void OPR(cpu_state *cpu, sreg_t *seg, uint8_t opcode, operand_set *set) {
@@ -667,6 +672,7 @@ static int SHIFT(cpu_state *cpu, operand_set *set, int c) {
         case 1: // ROR
         case 2: // RCL
         case 3: // RCR
+            // TODO:
             break;
         case 4: // SHL
         // case 6: // SHL?
@@ -1112,7 +1118,7 @@ static int cpu_eval(cpu_state *cpu) {
                     case 0: // POP r/m
                         WRITE_LE16(set.opr1, POP16(cpu));
                         return 0;
-                    default:
+                    default: // XOP
                         return cpu_status_ud;
                 }
 
@@ -1348,7 +1354,7 @@ static int cpu_eval(cpu_state *cpu) {
 
             case 0xC4: // LES reg, r/m
             {
-                MODRM_W(cpu, NULL, 1, &set);
+                if (MODRM_W(cpu, NULL, 1, &set)) return cpu_status_ud; // VEX
                 uint32_t offset = READ_LE16(set.opr1);
                 uint16_t new_sel = READ_LE16(set.opr1b + 2);
                 LOAD_SEL(cpu, &cpu->ES, new_sel);
@@ -1358,7 +1364,7 @@ static int cpu_eval(cpu_state *cpu) {
 
             case 0xC5: // LDS reg, r/m
             {
-                MODRM_W(cpu, NULL, 1, &set);
+                if (MODRM_W(cpu, NULL, 1, &set)) return cpu_status_ud; // VEX
                 uint32_t offset = READ_LE16(set.opr1);
                 uint16_t new_sel = READ_LE16(set.opr1b + 2);
                 LOAD_SEL(cpu, &cpu->DS, new_sel);
@@ -1379,8 +1385,9 @@ static int cpu_eval(cpu_state *cpu) {
                                 WRITE_LE16(set.opr1, FETCH16(cpu));
                                 return 0;
                         }
+                    default:
+                        return cpu_status_ud;
                 }
-                return cpu_status_ud;
  
             // case 0xC8: // ENTER imm16, imm8
                 // if (cpu->cpu_gen < cpu_gen_80186) return 0;
@@ -1442,7 +1449,7 @@ static int cpu_eval(cpu_state *cpu) {
                 // IGNORED
                 modrm_t modrm;
                 MODRM(cpu, seg, &modrm);
-                return 0;
+                return cpu_status_fpu;
             }
 
             case 0xE0: // LOOPNZ
@@ -1552,6 +1559,117 @@ static int cpu_eval(cpu_state *cpu) {
                 cpu->CF ^= 1;
                 return 0;
 
+            case 0xF6:
+                MODRM_W(cpu, seg, 0, &set);
+                switch (set.opr2) {
+                    case 0: // TEST r/m8, imm8
+                        cpu->CF = 0;
+                        SETF8(cpu, *set.opr1b & FETCH8(cpu));
+                        return 0;
+                    case 1: // TEST?
+                        return cpu_status_ud;
+                    case 2: // NOT r/m8
+                        *set.opr1b = ~*set.opr1b;
+                        return 0;
+                    case 3: // NEG r/m8
+                    {
+                        int src = *set.opr1b;
+                        cpu->AF = (src & 15);
+                        cpu->CF = !!src;
+                        *set.opr1b = SETF8(cpu, -src);
+                        return 0;
+                    }
+                    case 4: // MUL al, r/m8
+                        cpu->AX = cpu->AL * *set.opr1b;
+                        cpu->OF = cpu->CF = (cpu->AH != 0);
+                        return 0;
+                    case 5: // IMUL al, r/m8
+                        cpu->AX = (int)(int8_t)cpu->AL * (int)(int8_t)*set.opr1b;
+                        cpu->OF = cpu->CF = ((int8_t)cpu->AL != (int16_t)cpu->AX);
+                        return 0;
+                    case 6: // DIV ax, r/m8
+                    {
+                        uint32_t dst = cpu->AX;
+                        uint32_t src = *set.opr1b;
+                        if (src == 0) return cpu_status_div;
+                        uint32_t value = dst / src;
+                        if (value > 0x100) return cpu_status_div;
+                        cpu->AL = value;
+                        cpu->AH = dst % src;
+                        return 0;
+                    }
+                    case 7: // IDIV ax, r/m8
+                    {
+                        int dst = (int)(int16_t)cpu->AX;
+                        int src = (int)(int8_t)*set.opr1b;
+                        if (src == 0) return cpu_status_div;
+                        int value = dst / src;
+                        if (value != (int)(int8_t)value) return cpu_status_div;
+                        cpu->AL = value;
+                        cpu->AH = dst % src;
+                        return 0;
+                    }
+                }
+            case 0xF7:
+                MODRM_W(cpu, seg, 1, &set);
+                switch (set.opr2) {
+                    case 0: // TEST r/m16, imm16
+                        cpu->CF = 0;
+                        SETF16(cpu, *set.opr1b & FETCH16(cpu));
+                        return 0;
+                    case 1: // TEST?
+                        return cpu_status_ud;
+                    case 2: // NOT r/m16
+                        WRITE_LE16(set.opr1, READ_LE16(set.opr1));
+                        return 0;
+                    case 3: // NEG r/m16
+                    {
+                        int src = READ_LE16(set.opr1);
+                        cpu->AF = (src & 15);
+                        cpu->CF = !!src;
+                        WRITE_LE16(set.opr1, SETF16(cpu, -src));
+                        return 0;
+                    }
+                    case 4: // MUL ax, r/m16
+                    {
+                        uint32_t value = cpu->AX * READ_LE16(set.opr1);
+                        cpu->AX = value;
+                        cpu->DX = value >> 16;
+                        cpu->OF = cpu->CF = (cpu->DX != 0);
+                        return 0;
+                    }
+                    case 5: // IMUL al, r/m16
+                    {
+                        int value = (int)(int16_t)cpu->AX * (int)(int16_t)READ_LE16(set.opr1);
+                        cpu->AX = value;
+                        cpu->DX = value >> 16;
+                        cpu->OF = cpu->CF = (cpu->DX != 0); // TODO:
+                        return 0;
+                    }
+                    case 6: // DIV ax, r/m16
+                    {
+                        uint32_t dst = (cpu->DX << 16) | cpu->AX;
+                        uint32_t src = READ_LE16(set.opr1);
+                        if (src == 0) return cpu_status_div;
+                        uint32_t value = dst / src;
+                        if (value > 0x10000) return cpu_status_div;
+                        cpu->AX = value;
+                        cpu->DX = dst % src;
+                        return 0;
+                    }
+                    case 7: // IDIV ax, r/m16
+                    {
+                        int dst = (cpu->DX << 16) | cpu->AX;
+                        int src = (int)(int16_t)READ_LE16(set.opr1);
+                        if (src == 0) return cpu_status_div;
+                        int value = dst / src;
+                        if (value != (int)(int16_t)value) return cpu_status_div;
+                        cpu->AX = value;
+                        cpu->DX = dst % src;
+                        return 0;
+                    }
+                }
+
             case 0xF8: // CLC
                 cpu->CF = 0;
                 return 0;
@@ -1576,6 +1694,65 @@ static int cpu_eval(cpu_state *cpu) {
                 cpu->DF = 1;
                 return 0;
 
+            case 0xFE: //
+            {
+                int value;
+                MODRM_W(cpu, seg, 0, &set);
+                switch (set.opr2) {
+                    case 0: // INC r/m8
+                        *set.opr1b = value = SETF8(cpu, *set.opr1b + 1);
+                        cpu->AF = !(value & 15);
+                        return 0;
+                    case 1: // DEC r/m8
+                        *set.opr1b = value = SETF8(cpu, *set.opr1b - 1);
+                        cpu->AF = (value & 15) == 15;
+                        return 0;
+                    default:
+                        return cpu_status_ud;
+                }
+            }
+            case 0xFF: //
+            {
+                int value;
+                int mod = MODRM_W(cpu, seg, 0, &set);
+                switch (set.opr2) {
+                    case 0: // INC r/m16
+                        WRITE_LE16(set.opr1, value = SETF16(cpu, READ_LE16(set.opr1) + 1));
+                        cpu->AF = !(value & 15);
+                        return 0;
+                    case 1: // DEC r/m16
+                        WRITE_LE16(set.opr1, value = SETF16(cpu, READ_LE16(set.opr1) - 1));
+                        cpu->AF = (value & 15) == 15;
+                        return 0;
+                    case 2: // CALL r/m16
+                        PUSH16(cpu, cpu->EIP);
+                        cpu->EIP = READ_LE16(set.opr1);
+                        return 0;
+                    case 3: // CALL FAR m16:16
+                    {
+                        if (mod) return cpu_status_ud;
+                        uint32_t new_eip = READ_LE16(set.opr1b);
+                        uint16_t new_sel = READ_LE16(set.opr1b + 2);
+                        return FAR_CALL(cpu, new_sel, new_eip);
+                    }
+                    case 4: // JMP r/m 16
+                        cpu->EIP = READ_LE16(set.opr1);
+                        return 0;
+                    case 5: // JMP FAR m16:16
+                    {
+                        if (mod) return cpu_status_ud;
+                        uint32_t new_eip = READ_LE16(set.opr1b);
+                        uint16_t new_sel = READ_LE16(set.opr1b + 2);
+                        return FAR_JUMP(cpu, new_sel, new_eip);
+                    }
+                    case 6: // PUSH r/m16
+                        PUSH16(cpu, READ_LE16(set.opr1));
+                        return 0;
+                    default: // FF FF (#ud)
+                        return cpu_status_ud;
+                }
+            }
+
             default:
                 return cpu_status_ud;
         }
@@ -1597,6 +1774,15 @@ int cpu_step(cpu_state *cpu) {
         case cpu_status_icebp:
             dump_regs(cpu, cpu->EIP);
             return 1;
+        case cpu_status_div:
+            if (cpu->cpu_gen >= cpu_gen_80286) {
+                cpu->EIP = last_known_eip;
+            }
+            // INVOKE_INT(cpu, 0); // #DE
+            // return 1;
+            println("**** DIVIDE ERROR");
+            dump_regs(cpu, last_known_eip);
+            return 0;
         case cpu_status_ud:
             println("**** PANIC: UNDEFINED INSTRUCTION");
             dump_regs(cpu, last_known_eip);
@@ -1671,15 +1857,17 @@ void cpu_reset(cpu_state *cpu, int gen) {
         cpu->flags_mask1 |= 0xF000;
     }
     LOAD_FLAGS(cpu, 0);
-    cpu->CS.sel = 0xFFFF;
-    cpu->CS.base = 0x000FFFF0;
-    cpu->EIP = 0x00000000;
-    cpu->CS.limit = 0x0000FFFF;
-    cpu->SS.limit = 0x0000FFFF;
-    cpu->DS.limit = 0x0000FFFF;
-    cpu->ES.limit = 0x0000FFFF;
-    cpu->FS.limit = 0x0000FFFF;
-    cpu->GS.limit = 0x0000FFFF;
+    cpu->EIP = 0x0000FFF0;
+    cpu->CS.sel = 0xF000;
+    cpu->CS.base = 0x000F0000;
+    for (int i = 0; i < 6; i++) {
+        cpu->sregs[i].limit = 0x0000FFFF;
+    }
+    cpu->CR[0] = 0x60000010;
+    cpu->GDT.limit = 0xFFFF;
+    cpu->IDT.limit = 0xFFFF;
+    cpu->LDT.limit = 0xFFFF;
+    cpu->TSS.limit = 0xFFFF;
     cpu->EDX = cpu->cpu_gen << 8;
 }
 
@@ -1691,6 +1879,7 @@ extern void *_init() {
         }
         ptable[i] = (n & 1) == 0;
     }
+    // memset(mem + 0xA0000, 0xFF, 0x50000);
     return mem;
 }
 
