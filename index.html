@@ -8,8 +8,8 @@
         #screen_container {
             display: none;
             cursor: text;
-            width: 720px;
-            height: 408px;
+            min-width: 640px;
+            min-height: 400px;
         }
         
         #click_to_start {
@@ -221,14 +221,14 @@
     
     <label id="volumeControl" style="display: none;">
         🔇
-        <input id="inputVolume" type="range" min="0" max="10" step="1", value="5">
+        <input id="inputVolume" type="range" min="0" max="10" step="1" value="5">
         🔈
     </label>
 
     <hr>
     <address>
         POWERED by 
-        <a href="https://github.com/neri/vpc">VPC</a>
+        <a href="https://github.com/neri/vpc">Virtual Playground</a>
         / <a href="https://github.com/xtermjs/xterm.js/">xterm.js</a>
     </address>
 </body>
