@@ -1,18 +1,18 @@
-.PHONY: all clean run test lib
+.PHONY: all clean run test
 
-all: lib
+TARGETS := lib/vcpu.wasm lib/bios.bin lib/xterm.js lib/xterm.js.map lib/xterm.css
+
+all: $(TARGETS)
 
 clean:
-	rm -rf lib/*
+	-rm -f $(TARGETS)
 
 run: all
 
 test: all
 
-lib: lib/xterm.js lib/xterm.js.map lib/xterm.css lib/bios.bin lib/vcpu.wasm
-
 lib/vcpu.wasm: src/vcpu.c
-	wa-compile -q -O $? -o $@
+	wa-compile -O $? -o $@
 
 lib/bios.bin: src/bios.asm
 	nasm -f bin $? -o $@

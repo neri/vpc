@@ -5,15 +5,26 @@
 [BITS 16]
 [ORG 0]
 
-%define SEG_BIOS 0xFC00
-%define SIZE_BIOS 0x4000
+%define SEG_BIOS 0xFE00
+%define SIZE_BIOS 0x2000
+
+%define	PORT_TIMER_CNT0		0x0040
+%define	PORT_BEEP_CNT		0x0042
+%define	PORT_TIMER_CTL		0x0043
+%define	PORT_BEEP_FIRE		0x0061
+
+%define	_TIMER_RES			55
+
+%define	TIMER_INIT_BEEP		10110110b
+%define	_BEEP_TICK_L		0x34DC
+%define	_BEEP_TICK_H		0x0012
+
 %define ARGV 0x0080
 
 _HEAD:
     dw SEG_BIOS, SIZE_BIOS
 
 banner:
-    db 0x1b, "[H", 0x1b, "[J"
     db "BIOS v0.0", 10, 0
 
 _aux_out:
@@ -38,6 +49,33 @@ _aux_in:
     pop ds
     ret
 
+_bios_beep:
+	pushf
+	cli
+	jcxz .stop
+	cmp cx, 0x0001
+	jz short .fire
+	mov al, TIMER_INIT_BEEP
+	out PORT_TIMER_CTL, al
+	mov ax, _BEEP_TICK_L
+	mov dx, _BEEP_TICK_H
+	div cx
+	out PORT_BEEP_CNT,al
+	mov al, ah
+	out PORT_BEEP_CNT,al
+.fire:
+	in al,PORT_BEEP_FIRE
+	or al, 0x03
+	out PORT_BEEP_FIRE,al
+	jmp short .end
+.stop:
+	in al,PORT_BEEP_FIRE
+	and al, 0xFC
+	out PORT_BEEP_FIRE,al
+.end:
+	popf
+	ret
+
 _INIT:
     cli
     cld
@@ -50,6 +88,21 @@ _INIT:
 
     mov ax, 0x3F8
     mov [ss:0x0400], ax
+
+    mov si, cls_msg
+    call puts
+
+    ; PIPO sound
+    mov cx, 2000
+    call _bios_beep
+    mov cx, 100
+    call _wait
+    mov cx, 1000
+    call _bios_beep
+    mov cx, 100
+    call _wait
+    xor cx, cx
+    call _bios_beep
 
     mov si, banner
     call puts
@@ -96,11 +149,35 @@ _INIT:
     jnz .no_cmd_r
     mov dx, 0x0CF9
     out dx, al
+    jmp $
 .no_cmd_r:
-.end:
+    cmp al, 'u'
+    jnz .no_cmd_u
+    db 0xFF, 0xFF
+.no_cmd_u:
+    cmp al, 'b'
+    jnz .no_cmd_b
+    mov cx, 1000
+    call _bios_beep
+    mov cx, 100
+    call _wait
+    xor cx,cx 
+    call _bios_beep
+    jmp .prompt
+.no_cmd_b:
+.bad_cmd:
     mov si, bad_cmd_msg
     call puts
     jmp .prompt
+
+_wait:
+.await0:
+    mov dx, 0xFFFF
+.await:
+    dec dx
+    jnz .await
+    loop .await0
+    ret
 
 
 puts:
@@ -113,6 +190,9 @@ puts:
 .end:
     ret
 
+
+cls_msg:
+    db 0x1b, "[H", 0x1b, "[J", 0
 
 bad_cmd_msg:
     db "Bad command or file name", 10, 0

@@ -5,15 +5,7 @@
     <script src="lib/xterm.js"></script>
     <link rel="stylesheet" href="lib/xterm.css">
     <style>
-        @font-face {
-            font-family: 'TerminalWebFont';
-            unicode-range: U+0-7F;
-            src: url('register.ttf');
-        }
         #screen_container {
-            /* font-family: TerminalWebFont, 'Liberation Mono', 'DejaVu Sans Mono', 'Courier New', monospace;
-            font-size: 16px;
-            line-height: 16px; */
             display: none;
             cursor: text;
             width: 720px;
@@ -46,16 +38,14 @@
         const sab_index_sleep = 0;
         const sab_index_key = 1;
         
-        window.addEventListener('DOMContentLoaded', () => {
-            document.querySelector('#click_to_start').addEventListener('click', e => {
-                startEmu();
-            });
-        });
-        
         const startEmu = () => {
             document.querySelector('#screen_container').style.display = 'block';
             document.querySelector('#click_to_start').style.display = 'none';
             
+            if (window.beep) {
+                window.beep.createAudioContext();
+            }
+
             this._sab = new SharedArrayBuffer(256);
             const term = new Terminal({convertEol: true, rendererType: 'canvas'});
             term.open(document.querySelector('#terminal'));
@@ -74,29 +64,167 @@
             worker.onmessage = message => {
                 switch (message.data.command) {
                     case 'loaded':
-                    worker.postMessage({ command: 'sab', sab: this._sab });
+                    worker.postMessage({ command: 'start', sab: this._sab, ioRedirectMap: iomgr.ioRedirectMap });
                     break;
                     case 'write':
                     term.write(message.data.data);
                     break;
+                    case 'outb':
+                        window.iomgr.outb(message.data.data.port, message.data.data.data);
+                        break;
                     default:
                     throw message;
                 }
             };
         }
-    </script>
+        
+        // Renderer I/O Manager
+        class FrontendIOManager {
+            constructor () {
+                this.ioMap = [];
+                this.ioRedirectMap = new Uint32Array(2048);
+            }
+            on (port, callback) {
+                this.ioMap[port & 0xFFFF] = callback;
+                this.ioRedirectMap[port >> 5] |= (1 << (port & 31));
+            }
+            outb (port, data) {
+                try {
+                    const handler = this.ioMap[port & 0xFFFF];
+                    if (handler) {
+                        handler(port, data | 0);
+                    } else {
+                        throw Error(`front_outb(): Unexpected port $0x${port.toString(16)}`);
+                    }
+                } catch (e) {
+                    console.error('front_outb()', e);
+                }
+            }
+        }
+        window.iomgr = new FrontendIOManager();
+        
+        // i8254 Beep Sound Driver
+        class i8254Sound {
+            constructor (iomgr) {
+                this.audioContext = window.AudioContext || window.webkitAudioContext;
+                if (!this.audioContext) return;
+                
+                document.querySelector('#volumeControl').style.display = 'inline-block';
+                
+                document.querySelector('#inputVolume').addEventListener('change', e => {
+                    this.gain.gain.value = this.getGain();
+                });
+
+                this.context = null;
+                this.src = null;
+                
+                this.cnt2_phase = 0;
+                this.cnt2_cnt_l = 0;
+                this.cnt2_cnt_h = 0;
+                this.i0061_data = 0;
+                
+                //	i8254 ctl
+                iomgr.on(0x0043, (port, data) => {
+                    if ((data & 0xC0) == 0x80 && (data & 0x30) != 0) {
+                        this.cnt2_phase = 0;
+                        this.cnt2_cnt_l = 0;
+                        this.cnt2_cnt_h = 0;
+                        this.noteOff();
+                    }
+                });
+                //	i8254 beep cnt
+                iomgr.on(0x0042, (port, data) => {
+                    if (this.cnt2_phase == 0){
+                        this.cnt2_cnt_l = data & 0xFF;
+                        this.cnt2_phase++;
+                    }else{
+                        this.cnt2_cnt_h = data & 0xFF;
+                        this.cnt2_phase = 0;
+                        if(this.i0061_data & 0x02){
+                            this.update_beep();
+                        }
+                    }
+                });
+                //	misc i/o
+                iomgr.on(0x0061, (port, data) => {
+                    const old_data = this.i0061_data;
+                    this.i0061_data = data;
+                    const chg_value = old_data ^ data;
+                    if(chg_value & 0x02){
+                        if(data & 0x02){
+                            this.update_beep();
+                        }else{
+                            this.noteOff();
+                        }
+                    }
+                });
+            }
+            createAudioContext () {
+                this.context = new this.audioContext();
+                this.context.createOscillator();
+            }
+            update_beep() {
+                let count_value = this.cnt2_cnt_l + (this.cnt2_cnt_h << 8);
+                if (!count_value) count_value = 0x10000;
+                this.noteOn(1193181 / count_value);
+            }
+            noteOn(freq) {
+                this.noteOff();
+                
+                this.gain = this.context.createGain();
+                this.gain.gain.value = this.getGain();
+                
+                this.src = this.context.createOscillator();
+                this.src.type = 'square';
+                this.src.frequency.value = freq;
+                this.src.connect(this.gain);
+                this.gain.connect(this.context.destination);
+                this.src.start(0);
+            }
+            noteOff() {
+                if (this.src) {
+                    try{ this.src.noteOff(); }catch(e){}
+                    this.src.disconnect();
+                }
+                this.src = null;
+                this.gain = null;
+            }
+            getGain() {
+                const val = document.querySelector('#inputVolume').value;
+                return val * 2 / 100;
+            }
+        }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            window.beep = new i8254Sound(window.iomgr);
+            document.querySelector('#click_to_start').addEventListener('click', e => {
+                if (!window.SharedArrayBuffer) {
+                    alert('Sorry, but SharedArrayBuffer is not available');
+                    return;
+                }
+                startEmu();
+            });
+        });
+        
+</script>
 </head>
 <body>
     
     <h1>Virtual Playground (alpha)</h1>
     
     <div id="emulatorFrame">
-        <div id="click_to_start"><p>はじめるときはここをクリック...</p></div>
+        <div id="click_to_start"><p>Click to Start</p></div>
         <div id="screen_container">
             <div id="terminal"></div>
         </div>
     </div>
     
+    <label id="volumeControl" style="display: none;">
+        🔇
+        <input id="inputVolume" type="range" min="0" max="10" step="1", value="5">
+        🔈
+    </label>
+
     <hr>
     <address>
         POWERED by 

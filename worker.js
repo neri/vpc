@@ -2,10 +2,34 @@
 
 const sab_index_sleep = 0;
 const sab_index_key = 1;
+const sab_index_inport = 2;
 
 const writeTerminal = (message) => {
     postMessage({command: 'write', data: message });
 };
+
+// Worker I/O Manager
+class BackendIOManager {
+    constructor () {
+        this.ioMap = [];
+        this.ioRedirectMap = new Uint32Array(2048);
+    }
+    on (port, callback) {
+
+    }
+    isRedirectRequired (port) {
+        return (this.ioRedirectMap[port >> 5] & (1 << (port & 31))) != 0;
+    }
+    outb (port, data) {
+        if (this.isRedirectRequired(port)) {
+            postMessage({command: 'outb', data: { port: port, data: data }});
+        }
+    }
+    inb (port) {
+        return 0xFF | 0;
+    }
+}
+const iomgr = new BackendIOManager();
 
 class RuntimeEnvironment {
     constructor() {
@@ -27,14 +51,13 @@ class RuntimeEnvironment {
             const sab = new Int32Array(this._sab);
             return Atomics.exchange(sab, sab_index_key, 0);
         }
+        // const usleep = async us => await new Promise(resolve => setTimeout(resolve, us));
         this.env.vpc_wait = (us) => {
             const sab = new Int32Array(this._sab);
             Atomics.wait(sab, sab_index_key, 0, us);
         }
-        // this.env.printerr = (at) => {
-        //     const str = this.getCString(at);
-        //     console.error(str);
-        // }
+        this.env.vpc_outb = (port, data) => iomgr.outb(port, data);
+        this.env.vpc_inb = (port) => iomgr.inb(port);
     }
     emit(to, from) {
         const l = from.length;
@@ -97,7 +120,9 @@ fetch('./lib/vcpu.wasm')
         });
     })
     .then(buffer => {
-        env.emit(0xFC000, new Uint8Array(buffer));
+        const bios = new Uint8Array(buffer);
+        const bios_base = (bios[0] | (bios[1] << 8)) << 4;
+        env.emit(bios_base, bios);
         postMessage({command: 'loaded'});
     })
     .catch(reason => {
@@ -107,8 +132,9 @@ fetch('./lib/vcpu.wasm')
 
 onmessage = e => {
     switch (e.data.command) {
-        case 'sab':
+        case 'start':
             env._sab = e.data.sab;
+            iomgr.ioRedirectMap = e.data.ioRedirectMap;
             setTimeout(() => {
                 console.log('CPU started');
                 env.instance.exports.run(1);

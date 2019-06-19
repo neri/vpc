@@ -8,11 +8,12 @@ extern void println(const char *);
 extern void vpc_putc(int ch);
 extern void vpc_wait(int us);
 extern uint32_t vpc_readKey(void);
+extern void vpc_outb(uint32_t port, uint32_t value);
+extern uint32_t vpc_inb(uint32_t port);
 
 typedef struct cpu_state cpu_state;
 typedef struct sreg_t sreg_t;
 void cpu_reset(cpu_state *cpu, int gen);
-int cpu_step(cpu_state *cpu);
 void dump_regs(cpu_state *cpu, uint32_t eip);
 
 
@@ -34,6 +35,7 @@ enum {
 typedef enum cpu_status_t {
     cpu_status_normal = 0,
     cpu_status_halt,
+    cpu_status_int,
     cpu_status_icebp,
     cpu_status_ud,
     cpu_status_gpf,
@@ -290,6 +292,7 @@ static void OUT8(cpu_state *cpu, uint16_t port, uint8_t value) {
             cpu_reset(cpu, -1);
             break;
         default:
+            vpc_outb(port, value);
             break;
     }
 }
@@ -306,7 +309,7 @@ static uint8_t INPORT8(cpu_state *cpu, uint16_t port) {
         case 0x03F8:// UART I/O
             return vpc_readKey();
         default:
-            return 0xFF;
+            return vpc_inb(port);
     }
 }
 
@@ -758,7 +761,7 @@ static int SHIFT(cpu_state *cpu, operand_set *set, int c) {
 #define PREFIX_66       0x00000010
 #define PREFIX_67       0x00000020
 
-static int cpu_eval(cpu_state *cpu) {
+static int cpu_step(cpu_state *cpu) {
     operand_set set;
     uint32_t prefix = 0;
     sreg_t *seg = NULL;
@@ -1474,10 +1477,10 @@ static int cpu_eval(cpu_state *cpu) {
                     default:
                         return cpu_status_ud;
                 }
- 
+
             case 0xC8: // ENTER imm16, imm8
             {
-                int param1 = FETCH16(cpu);
+                uint32_t param1 = FETCH16(cpu);
                 int param2 = FETCH8(cpu);
                 if (param2 != 0) return cpu_status_ud;
                 PUSH16(cpu, cpu->BP);
@@ -1784,7 +1787,10 @@ static int cpu_eval(cpu_state *cpu) {
                 return 0;
 
             case 0xFB: // STI
-                cpu->IF = 1;
+                if (!cpu->IF) {
+                    cpu->IF = 1;
+                    return cpu_status_int;
+                }
                 return 0;
 
             case 0xFC: // CLD
@@ -1854,44 +1860,73 @@ static int cpu_eval(cpu_state *cpu) {
                 }
             }
 
+            case 0x0F80: // JO d16
+                JCC(cpu, MOVSXW(FETCH16(cpu)), cpu->OF);
+                return 0;
+
+            case 0x0F81: // JNO d16
+                JCC(cpu, MOVSXW(FETCH16(cpu)), !cpu->OF);
+                return 0;
+
+            case 0x0F82: // JC d16
+                JCC(cpu, MOVSXW(FETCH16(cpu)), cpu->CF);
+                return 0;
+
+            case 0x0F83: // JNC d16
+                JCC(cpu, MOVSXW(FETCH16(cpu)), !cpu->CF);
+                return 0;
+
+            case 0x0F84: // JZ d16
+                JCC(cpu, MOVSXW(FETCH16(cpu)), cpu->ZF);
+                return 0;
+
+            case 0x0F85: // JNZ d16
+                JCC(cpu, MOVSXW(FETCH16(cpu)), !cpu->ZF);
+                return 0;
+
+            case 0x0F86: // JBE d16
+                JCC(cpu, MOVSXW(FETCH16(cpu)), cpu->CF || cpu->ZF);
+                return 0;
+
+            case 0x0F87: // JNBE d16
+                JCC(cpu, MOVSXW(FETCH16(cpu)), !(cpu->CF || cpu->ZF));
+                return 0;
+
+            case 0x0F88: // JS d16
+                JCC(cpu, MOVSXW(FETCH16(cpu)), cpu->SF);
+                return 0;
+
+            case 0x0F89: // JNS d16
+                JCC(cpu, MOVSXW(FETCH16(cpu)), !cpu->SF);
+                return 0;
+
+            case 0x0F8A: // JP d16
+                JCC(cpu, MOVSXW(FETCH16(cpu)), cpu->PF);
+                return 0;
+
+            case 0x0F8B: // JNP d16
+                JCC(cpu, MOVSXW(FETCH16(cpu)), !cpu->PF);
+                return 0;
+
+            case 0x0F8C: // JL d16
+                JCC(cpu, MOVSXW(FETCH16(cpu)), cpu->SF != cpu->OF);
+                return 0;
+
+            case 0x0F8D: // JNL d16
+                JCC(cpu, MOVSXW(FETCH16(cpu)), cpu->SF == cpu->OF);
+                return 0;
+
+            case 0x0F8E: // JLE d16
+                JCC(cpu, MOVSXW(FETCH16(cpu)), cpu->ZF || (cpu->SF != cpu->OF));
+                return 0;
+
+            case 0x0F8F: // JG d16
+                JCC(cpu, MOVSXW(FETCH16(cpu)), !(cpu->ZF || cpu->SF != cpu->OF));
+                return 0;
+
             default:
                 return cpu_status_ud;
         }
-    }
-}
-
-int cpu_step(cpu_state *cpu) {
-    uint32_t last_known_eip = cpu->EIP;
-    switch (cpu_eval(cpu)) {
-        case cpu_status_normal:
-            return 1;
-        case cpu_status_halt:
-            if (cpu->IF) {
-                vpc_wait(100);
-                return 1;
-            } else {
-                return 0;
-            }
-        case cpu_status_icebp:
-            dump_regs(cpu, cpu->EIP);
-            return 1;
-        case cpu_status_div:
-            if (cpu->cpu_gen >= cpu_gen_80286) {
-                cpu->EIP = last_known_eip;
-            }
-            // INVOKE_INT(cpu, 0); // #DE
-            // return 1;
-            println("**** DIVIDE ERROR");
-            dump_regs(cpu, last_known_eip);
-            return 0;
-        case cpu_status_ud:
-            println("**** PANIC: UNDEFINED INSTRUCTION");
-            dump_regs(cpu, last_known_eip);
-            return 0;
-        default:
-            println("**** PANIC: TRIPLE FAULT!!!");
-            dump_regs(cpu, last_known_eip);
-            return 0;
     }
 }
 
@@ -1990,8 +2025,49 @@ extern void *_init() {
     return mem;
 }
 
+#define CPU_INTERVAL    0x10000
+static int hoge(cpu_state *cpu) {
+        uint32_t last_known_eip = cpu->EIP;
+        switch (cpu_step(cpu)) {
+            case cpu_status_normal:
+                break;
+            case cpu_status_halt:
+                if (cpu->IF) {
+                    vpc_wait(100);
+                } else {
+                    println("**** SYSTEM HALTED");
+                    dump_regs(cpu, last_known_eip);
+                    return 0;
+                }
+            case cpu_status_int:
+                break;
+            case cpu_status_icebp:
+                dump_regs(cpu, cpu->EIP);
+                break;
+            case cpu_status_div:
+                if (cpu->cpu_gen >= cpu_gen_80286) {
+                    cpu->EIP = last_known_eip;
+                }
+                // INVOKE_INT(cpu, 0); // #DE
+                // continue;
+                println("**** DIVIDE ERROR");
+                dump_regs(cpu, last_known_eip);
+                return 0;
+            case cpu_status_ud:
+                println("**** PANIC: UNDEFINED INSTRUCTION");
+                dump_regs(cpu, last_known_eip);
+                return 0;
+            default:
+                println("**** PANIC: TRIPLE FAULT!!!");
+                dump_regs(cpu, last_known_eip);
+                return 0;
+        }
+    return 1;
+}
+
 extern void run(int gen) {
     cpu_state cpu;
     cpu_reset(&cpu, gen);
-    while (cpu_step(&cpu)) {}
+
+    while (hoge(&cpu)) {}
 }
