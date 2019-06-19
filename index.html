@@ -112,7 +112,9 @@
                 document.querySelector('#volumeControl').style.display = 'inline-block';
                 
                 document.querySelector('#inputVolume').addEventListener('change', e => {
-                    this.gain.gain.value = this.getGain();
+                    if (this.gain) {
+                        this.gain.gain.value = this.getGain();
+                    }
                 });
 
                 this.context = null;
@@ -225,7 +227,6 @@
         🔈
     </label>
 
-    <hr>
     <address>
         POWERED by 
         <a href="https://github.com/neri/vpc">Virtual Playground</a>

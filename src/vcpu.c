@@ -34,6 +34,7 @@ enum {
 
 typedef enum cpu_status_t {
     cpu_status_normal = 0,
+    cpu_status_exit,
     cpu_status_halt,
     cpu_status_int,
     cpu_status_icebp,
@@ -979,7 +980,7 @@ static int cpu_step(cpu_state *cpu) {
             {
                 sreg_t *_seg = SEGMENT(&cpu->ES);
                 int rep = prefix & PREFIX_REPZ;
-                if (rep && cpu->CX == 0) return 1;
+                if (rep && cpu->CX == 0) return 0;
                 do {
                     WRITE_MEM8(_seg, cpu->DI, INPORT8(cpu, cpu->DX));
                     if (cpu->DF) {
@@ -995,7 +996,7 @@ static int cpu_step(cpu_state *cpu) {
             {
                 sreg_t *_seg = SEGMENT(&cpu->ES);
                 int rep = prefix & PREFIX_REPZ;
-                if (rep && cpu->CX == 0) return 1;
+                if (rep && cpu->CX == 0) return 0;
                 do {
                     WRITE_MEM16(_seg, cpu->DI, INPORT16(cpu, cpu->DX));
                     if (cpu->DF) {
@@ -1011,7 +1012,7 @@ static int cpu_step(cpu_state *cpu) {
             {
                 sreg_t *_seg = SEGMENT(&cpu->DS);
                 int rep = prefix & PREFIX_REPZ;
-                if (rep && cpu->CX == 0) return 1;
+                if (rep && cpu->CX == 0) return 0;
                 do {
                     OUT8(cpu, cpu->DX, READ_MEM8(_seg, cpu->SI));
                     if (cpu->DF) {
@@ -1027,7 +1028,7 @@ static int cpu_step(cpu_state *cpu) {
             {
                 sreg_t *_seg = SEGMENT(&cpu->DS);
                 int rep = prefix & PREFIX_REPZ;
-                if (rep && cpu->CX == 0) return 1;
+                if (rep && cpu->CX == 0) return 0;
                 do {
                     OUT16(cpu, cpu->DX, READ_MEM16(_seg, cpu->SI));
                     if (cpu->DF) {
@@ -1281,7 +1282,7 @@ static int cpu_step(cpu_state *cpu) {
                 sreg_t *_seg = SEGMENT(&cpu->DS);
                 int rep = prefix & PREFIX_REPZ;
                 size_t count = cpu->CX;
-                if (rep && count == 0) return 1;
+                if (rep && count == 0) return 0;
                 // if (rep && cpu->DF == 0
                 //     && ((cpu->SI + count) <= 0x10000)
                 //     && ((cpu->DI + count) <= 0x10000)
@@ -1312,7 +1313,7 @@ static int cpu_step(cpu_state *cpu) {
                 sreg_t *_seg = SEGMENT(&cpu->DS);
                 int rep = prefix & PREFIX_REPZ;
                 size_t count = cpu->CX * 2;
-                if (rep && count == 0) return 1;
+                if (rep && count == 0) return 0;
                 // if (rep && cpu->DF == 0
                 //     && ((cpu->SI + count) <= 0x10000)
                 //     && ((cpu->DI + count) <= 0x10000)
@@ -1355,7 +1356,7 @@ static int cpu_step(cpu_state *cpu) {
                 sreg_t *_seg = SEGMENT(&cpu->ES);
                 int rep = prefix & PREFIX_REPZ;
                 size_t count = cpu->CX;
-                if (rep && count == 0) return 1;
+                if (rep && count == 0) return 0;
                 // if (rep && cpu->DF == 0 && ((cpu->DI + count) <= 0x10000)) {
                 //     uint8_t *p = mem + _seg->base + cpu->DI;
                 //     memset(p, cpu->AL, count);
@@ -1378,7 +1379,7 @@ static int cpu_step(cpu_state *cpu) {
             {
                 sreg_t *_seg = SEGMENT(&cpu->ES);
                 int rep = prefix & PREFIX_REPZ;
-                if (rep && cpu->CX) return 1;
+                if (rep && cpu->CX) return 0;
                 do {
                     WRITE_MEM16(_seg, cpu->DI, cpu->AX);
                     if (cpu->DF) {
@@ -2026,18 +2027,18 @@ extern void *_init() {
 }
 
 #define CPU_INTERVAL    0x10000
-static int hoge(cpu_state *cpu) {
+static int cpu_block(cpu_state *cpu) {
+    for (;;) {
         uint32_t last_known_eip = cpu->EIP;
-        switch (cpu_step(cpu)) {
+        int status = cpu_step(cpu);
+        switch (status) {
             case cpu_status_normal:
                 break;
             case cpu_status_halt:
                 if (cpu->IF) {
                     vpc_wait(100);
                 } else {
-                    println("**** SYSTEM HALTED");
-                    dump_regs(cpu, last_known_eip);
-                    return 0;
+                    return status;
                 }
             case cpu_status_int:
                 break;
@@ -2049,25 +2050,36 @@ static int hoge(cpu_state *cpu) {
                     cpu->EIP = last_known_eip;
                 }
                 // INVOKE_INT(cpu, 0); // #DE
-                // continue;
-                println("**** DIVIDE ERROR");
-                dump_regs(cpu, last_known_eip);
-                return 0;
+                return status;
             case cpu_status_ud:
-                println("**** PANIC: UNDEFINED INSTRUCTION");
-                dump_regs(cpu, last_known_eip);
-                return 0;
             default:
-                println("**** PANIC: TRIPLE FAULT!!!");
-                dump_regs(cpu, last_known_eip);
-                return 0;
+                cpu->EIP = last_known_eip;
+                return status;
         }
-    return 1;
+    }
 }
 
 extern void run(int gen) {
     cpu_state cpu;
     cpu_reset(&cpu, gen);
-
-    while (hoge(&cpu)) {}
+    switch (cpu_block(&cpu)) {
+        case cpu_status_exit:
+            break;
+        case cpu_status_halt:
+            println("**** SYSTEM HALTED");
+            dump_regs(&cpu, cpu.EIP);
+            break;
+        case cpu_status_div:
+            println("**** DIVIDE ERROR");
+            dump_regs(&cpu, cpu.EIP);
+            break;
+        case cpu_status_ud:
+            println("**** PANIC: UNDEFINED INSTRUCTION");
+            dump_regs(&cpu, cpu.EIP);
+            break;
+        default:
+            println("**** PANIC: TRIPLE FAULT!!!");
+            dump_regs(&cpu, cpu.EIP);
+            break;
+    }
 }
