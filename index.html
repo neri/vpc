@@ -72,6 +72,9 @@
                     case 'outb':
                         window.iomgr.outb(message.data.data.port, message.data.data.data);
                         break;
+                    case 'beep':
+                        window.beep.sound(message.data.data);
+                        break;
                     default:
                     throw message;
                 }
@@ -105,59 +108,16 @@
         
         // i8254 Beep Sound Driver
         class i8254Sound {
-            constructor (iomgr) {
+            constructor () {
                 this.audioContext = window.AudioContext || window.webkitAudioContext;
                 if (!this.audioContext) return;
-                
-                document.querySelector('#volumeControl').style.display = 'inline-block';
-                
-                document.querySelector('#inputVolume').addEventListener('change', e => {
-                    if (this.gain) {
-                        this.gain.gain.value = this.getGain();
-                    }
-                });
-
                 this.context = null;
                 this.src = null;
                 
-                this.cnt2_phase = 0;
-                this.cnt2_cnt_l = 0;
-                this.cnt2_cnt_h = 0;
-                this.i0061_data = 0;
-                
-                //	i8254 ctl
-                iomgr.on(0x0043, (port, data) => {
-                    if ((data & 0xC0) == 0x80 && (data & 0x30) != 0) {
-                        this.cnt2_phase = 0;
-                        this.cnt2_cnt_l = 0;
-                        this.cnt2_cnt_h = 0;
-                        this.noteOff();
-                    }
-                });
-                //	i8254 beep cnt
-                iomgr.on(0x0042, (port, data) => {
-                    if (this.cnt2_phase == 0){
-                        this.cnt2_cnt_l = data & 0xFF;
-                        this.cnt2_phase++;
-                    }else{
-                        this.cnt2_cnt_h = data & 0xFF;
-                        this.cnt2_phase = 0;
-                        if(this.i0061_data & 0x02){
-                            this.update_beep();
-                        }
-                    }
-                });
-                //	misc i/o
-                iomgr.on(0x0061, (port, data) => {
-                    const old_data = this.i0061_data;
-                    this.i0061_data = data;
-                    const chg_value = old_data ^ data;
-                    if(chg_value & 0x02){
-                        if(data & 0x02){
-                            this.update_beep();
-                        }else{
-                            this.noteOff();
-                        }
+                document.querySelector('#volumeControl').style.display = 'inline-block';
+                document.querySelector('#inputVolume').addEventListener('change', e => {
+                    if (this.gain) {
+                        this.gain.gain.value = this.getGain();
                     }
                 });
             }
@@ -165,13 +125,14 @@
                 this.context = new this.audioContext();
                 this.context.createOscillator();
             }
-            update_beep() {
-                let count_value = this.cnt2_cnt_l + (this.cnt2_cnt_h << 8);
-                if (!count_value) count_value = 0x10000;
-                this.noteOn(1193181 / count_value);
+            sound(value) {
+                this.noteOff();
+                if (value > 0) {
+                    this.noteOn(value);
+                }
             }
             noteOn(freq) {
-                this.noteOff();
+                // this.noteOff();
                 
                 this.gain = this.context.createGain();
                 this.gain.gain.value = this.getGain();
@@ -185,7 +146,9 @@
             }
             noteOff() {
                 if (this.src) {
-                    try{ this.src.noteOff(); }catch(e){}
+                    try {
+                        this.src.noteOff();
+                    } catch(e) {}
                     this.src.disconnect();
                 }
                 this.src = null;
@@ -198,7 +161,7 @@
         }
 
         window.addEventListener('DOMContentLoaded', () => {
-            window.beep = new i8254Sound(window.iomgr);
+            window.beep = new i8254Sound();
             document.querySelector('#click_to_start').addEventListener('click', e => {
                 if (!window.SharedArrayBuffer) {
                     alert('Sorry, but SharedArrayBuffer is not available');

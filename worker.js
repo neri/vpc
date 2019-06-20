@@ -9,27 +9,111 @@ const writeTerminal = (message) => {
 };
 
 // Worker I/O Manager
-class BackendIOManager {
+class WorkerIOManager {
     constructor () {
-        this.ioMap = [];
+        this.outHandlers = [];
+        this.inHandlers = [];
         this.ioRedirectMap = new Uint32Array(2048);
     }
-    on (port, callback) {
-
+    on(port, callback, callback2 = null) {
+        this.outHandlers[port & 0xFFFF] = callback;
+        this.inHandlers[port & 0xFFFF] = callback2;
     }
     isRedirectRequired (port) {
         return (this.ioRedirectMap[port >> 5] & (1 << (port & 31))) != 0;
     }
     outb (port, data) {
+        try {
+            const handler = this.outHandlers[port & 0xFFFF];
+            if (handler) {
+                if (!handler(port, data | 0)) return;
+            }
+        } catch (e) {
+            console.error('worker_outb()', e);
+        }
         if (this.isRedirectRequired(port)) {
             postMessage({command: 'outb', data: { port: port, data: data }});
         }
     }
     inb (port) {
-        return 0xFF | 0;
+        const handler = this.outHandlers[port & 0xFFFF];
+        if (handler) {
+            return handler(port);
+        } else {
+            return 0xFF | 0;
+        }
     }
 }
-const iomgr = new BackendIOManager();
+const iomgr = new WorkerIOManager();
+
+
+class iPITDevice {
+    constructor (iomgr) {
+        this.cntModes = new Uint8Array(3);
+        this.cntPhases = new Uint8Array(3);
+        this.cntValues = new Uint8Array(6);
+        this.p0061_data = 0;
+
+        // timer #0 value
+        iomgr.on(0x40, (port, data) => this.onCount(port, data));
+        iomgr.on(0x41, (port, data) => this.onCount(port, data));
+        iomgr.on(0x42, (port, data) => this.onCount(port, data));
+        // ctl
+        iomgr.on(0x43, (port, data) => {
+            const counter = (data >> 6) & 3;
+            const format = (data >> 4) & 3;
+            // const mode = (data >> 1) & 7;
+            // const bcd = data & 1;
+            if (counter < 3 && format > 0) {
+                this.cntModes[counter] = data;
+                this.cntPhases[counter] = 0;
+                this.cntValues[counter * 2] = 0;
+                this.cntValues[counter * 2 + 1] = 0;
+                this.noteOff();
+            }
+            return false;
+        });
+        // misc i/o
+        iomgr.on(0x61, (port, data) => {
+            const old_data = this.p0061_data;
+            this.p0061_data = data;
+            const chg_value = old_data ^ data;
+            if (chg_value & 0x02){
+                if (data & 0x02){
+                    this.noteOn();
+                }else{
+                    this.noteOff();
+                }
+            }
+            return false;
+        }, (port) => this.p0061_data);
+    }
+    onCount (port, data) {
+        const counter = port & 3;
+        if (this.cntPhases[counter] != 1) {
+            this.cntValues[counter * 2] = data;
+            this.cntPhases[counter] = 1;
+        } else {
+            this.cntValues[counter * 2 + 1] = data;
+            this.cntPhases[counter] = 0;
+            if (counter == 2 && (this.p0061_data & 0x02)){
+                this.noteOn();
+            }
+        }
+        return false;
+    }
+    noteOn() {
+        let count_value = this.cntValues[4] + (this.cntValues[5] * 256);
+        if (!count_value) count_value = 0x10000;
+        const freq = 1193181 / count_value;
+        postMessage({command: 'beep', data: freq});
+    }
+    noteOff() {
+        postMessage({command: 'beep', data: 0});
+    }
+}
+const timer = new iPITDevice(iomgr);
+
 
 class RuntimeEnvironment {
     constructor() {
