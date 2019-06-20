@@ -1,8 +1,8 @@
 'use strict';
 
 const sab_index_sleep = 0;
-const sab_index_key = 1;
-const sab_index_inport = 2;
+const sab_index_timer = 1;
+const sab_index_key = 2;
 
 const writeTerminal = (message) => {
     postMessage({command: 'write', data: message });
@@ -36,7 +36,7 @@ class WorkerIOManager {
         }
     }
     inb (port) {
-        const handler = this.outHandlers[port & 0xFFFF];
+        const handler = this.inHandlers[port & 0xFFFF];
         if (handler) {
             return handler(port);
         } else {
@@ -47,18 +47,104 @@ class WorkerIOManager {
 const iomgr = new WorkerIOManager();
 
 
-class iPITDevice {
+/**
+ * Programmable Interrupt Controller
+*/
+class PIC {
+    constructor (iomgr) {
+        this.pending = [];
+        this.phase = [0, 0];
+        this.IMR = new Uint8Array([0xFF, 0xFF]);
+        this.IRR = new Uint8Array(2);
+        this.ISR = new Uint8Array(2);
+        this.ICW = new Uint8Array(8);
+
+        iomgr.on(0x20, (port, data) => this.writeOCR(0, data), (port) => this.readOCR(0));
+        iomgr.on(0x21, (port, data) => this.writeIMR(0, data), (port) => this.readIMR(0));
+        iomgr.on(0xA0, (port, data) => this.writeOCR(1, data), (port) => this.readOCR(1));
+        iomgr.on(0xA1, (port, data) => this.writeIMR(1, data), (port) => this.readIMR(1));
+    }
+    writeOCR(port, data) {
+        // ICW1
+        if (data & 0x10) {
+            this.phase[port] = 1;
+            this.ICW[port * 4] = data;
+        } else if (data == 0x20) {
+            for (let i = 0; i < 8; i++) {
+                const mask = (1 << i);
+                if (this.ISR[port] & mask) {
+                    this.ISR[port] &= ~mask;
+                    this.setNextInt(port);
+                    break;
+                }
+            }
+        }
+    }
+    readOCR(port) {
+        // TODO:
+        return 0;
+    }
+    writeIMR(port, data) {
+        const phase = this.phase[port] || 0;
+        if (phase > 0 && phase < 4) { // ICW2-4
+            this.ICW[port * 4 + phase] = data;
+            if (phase < 4) {
+                this.phase[port] = 1 + phase;
+            } else {
+                this.phase[port] = 0;
+            }
+        } else {
+            this.IMR[port] = data;
+        }
+    }
+    readIMR(port) {
+        return this.IMR[port];
+    }
+    setNextInt(port) {
+        if (this.pending.length) return;
+        for (let i = 0; i < 8; i++) {
+            const mask = (1 << i);
+            if (this.ISR[port] & mask) break;
+            if ((this.IRR[port] & mask) && (this.IMR[port] & mask) == 0) {
+                this.IRR[port] &= ~mask;
+                this.ISR[port] |= mask;
+                const vector = this.ICW[port * 4 + 1];
+                this.pending.push(vector);
+            }
+        }
+    }
+    raise(n) {
+        if (n < 8) {
+            this.IRR[0] |= (1 << n);
+            this.setNextInt(0);
+        } else if (n < 16) {
+            this.IRR[1] |= (1 << (n - 8));
+            this.IRR[0] |= this.ICW[2];
+            this.setNextInt(1);
+        }
+    }
+    checkInt() {
+        const result = this.pending.pop();
+        return result || 0;
+    }
+}
+const pic = new PIC(iomgr);
+
+
+/**
+ * Programmable Interval Timer
+ * Timer and Sound
+ */
+class PIT {
     constructor (iomgr) {
         this.cntModes = new Uint8Array(3);
         this.cntPhases = new Uint8Array(3);
         this.cntValues = new Uint8Array(6);
         this.p0061_data = 0;
 
-        // timer #0 value
         iomgr.on(0x40, (port, data) => this.onCount(port, data));
         iomgr.on(0x41, (port, data) => this.onCount(port, data));
         iomgr.on(0x42, (port, data) => this.onCount(port, data));
-        // ctl
         iomgr.on(0x43, (port, data) => {
             const counter = (data >> 6) & 3;
             const format = (data >> 4) & 3;
@@ -69,11 +155,17 @@ class iPITDevice {
                 this.cntPhases[counter] = 0;
                 this.cntValues[counter * 2] = 0;
                 this.cntValues[counter * 2 + 1] = 0;
-                this.noteOff();
+                switch (counter) {
+                    case 0:
+                        this.clearTimer();
+                        break;
+                    case 2:
+                        this.noteOff();
+                        break;
+                }
             }
             return false;
         });
-        // misc i/o
         iomgr.on(0x61, (port, data) => {
             const old_data = this.p0061_data;
             this.p0061_data = data;
@@ -96,27 +188,71 @@ class iPITDevice {
         } else {
             this.cntValues[counter * 2 + 1] = data;
             this.cntPhases[counter] = 0;
-            if (counter == 2 && (this.p0061_data & 0x02)){
-                this.noteOn();
+            switch (counter) {
+                case 0:
+                    this.setTimer();
+                    break;
+                case 2:
+                    if (this.p0061_data & 0x02) {
+                        this.noteOn();
+                    }
+                    break;
             }
         }
         return false;
     }
     noteOn() {
-        let count_value = this.cntValues[4] + (this.cntValues[5] * 256);
-        if (!count_value) count_value = 0x10000;
-        const freq = 1193181 / count_value;
+        const freq = 1193181 / this.getCounter(2);
         postMessage({command: 'beep', data: freq});
     }
     noteOff() {
         postMessage({command: 'beep', data: 0});
     }
+    getCounter(counter) {
+        let count_value = this.cntValues[counter * 2] + (this.cntValues[counter * 2 + 1] * 256);
+        if (!count_value) count_value = 0x10000;
+        return count_value;
+    }
+    clearTimer() {
+        env.setTimer(0);
+    }
+    setTimer() {
+        const period = Math.ceil(this.getCounter(0) / 1193.181);
+        env.setTimer(period);
+    }
 }
-const timer = new iPITDevice(iomgr);
+const pit = new PIT(iomgr);
+
+
+/**
+ * Universal Asynchronous Receiver Transmitter
+ */
+class UART {
+    constructor (iomgr, base) {
+        this.fifo_i = [];
+        iomgr.on(base, (port, data) => this.dataOut(data), port => this.dataIn());
+    }
+    dataOut(data) {
+        writeTerminal(String.fromCharCode(data));
+    }
+    dataIn() {
+        if (this.fifo_i.length > 0) {
+            return this.fifo_i.shift();
+        } else {
+            return 0;
+        }
+    }
+    rx(data) {
+        this.fifo_i.push(data & 0xFF);
+    }
+}
+const uart = new UART(iomgr, 0x3F8);
 
 
 class RuntimeEnvironment {
     constructor() {
+        this.period = 0;
+        this.lastTick = new Date().valueOf();
         this.env = {
             memoryBase: 0,
             tableBase: 0,
@@ -128,20 +264,33 @@ class RuntimeEnvironment {
             const str = this.getCString(at);
             writeTerminal(`${str}\n`);
         }
-        this.env.vpc_putc = (c) => {
-            writeTerminal(String.fromCharCode(c));
-        }
-        this.env.vpc_readKey = () => {
-            const sab = new Int32Array(this._sab);
-            return Atomics.exchange(sab, sab_index_key, 0);
-        }
-        // const usleep = async us => await new Promise(resolve => setTimeout(resolve, us));
-        this.env.vpc_wait = (us) => {
-            const sab = new Int32Array(this._sab);
-            Atomics.wait(sab, sab_index_key, 0, us);
-        }
+        this.env.vpc_halt = () => this.halt();
         this.env.vpc_outb = (port, data) => iomgr.outb(port, data);
         this.env.vpc_inb = (port) => iomgr.inb(port);
+        this.env.vpc_int = () => pic.checkInt();
+    }
+    halt() {
+        const sab = new Int32Array(this._sab);
+
+        const now = new Date().valueOf();
+        const expected = this.lastTick + this.period;
+        const diff = expected - now;
+        if (diff > 0) {
+            Atomics.wait(sab, sab_index_sleep, 0, diff);
+        }
+        const now2 = new Date().valueOf();
+        this.lastTick = now2;
+        if (now2 >= expected) {
+            pic.raise(0);
+        }
+
+        const keyIn = Atomics.exchange(sab, sab_index_key, 0);
+        if (keyIn) {
+            uart.rx(keyIn);
+        }
+    }
+    setTimer(period) {
+        this.period = period;
     }
     emit(to, from) {
         const l = from.length;
@@ -225,6 +374,9 @@ onmessage = e => {
                 console.log('CPU halted');
             }, 10);
             break;
+        // case 'key':
+        //     uart.rx(e.data.data);
+        //     break
         default:
             console.log('worker.onmessage', e.data);
         }

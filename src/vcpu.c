@@ -5,11 +5,10 @@
 #include <stdlib.h>
 
 extern void println(const char *);
-extern void vpc_putc(int ch);
-extern void vpc_wait(int us);
-extern uint32_t vpc_readKey(void);
+extern void vpc_halt();
 extern void vpc_outb(uint32_t port, uint32_t value);
 extern uint32_t vpc_inb(uint32_t port);
+extern uint32_t vpc_int();
 
 typedef struct cpu_state cpu_state;
 typedef struct sreg_t sreg_t;
@@ -285,10 +284,6 @@ static void PUSH16(cpu_state *cpu, uint16_t value) {
 
 static void OUT8(cpu_state *cpu, uint16_t port, uint8_t value) {
     switch (port) {
-        case 0xE9: // debug print
-        case 0x03F8:// UART I/O
-            vpc_putc(value);
-            break;
         case 0xCF9: // ACPI reset
             cpu_reset(cpu, -1);
             break;
@@ -307,8 +302,6 @@ static void OUT16(cpu_state *cpu, uint16_t port, uint16_t value) {
 
 static uint8_t INPORT8(cpu_state *cpu, uint16_t port) {
     switch (port) {
-        case 0x03F8:// UART I/O
-            return vpc_readKey();
         default:
             return vpc_inb(port);
     }
@@ -354,8 +347,8 @@ static void INVOKE_INT(cpu_state *cpu, int n) {
     PUSH16(cpu, cpu->CS.sel);
     PUSH16(cpu, cpu->EIP);
     int idt_offset = cpu->IDT.base + n * 4;
-    LOAD_SEL(cpu, &cpu->CS, READ_LE16((uint16_t *)(mem + idt_offset + 2)));
-    cpu->EIP = READ_LE16((uint16_t *)(mem + idt_offset));
+    LOAD_SEL(cpu, &cpu->CS, READ_LE16(mem + idt_offset + 2));
+    cpu->EIP = READ_LE16(mem + idt_offset);
 }
 
 static int SETF8(cpu_state *cpu, int value) {
@@ -1109,8 +1102,8 @@ static int cpu_step(cpu_state *cpu) {
             // case 0x82: // undocumented
             case 0x83: // alu r/m, imm8 (sign extended)
             {
-                int opc = (inst >> 3) & 7;
                 MODRM_W(cpu, seg, inst & 1, &set);
+                int opc = set.opr2;
                 if (inst == 0x81) {
                     set.opr2 = MOVSXW(FETCH16(cpu));
                 } else {
@@ -1251,7 +1244,7 @@ static int cpu_step(cpu_state *cpu) {
 
             case 0x9D: // POPF
                 LOAD_FLAGS(cpu, POP16(cpu));
-                return 0;
+                return cpu_status_int;
 
             case 0x9E: // SAHF
                 LOAD_FLAGS(cpu, (cpu->eflags & 0xFFFFFF00) | cpu->AH);
@@ -1520,10 +1513,10 @@ static int cpu_step(cpu_state *cpu) {
                 uint32_t ret_eip = POP16(cpu);
                 uint32_t ret_cs = POP16(cpu);
                 uint32_t ret_fl = POP16(cpu);
-                LOAD_FLAGS(cpu, ret_fl);
                 LOAD_SEL(cpu, &cpu->CS, ret_cs);
                 cpu->EIP = ret_eip;
-                return 0;
+                LOAD_FLAGS(cpu, ret_fl);
+                return cpu_status_int;
             }
 
             case 0xD0: // shift r/m, 1
@@ -2036,11 +2029,18 @@ static int cpu_block(cpu_state *cpu) {
                 break;
             case cpu_status_halt:
                 if (cpu->IF) {
-                    vpc_wait(100);
+                    vpc_halt();
                 } else {
                     return status;
                 }
             case cpu_status_int:
+                if (cpu->IF) {
+                    int vector = vpc_int();
+                    if (vector) {
+                        INVOKE_INT(cpu, vector);
+                        cpu->IF = 0;
+                    }
+                }
                 break;
             case cpu_status_icebp:
                 dump_regs(cpu, cpu->EIP);
@@ -2049,8 +2049,8 @@ static int cpu_block(cpu_state *cpu) {
                 if (cpu->cpu_gen >= cpu_gen_80286) {
                     cpu->EIP = last_known_eip;
                 }
-                // INVOKE_INT(cpu, 0); // #DE
-                return status;
+                INVOKE_INT(cpu, 0); // #DE
+                break;
             case cpu_status_ud:
             default:
                 cpu->EIP = last_known_eip;

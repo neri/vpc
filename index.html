@@ -35,8 +35,9 @@
         }
     </style>
     <script>
-        const sab_index_sleep = 0;
-        const sab_index_key = 1;
+const sab_index_sleep = 0;
+const sab_index_timer = 1;
+const sab_index_key = 2;
         
         const startEmu = () => {
             document.querySelector('#screen_container').style.display = 'block';
@@ -51,10 +52,11 @@
             term.open(document.querySelector('#terminal'));
             window.term = term;
             term.onKey((e) => {
+                // worker.postMessage({command: 'key', data: e.key.charCodeAt(0) });
                 let sab = new Int32Array(this._sab);
                 Atomics.store(sab, sab_index_key, (e.key.length ? e.key.charCodeAt(0) : 0)
                 | (e.domEvent.keyCode << 16));
-                Atomics.notify(sab, sab_index_key);
+                Atomics.notify(sab, sab_index_sleep);
             });
             term.focus();
             
@@ -64,11 +66,11 @@
             worker.onmessage = message => {
                 switch (message.data.command) {
                     case 'loaded':
-                    worker.postMessage({ command: 'start', sab: this._sab, ioRedirectMap: iomgr.ioRedirectMap });
-                    break;
+                        worker.postMessage({ command: 'start', sab: this._sab, ioRedirectMap: iomgr.ioRedirectMap });
+                        break;
                     case 'write':
-                    term.write(message.data.data);
-                    break;
+                        term.write(message.data.data);
+                        break;
                     case 'outb':
                         window.iomgr.outb(message.data.data.port, message.data.data.data);
                         break;
@@ -76,7 +78,7 @@
                         window.beep.sound(message.data.data);
                         break;
                     default:
-                    throw message;
+                        throw message;
                 }
             };
         }

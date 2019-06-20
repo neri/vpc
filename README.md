@@ -8,12 +8,13 @@ A PC Emulator implemented by WebAssembly.
 
 ## Implemented hardware
 
-- CPU: 80x86?
+- CPU: 80186?
   - Don't implement: AAA AAS AAM AAD DAS DAA SETALC and minor instructions
 - Memory: 640KB ought to be enough for anybody.
 - I/O:
+  - i8259 PIC
+  - i8254 Timer & Sound
   - UART (port 3F8 only)
-  - i8254 BEEP
 
 ## Requirements
 

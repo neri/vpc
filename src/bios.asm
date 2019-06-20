@@ -8,6 +8,9 @@
 %define SEG_BIOS 0xFE00
 %define SIZE_BIOS 0x2000
 
+%define PIC_ICW2_MAS        0x08
+%define PIC_ICW2_SLA        0x70
+
 %define	PORT_TIMER_CNT0		0x0040
 %define	PORT_BEEP_CNT		0x0042
 %define	PORT_TIMER_CTL		0x0043
@@ -26,6 +29,34 @@ _HEAD:
 
 banner:
     db "BIOS v0.0", 10, 0
+
+_boot_sound_data:
+    dw 262, 250
+    dw 293, 250
+    dw 330, 250
+    dw 349, 250
+    dw 392, 250
+    dw 440, 250
+    dw 494, 250
+    dw 523, 1000
+    dw 0xFFFF
+
+
+_irq0:
+    push ds
+    push ax
+    xor ax, ax
+    mov ds, ax
+    inc word [ds:0x046C]
+    jnz .skip
+    inc word [ds:0x046E]
+.skip:
+    mov al, 0x20
+    out 0x20, al
+    pop ax
+    pop ds
+    iret
+
 
 _aux_out:
     push ds
@@ -50,31 +81,99 @@ _aux_in:
     ret
 
 _bios_beep:
-	pushf
-	cli
-	jcxz .stop
-	cmp cx, 0x0001
-	jz short .fire
-	mov al, TIMER_INIT_BEEP
-	out PORT_TIMER_CTL, al
-	mov ax, _BEEP_TICK_L
-	mov dx, _BEEP_TICK_H
-	div cx
-	out PORT_BEEP_CNT,al
-	mov al, ah
-	out PORT_BEEP_CNT,al
+    pushf
+    cli
+    jcxz .stop
+    cmp cx, 0x0001
+    jz short .fire
+    mov al, TIMER_INIT_BEEP
+    out PORT_TIMER_CTL, al
+    mov ax, _BEEP_TICK_L
+    mov dx, _BEEP_TICK_H
+    div cx
+    out PORT_BEEP_CNT,al
+    mov al, ah
+    out PORT_BEEP_CNT,al
 .fire:
-	in al,PORT_BEEP_FIRE
-	or al, 0x03
-	out PORT_BEEP_FIRE,al
-	jmp short .end
+    in al,PORT_BEEP_FIRE
+    or al, 0x03
+    out PORT_BEEP_FIRE,al
+    jmp short .end
 .stop:
-	in al,PORT_BEEP_FIRE
-	and al, 0xFC
-	out PORT_BEEP_FIRE,al
+    in al,PORT_BEEP_FIRE
+    and al, 0xFC
+    out PORT_BEEP_FIRE,al
 .end:
-	popf
-	ret
+    popf
+    ret
+
+
+_bios_tick:
+    push ds
+    xor ax, ax
+    mov ds, ax
+.retry:
+    mov ax, [ds:0x046C]
+    mov dx, [ds:0x046E]
+    cmp ax, [ds:0x046C]
+    jnz .retry
+    mov cx, _TIMER_RES
+    pop ds
+    ret
+
+
+_bios_wait:
+    push si
+    push di
+    push bx
+
+    mov bx, cx
+
+    call _bios_tick
+    mov si, ax
+    mov di, dx
+
+.loop:
+    sti
+    hlt
+    call _bios_tick
+
+    sub ax, si
+    sbb dx, di
+    or dx, dx
+    jnz .end
+
+    mul cx
+    or dx, dx
+    jnz .end
+    cmp ax, bx
+    jb .loop
+
+.end:
+    pop bx
+    pop di
+    pop si
+    ret
+
+
+
+_play_sound:
+
+.loop:
+    lodsw
+    cmp ax, 0xFFFF
+    jz .end
+    mov cx, ax
+    call _bios_beep
+    lodsw
+    mov cx, ax
+    call _bios_wait
+    jmp .loop
+.end:
+    xor cx, cx
+    call _bios_beep
+    ret
+
 
 _INIT:
     cli
@@ -82,32 +181,65 @@ _INIT:
     xor ax, ax
     mov ss, ax
     mov sp, 0x400
-    mov ax, cs
-    mov ds, ax
+    mov cx, cs
+    mov ds, cx
+
     mov es, ax
+
+    xor di, di
+    mov cx, 256
+    rep stosw
+
+    mov di, 8 * 4
+    mov ax, _irq0
+    stosw
+    mov ax, cs
+    stosw
 
     mov ax, 0x3F8
     mov [ss:0x0400], ax
 
+    ;; INIT PC/AT PIC
+    mov al, 0xFF
+    out 0x21, al
+    out 0xA1, al
+    mov al, 0x11
+    out 0x20, al
+    out 0xA0, al
+    mov al, PIC_ICW2_MAS
+    out 0x21, al
+    mov al, PIC_ICW2_SLA
+    out 0xA1, al
+    mov al, 0x04
+    out 0x21, al
+    mov al, 0x02
+    out 0xA1, al
+    mov al, 0x01
+    out 0x21, al
+    out 0xA1, al
+
+    mov al, 0xFA
+    out 0x21, al
+    mov al, 0xFF
+    out 0xA1, al
+    sti
+
+    ;; INIT PIT
+    mov al, 0x34
+    out 0x43, al
+    xor al, al
+    out 0x40, al
+    out 0x40, al
+
     mov si, cls_msg
     call puts
 
-    ; PIPO sound
-    mov cx, 2000
-    call _bios_beep
-    mov cx, 100
-    call _wait
-    mov cx, 1000
-    call _bios_beep
-    mov cx, 100
-    call _wait
-    xor cx, cx
-    call _bios_beep
+    mov si, _boot_sound_data
+    call _play_sound
 
     mov si, banner
     call puts
 
-    sti
 .prompt:
     mov di, ARGV
     mov al, '#'
@@ -153,14 +285,15 @@ _INIT:
 .no_cmd_r:
     cmp al, 'u'
     jnz .no_cmd_u
-    db 0xFF, 0xFF
+    cli
+    hlt
 .no_cmd_u:
     cmp al, 'b'
     jnz .no_cmd_b
     mov cx, 1000
     call _bios_beep
-    mov cx, 100
-    call _wait
+    mov cx, 200
+    call _bios_wait
     xor cx,cx 
     call _bios_beep
     jmp .prompt
@@ -169,15 +302,6 @@ _INIT:
     mov si, bad_cmd_msg
     call puts
     jmp .prompt
-
-_wait:
-.await0:
-    mov dx, 0xFFFF
-.await:
-    dec dx
-    jnz .await
-    loop .await0
-    ret
 
 
 puts:
