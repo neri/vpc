@@ -31,14 +31,7 @@ banner:
     db "BIOS v0.0", 10, 0
 
 _boot_sound_data:
-    dw 262, 250
-    dw 293, 250
-    dw 330, 250
-    dw 349, 250
-    dw 392, 250
-    dw 440, 250
-    dw 494, 250
-    dw 523, 1000
+    dw 2000, 200, 1000, 200
     dw 0xFFFF
 
 

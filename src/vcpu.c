@@ -8,7 +8,7 @@ extern void println(const char *);
 extern void vpc_halt();
 extern void vpc_outb(uint32_t port, uint32_t value);
 extern uint32_t vpc_inb(uint32_t port);
-extern uint32_t vpc_int();
+extern uint32_t vpc_irq();
 
 typedef struct cpu_state cpu_state;
 typedef struct sreg_t sreg_t;
@@ -2035,7 +2035,7 @@ static int cpu_block(cpu_state *cpu) {
                 }
             case cpu_status_int:
                 if (cpu->IF) {
-                    int vector = vpc_int();
+                    int vector = vpc_irq();
                     if (vector) {
                         INVOKE_INT(cpu, vector);
                         cpu->IF = 0;
