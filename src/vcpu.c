@@ -4,11 +4,13 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-extern void println(const char *);
-extern void vpc_halt();
-extern void vpc_outb(uint32_t port, uint32_t value);
-extern uint32_t vpc_inb(uint32_t port);
-extern uint32_t vpc_irq();
+#define WASM_EXPORT __attribute__((visibility("default")))
+#define WASM_IMPORT extern
+
+WASM_IMPORT void println(const char *);
+WASM_IMPORT void vpc_outb(uint32_t port, uint32_t value);
+WASM_IMPORT uint32_t vpc_inb(uint32_t port);
+WASM_IMPORT uint32_t vpc_irq();
 
 typedef struct cpu_state cpu_state;
 typedef struct sreg_t sreg_t;
@@ -33,10 +35,10 @@ enum {
 
 typedef enum cpu_status_t {
     cpu_status_normal = 0,
-    cpu_status_exit,
     cpu_status_halt,
     cpu_status_int,
     cpu_status_icebp,
+    cpu_status_exit = 10000,
     cpu_status_ud,
     cpu_status_gpf,
     cpu_status_div,
@@ -2007,7 +2009,7 @@ void cpu_reset(cpu_state *cpu, int gen) {
     cpu->EDX = cpu->cpu_gen << 8;
 }
 
-extern void *_init() {
+WASM_EXPORT void *_init() {
     for (int i = 0; i < 256; ++i) {
         int n = 0;
         for (int j = 1; j < 256; j += j) {
@@ -2019,28 +2021,27 @@ extern void *_init() {
     return mem;
 }
 
+static void check_irq(cpu_state *cpu) {
+    if (cpu->IF) {
+        int vector = vpc_irq();
+        if (vector) {
+            INVOKE_INT(cpu, vector);
+            cpu->IF = 0;
+        }
+    }
+}
+
 #define CPU_INTERVAL    0x10000
 static int cpu_block(cpu_state *cpu) {
+    check_irq(cpu);
     for (;;) {
         uint32_t last_known_eip = cpu->EIP;
         int status = cpu_step(cpu);
         switch (status) {
             case cpu_status_normal:
                 break;
-            case cpu_status_halt:
-                if (cpu->IF) {
-                    vpc_halt();
-                } else {
-                    return status;
-                }
             case cpu_status_int:
-                if (cpu->IF) {
-                    int vector = vpc_irq();
-                    if (vector) {
-                        INVOKE_INT(cpu, vector);
-                        cpu->IF = 0;
-                    }
-                }
+                check_irq(cpu);
                 break;
             case cpu_status_icebp:
                 dump_regs(cpu, cpu->EIP);
@@ -2051,6 +2052,8 @@ static int cpu_block(cpu_state *cpu) {
                 }
                 INVOKE_INT(cpu, 0); // #DE
                 break;
+            case cpu_status_halt:
+                return status;
             case cpu_status_ud:
             default:
                 cpu->EIP = last_known_eip;
@@ -2059,27 +2062,36 @@ static int cpu_block(cpu_state *cpu) {
     }
 }
 
-extern void run(int gen) {
-    cpu_state cpu;
+WASM_EXPORT cpu_state *alloc_cpu(int gen) {
+    static cpu_state cpu;
     cpu_reset(&cpu, gen);
-    switch (cpu_block(&cpu)) {
+    return &cpu;
+}
+
+WASM_EXPORT int run(cpu_state *cpu) {
+    int status = cpu_block(cpu);
+    switch (status) {
         case cpu_status_exit:
-            break;
+            return status;
         case cpu_status_halt:
-            println("**** SYSTEM HALTED");
-            dump_regs(&cpu, cpu.EIP);
-            break;
+            if (cpu->IF) {
+                return 0;
+            } else {
+                println("**** SYSTEM HALTED");
+                dump_regs(cpu, cpu->EIP);
+                return cpu_status_exit;
+            }
         case cpu_status_div:
             println("**** DIVIDE ERROR");
-            dump_regs(&cpu, cpu.EIP);
-            break;
+            dump_regs(cpu, cpu->EIP);
+            return status;
         case cpu_status_ud:
             println("**** PANIC: UNDEFINED INSTRUCTION");
-            dump_regs(&cpu, cpu.EIP);
-            break;
+            dump_regs(cpu, cpu->EIP);
+            return status;
         default:
             println("**** PANIC: TRIPLE FAULT!!!");
-            dump_regs(&cpu, cpu.EIP);
-            break;
+            dump_regs(cpu, cpu->EIP);
+            return status;
     }
 }

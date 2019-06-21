@@ -255,8 +255,8 @@ class RuntimeEnvironment {
         this.lastTick = new Date().valueOf();
         this.env = {
             memoryBase: 0,
-            tableBase: 0,
-            table: new WebAssembly.Table({ initial: 2, element: "anyfunc" }),
+            // tableBase: 0,
+            // table: new WebAssembly.Table({ initial: 2, element: "anyfunc" }),
             memory: new WebAssembly.Memory({ initial: 257 }),
         }
         this._memory = new Uint8Array(this.env.memory.buffer);
@@ -264,30 +264,9 @@ class RuntimeEnvironment {
             const str = this.getCString(at);
             writeTerminal(`${str}\n`);
         }
-        this.env.vpc_halt = () => this.halt();
         this.env.vpc_outb = (port, data) => iomgr.outb(port, data);
         this.env.vpc_inb = (port) => iomgr.inb(port);
         this.env.vpc_irq = () => pic.checkIRQ();
-    }
-    halt() {
-        const sab = new Int32Array(this._sab);
-
-        const now = new Date().valueOf();
-        const expected = this.lastTick + this.period;
-        const diff = expected - now;
-        if (diff > 0) {
-            Atomics.wait(sab, sab_index_sleep, 0, diff);
-        }
-        const now2 = new Date().valueOf();
-        this.lastTick = now2;
-        if (now2 >= expected) {
-            pic.raiseIRQ(0);
-        }
-
-        const keyIn = Atomics.exchange(sab, sab_index_key, 0);
-        if (keyIn) {
-            uart.onRX(keyIn);
-        }
     }
     setTimer(period) {
         this.period = period;
@@ -321,6 +300,31 @@ class RuntimeEnvironment {
         const len = this.strlen(at);
         const bytes = new Uint8Array(this._memory.buffer, at, len);
         return new TextDecoder('utf-8').decode(bytes);
+    }
+    run (gen) {
+        this.cpu = this.instance.exports.alloc_cpu(gen);
+        console.log(`CPU started (${gen})`);
+        this.cont();
+    }
+    cont () {
+        if (this.period) {
+            const now = new Date().valueOf();
+            const expected = this.lastTick + this.period;
+            if (now > expected) {
+                pic.raiseIRQ(0);
+            }
+            this.lastTick = new Date().valueOf();
+        }
+        const status = env.instance.exports.run(this.cpu);
+        if (status) {
+            console.log(`CPU halted (${status})`);
+        } else {
+            const now = new Date().valueOf();
+            const expected = this.lastTick + this.period;
+            let timer = expected - now;
+            if (timer < 1) timer = 1;
+            setTimeout(() => this.cont(), timer);
+        }
     }
 }
 
@@ -366,17 +370,12 @@ fetch('./lib/vcpu.wasm')
 onmessage = e => {
     switch (e.data.command) {
         case 'start':
-            env._sab = e.data.sab;
             iomgr.ioRedirectMap = e.data.ioRedirectMap;
-            setTimeout(() => {
-                console.log('CPU started');
-                env.instance.exports.run(1);
-                console.log('CPU halted');
-            }, 10);
+            env.run(1);
             break;
-        // case 'key':
-        //     uart.onRX(e.data.data);
-        //     break
+        case 'key':
+            uart.onRX(e.data.data);
+            break
         default:
             console.log('worker.onmessage', e.data);
     }

@@ -16,11 +16,6 @@ A PC Emulator implemented by WebAssembly.
   - i8254 Timer & Sound
   - UART (port 3F8 only)
 
-## Requirements
-
-- Google Chrome
-  - Currently, other web browsers don't support SharedArrayBuffer.
-
 ## License
 
 Copyright (C)2019 Nerry

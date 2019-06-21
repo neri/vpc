@@ -35,10 +35,6 @@
         }
     </style>
     <script>
-const sab_index_sleep = 0;
-const sab_index_timer = 1;
-const sab_index_key = 2;
-        
         const startEmu = () => {
             document.querySelector('#screen_container').style.display = 'block';
             document.querySelector('#click_to_start').style.display = 'none';
@@ -47,16 +43,11 @@ const sab_index_key = 2;
                 window.beep.createAudioContext();
             }
 
-            this._sab = new SharedArrayBuffer(256);
             const term = new Terminal({convertEol: true, rendererType: 'canvas'});
             term.open(document.querySelector('#terminal'));
             window.term = term;
             term.onKey((e) => {
-                // worker.postMessage({command: 'key', data: e.key.charCodeAt(0) });
-                let sab = new Int32Array(this._sab);
-                Atomics.store(sab, sab_index_key, (e.key.length ? e.key.charCodeAt(0) : 0)
-                | (e.domEvent.keyCode << 16));
-                Atomics.notify(sab, sab_index_sleep);
+                worker.postMessage({command: 'key', data: e.key.charCodeAt(0) });
             });
             term.focus();
             
@@ -66,7 +57,7 @@ const sab_index_key = 2;
             worker.onmessage = message => {
                 switch (message.data.command) {
                     case 'loaded':
-                        worker.postMessage({ command: 'start', sab: this._sab, ioRedirectMap: iomgr.ioRedirectMap });
+                        worker.postMessage({ command: 'start', ioRedirectMap: iomgr.ioRedirectMap });
                         break;
                     case 'write':
                         term.write(message.data.data);
@@ -165,10 +156,6 @@ const sab_index_key = 2;
         window.addEventListener('DOMContentLoaded', () => {
             window.beep = new i8254Sound();
             document.querySelector('#click_to_start').addEventListener('click', e => {
-                if (!window.SharedArrayBuffer) {
-                    alert('Sorry, but SharedArrayBuffer is not available');
-                    return;
-                }
                 startEmu();
             });
         });
