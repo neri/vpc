@@ -2,15 +2,19 @@
 // Copyright (c) 2019 Nerry
 
 #include <stdint.h>
-#include <stdlib.h>
+// #include <stdlib.h>
+#define NULL 0
+typedef uintptr_t size_t;
 
 #define WASM_EXPORT __attribute__((visibility("default")))
 #define WASM_IMPORT extern
 
 WASM_IMPORT void println(const char *);
-WASM_IMPORT void vpc_outb(uint32_t port, uint32_t value);
-WASM_IMPORT uint32_t vpc_inb(uint32_t port);
-WASM_IMPORT uint32_t vpc_irq();
+WASM_IMPORT void vpc_outb(int port, int value);
+WASM_IMPORT int vpc_inb(int port);
+WASM_IMPORT void vpc_outw(int port, int value);
+WASM_IMPORT int vpc_inw(int port);
+WASM_IMPORT int vpc_irq();
 
 typedef struct cpu_state cpu_state;
 typedef struct sreg_t sreg_t;
@@ -187,6 +191,14 @@ char *dump16(char *p, int value) {
     return p;
 }
 
+char *dump32(char *p, uint32_t value) {
+    for (int i = 7; i >= 0; i--) {
+        int c = (value >> (i * 4)) & 0xF;
+        *p++ = hextbl[c];
+    }
+    return p;
+}
+
 char *dump_string(char *p, const char *s) {
     for (; *s;) {
         *p++ = *s++;
@@ -296,10 +308,7 @@ static void OUT8(cpu_state *cpu, uint16_t port, uint8_t value) {
 }
 
 static void OUT16(cpu_state *cpu, uint16_t port, uint16_t value) {
-    switch (port) {
-        default:
-            break;
-    }
+    vpc_outw(port, value);
 }
 
 static uint8_t INPORT8(cpu_state *cpu, uint16_t port) {
@@ -310,10 +319,7 @@ static uint8_t INPORT8(cpu_state *cpu, uint16_t port) {
 }
 
 static uint16_t INPORT16(cpu_state *cpu, uint16_t port) {
-    switch (port) {
-        default:
-            return 0xFFFF;
-    }
+    return vpc_inw(port);
 }
 
 static void LOAD_SEL(cpu_state *cpu, sreg_t *sreg, uint16_t value) {
@@ -648,7 +654,7 @@ static void XOR(cpu_state *cpu, operand_set *set) {
 
 static void JCC(cpu_state *cpu, int disp, int cc) {
     if (cc) {
-        cpu->EIP += disp;
+        cpu->EIP = (cpu->EIP + disp) & 0xFFFF;
     }
 }
 
@@ -662,10 +668,56 @@ static int SHIFT(cpu_state *cpu, operand_set *set, int c) {
             m = 0x8000;
             break;
     }
-    if (cpu->cpu_gen >= cpu_gen_80186) c |= 0x1F;
+    if (cpu->cpu_gen >= cpu_gen_80186) c &= 0x1F;
     switch (set->opr2) {
         case 0: // ROL
+        {
+            uint32_t value;
+            switch (set->size) {
+                case 0:
+                    value = *set->opr1b;
+                    for (int i = 0; i < c; ++i) {
+                        value = (value << 1) | (cpu->CF = (value & m) != 0);
+                    }
+                    cpu->OF = cpu->CF ^ ((value & m) != 0);
+                    *set->opr1b = value;
+                    return 0;
+                case 1:
+                    value = READ_LE16(set->opr1b);
+                    for (int i = 0; i < c; ++i) {
+                        value = (value << 1) | (cpu->CF = (value & m) != 0);
+                    }
+                    cpu->OF = cpu->CF ^ ((value & m) != 0);
+                    WRITE_LE16(set->opr1, value);
+                    return 0;
+            }
+        }
+            break;
+
         case 1: // ROR
+        {
+            uint32_t value;
+            switch (set->size) {
+                case 0:
+                    value = *set->opr1b;
+                    for (int i = 0; i < c; ++i) {
+                        value = (value >> 1) | ((cpu->CF = value & 1) ? m : 0);
+                    }
+                    cpu->OF = cpu->CF ^ ((value & (m >> 1)) != 0);
+                    *set->opr1b = value;
+                    return 0;
+                case 1:
+                    value = READ_LE16(set->opr1);
+                    for (int i = 0; i < c; ++i) {
+                        value = (value >> 1) | ((cpu->CF = value & 1) ? m : 0);
+                    }
+                    cpu->OF = cpu->CF ^ ((value & (m >> 1)) != 0);
+                    WRITE_LE16(set->opr1, value);
+                    return 0;
+            }
+            break;
+        }
+
         case 2: // RCL
         case 3: // RCR
             // TODO:
@@ -681,7 +733,7 @@ static int SHIFT(cpu_state *cpu, operand_set *set, int c) {
                             value <<= 1;
                         }
                         *set->opr1b = SETF8(cpu, value);
-                        cpu->CF = value & (m << 1);
+                        cpu->CF = (value & (m << 1)) != 0;
                         cpu->OF = cpu->CF != !!(value & m);
                         return 0;
                     case 1:
@@ -690,62 +742,62 @@ static int SHIFT(cpu_state *cpu, operand_set *set, int c) {
                             value <<= 1;
                         }
                         WRITE_LE16(set->opr1b, SETF16(cpu, value));
-                        cpu->CF = value & (m << 1);
+                        cpu->CF = (value & (m << 1)) != 0;
                         cpu->OF = cpu->CF != !!(value & m);
                         return 0;
                 }
             }
-            break;
+            return 0;
         case 5: // SHR
             if (c > 0) {
                 uint32_t value;
                 switch (set->size) {
                     case 0:
                         value = *set->opr1b;
-                        for (int i = 0; i < c; ++i) {
+                        for (int i = 1; i < c; ++i) {
                             value >>= 1;
                         }
-                        *set->opr1b = SETF8(cpu, value);
+                        *set->opr1b = SETF8(cpu, value >> 1);
                         cpu->CF = value & 1;
                         cpu->OF = !!(value & m);
                         return 0;
                     case 1:
                         value = READ_LE16(set->opr1);
-                        for (int i = 0; i < c; ++i) {
+                        for (int i = 1; i < c; ++i) {
                             value >>= 1;
                         }
-                        WRITE_LE16(set->opr1b, SETF16(cpu, value));
+                        WRITE_LE16(set->opr1b, SETF16(cpu, value >> 1));
                         cpu->CF = value & 1;
                         cpu->OF = !!(value & m);
                         return 0;
                 }
             }
-            break;
+            return 0;
         case 7: // SAR
             if (c > 0) {
                 int32_t value;
                 switch (set->size) {
                     case 0:
                         value = MOVSXB(*set->opr1b);
-                        for (int i = 0; i < c; ++i) {
+                        for (int i = 1; i < c; ++i) {
                             value >>= 1;
                         }
-                        *set->opr1b = SETF8(cpu, value);
+                        *set->opr1b = SETF8(cpu, value >> 1);
                         cpu->CF = value & 1;
                         cpu->OF = 0;
                         return 0;
                     case 1:
                         value = MOVSXW(READ_LE16(set->opr1));
-                        for (int i = 0; i < c; ++i) {
+                        for (int i = 1; i < c; ++i) {
                             value >>= 1;
                         }
-                        WRITE_LE16(set->opr1b, SETF16(cpu, value));
+                        WRITE_LE16(set->opr1b, SETF16(cpu, value >> 1));
                         cpu->CF = value & 1;
                         cpu->OF = 0;
                         return 0;
                 }
             }
-            break;
+            return 0;
     }
     return cpu_status_ud;
 }
@@ -868,6 +920,15 @@ static int cpu_step(cpu_state *cpu) {
                 break;
 
             // case 0x2F: // DAS
+            // {
+            //     int value;
+            //     value = (cpu->AF = (cpu->AL & 15) > 9 || cpu->AF) ? 6 : 0;
+            //     if ((cpu->CF = cpu->AL > 0x99 || cpu->CF)){
+            //         value += 0x60;
+            //     }
+            //     cpu->AL = SETF8(cpu, cpu->AL - value);
+            //     return 0;
+            // }
 
             case 0x30: // XOR r/g, reg8
             case 0x31:
@@ -1334,6 +1395,56 @@ static int cpu_step(cpu_state *cpu) {
                 return 0;
             }
 
+            case 0xA6: // CMPSB
+            {
+                sreg_t *_seg = SEGMENT(&cpu->DS);
+                int repz = prefix & PREFIX_REPZ;
+                int repnz = prefix & PREFIX_REPNZ;
+                int rep = repz | repnz;
+                if (rep && cpu->CX == 0) return 0;
+                do {
+                    int dst = MOVSXB(READ_MEM8(_seg, cpu->SI));
+                    int src = MOVSXB(READ_MEM8(&cpu->ES, cpu->DI));
+                    int value = dst - src;
+                    cpu->AF = (dst & 15) - (src & 15) < 0;
+                    cpu->CF = dst < src;
+                    SETF8(cpu, value);
+                    if (cpu->DF) {
+                        cpu->SI--;
+                        cpu->DI--;
+                    } else {
+                        cpu->SI++;
+                        cpu->DI++;
+                    }
+                } while (rep && --cpu->CX && ((repnz && !cpu->ZF) || (repz && cpu->ZF)));
+                return 0;
+            }
+
+            case 0xA7: // CMPSW
+            {
+                sreg_t *_seg = SEGMENT(&cpu->DS);
+                int repz = prefix & PREFIX_REPZ;
+                int repnz = prefix & PREFIX_REPNZ;
+                int rep = repz | repnz;
+                if (rep && cpu->CX == 0) return 0;
+                do {
+                    int dst = MOVSXW(READ_MEM16(_seg, cpu->SI));
+                    int src = MOVSXW(READ_MEM16(&cpu->ES, cpu->DI));
+                    int value = dst - src;
+                    cpu->AF = (dst & 15) - (src & 15) < 0;
+                    cpu->CF = dst < src;
+                    SETF16(cpu, value);
+                    if (cpu->DF) {
+                        cpu->SI -= 2;
+                        cpu->DI -= 2;
+                    } else {
+                        cpu->SI += 2;
+                        cpu->DI += 2;
+                    }
+                } while (rep && --cpu->CX && ((repnz && !cpu->ZF) || (repz && cpu->ZF)));
+                return 0;
+            }
+
             case 0xA8: // TEST AL, imm8
             case 0xA9: // TEST AX, imm16
                 set.size = inst & 1;
@@ -1374,7 +1485,7 @@ static int cpu_step(cpu_state *cpu) {
             {
                 sreg_t *_seg = SEGMENT(&cpu->ES);
                 int rep = prefix & PREFIX_REPZ;
-                if (rep && cpu->CX) return 0;
+                if (rep && cpu->CX == 0) return 0;
                 do {
                     WRITE_MEM16(_seg, cpu->DI, cpu->AX);
                     if (cpu->DF) {
@@ -1407,6 +1518,52 @@ static int cpu_step(cpu_state *cpu) {
                 } else {
                     cpu->SI += 2;
                 }
+                return 0;
+            }
+
+            case 0xAE: // SCASB
+            {
+                sreg_t *_seg = SEGMENT(&cpu->ES);
+                int repz = prefix & PREFIX_REPZ;
+                int repnz = prefix & PREFIX_REPNZ;
+                int rep = repz | repnz;
+                if (rep && cpu->CX == 0) return 0;
+                do {
+                    int dst = MOVSXB(cpu->AL);
+                    int src = MOVSXB(READ_MEM8(_seg, cpu->DI));
+                    int value = dst - src;
+                    cpu->AF = (dst & 15) - (src & 15) < 0;
+                    cpu->CF = dst < src;
+                    SETF8(cpu, value);
+                    if (cpu->DF) {
+                        cpu->DI--;
+                    } else {
+                        cpu->DI++;
+                    }
+                } while (rep && --cpu->CX && ((repnz && !cpu->ZF) || (repz && cpu->ZF)));
+                return 0;
+            }
+
+            case 0xAF: // SCASW
+            {
+                sreg_t *_seg = SEGMENT(&cpu->ES);
+                int repz = prefix & PREFIX_REPZ;
+                int repnz = prefix & PREFIX_REPNZ;
+                int rep = repz | repnz;
+                if (rep && cpu->CX == 0) return 0;
+                do {
+                    int dst = MOVSXW(cpu->AX);
+                    int src = MOVSXW(READ_MEM16(_seg, cpu->DI));
+                    int value = dst - src;
+                    cpu->AF = (dst & 15) - (src & 15) < 0;
+                    cpu->CF = dst < src;
+                    SETF16(cpu, value);
+                    if (cpu->DF) {
+                        cpu->DI -= 2;
+                    } else {
+                        cpu->DI += 2;
+                    }
+                } while (rep && --cpu->CX && ((repnz && !cpu->ZF) || (repz && cpu->ZF)));
                 return 0;
             }
 
@@ -1532,6 +1689,14 @@ static int cpu_step(cpu_state *cpu) {
                 return SHIFT(cpu, &set, cpu->CL);
 
             // case 0xD4: // AAM
+            // {
+            //     int param = FETCH8(cpu);
+            //     int al = cpu->AL;
+            //     cpu->AH = al / param;
+            //     cpu->AL = SETF8(cpu, al % param);
+            //     return 0;
+            // }
+
             // case 0xD5: // AAD
             // case 0xD6: // SETALC
 
@@ -1552,9 +1717,7 @@ static int cpu_step(cpu_state *cpu) {
             {
                 int disp = MOVSXB(FETCH8(cpu));
                 cpu->CX--;
-                if (cpu->CX > 0 && cpu->ZF == 0) {
-                    cpu->EIP += disp;
-                }
+                JCC(cpu, disp, (cpu->CX > 0 && cpu->ZF == 0));
                 return 0;
             }
 
@@ -1562,9 +1725,7 @@ static int cpu_step(cpu_state *cpu) {
             {
                 int disp = MOVSXB(FETCH8(cpu));
                 cpu->CX--;
-                if (cpu->CX > 0 && cpu->ZF != 0) {
-                    cpu->EIP += disp;
-                }
+                JCC(cpu, disp, (cpu->CX > 0 && cpu->ZF != 0));
                 return 0;
             }
 
@@ -1572,9 +1733,7 @@ static int cpu_step(cpu_state *cpu) {
             {
                 int disp = MOVSXB(FETCH8(cpu));
                 cpu->CX--;
-                if (cpu->CX > 0) {
-                    cpu->EIP += disp;
-                }
+                JCC(cpu, disp, (cpu->CX > 0));
                 return 0;
             }
 
@@ -1602,13 +1761,16 @@ static int cpu_step(cpu_state *cpu) {
             {
                 int disp = MOVSXW(FETCH16(cpu));
                 PUSH16(cpu, cpu->EIP);
-                cpu->EIP += disp;
+                JCC(cpu, disp, 1);
                 return 0;
             }
 
             case 0xE9: // jmp imm16
-                cpu->EIP += MOVSXW(FETCH16(cpu));
+            {
+                int disp = MOVSXW(FETCH16(cpu));
+                JCC(cpu, disp, 1);
                 return 0;
+            }
 
             case 0xEA: // jmp far imm32
             {
@@ -1618,8 +1780,11 @@ static int cpu_step(cpu_state *cpu) {
             }
 
             case 0xEB: // jmp d8
-                cpu->EIP += MOVSXB(FETCH8(cpu));
+            {
+                int disp = MOVSXB(FETCH8(cpu));
+                JCC(cpu, disp, 1);
                 return 0;
+            }
 
             case 0xEC: // IN AL, DX
                 cpu->AL = INPORT8(cpu, cpu->DX);
@@ -1932,11 +2097,20 @@ void dump_regs(cpu_state *cpu, uint32_t eip) {
     p = dump_string(p, "CS:IP ");
     p = dump16(p, cpu->CS.sel);
     *p++ = ':';
-    p = dump16(p, eip);
+    if (eip > 0xFFFF) {
+        p = dump32(p, eip);
+    } else {
+        p = dump16(p, eip);
+    }
     p = dump_string(p, " SS:SP ");
     p = dump16(p, cpu->SS.sel);
     *p++ = ':';
-    p = dump16(p, cpu->ESP);
+    uint32_t esp = cpu->ESP;
+    if (esp > 0xFFFF) {
+        p = dump32(p, esp);
+    } else {
+        p = dump16(p, esp);
+    }
 
     for (int i = 0; i < 3; i++) {
         *p++ = ' ';
@@ -2031,11 +2205,12 @@ static void check_irq(cpu_state *cpu) {
     }
 }
 
-#define CPU_INTERVAL    0x10000
+#define CPU_INTERVAL    0x100000
 static int cpu_block(cpu_state *cpu) {
     check_irq(cpu);
-    for (;;) {
+    for (int i = 0; i < CPU_INTERVAL; i++) {
         uint32_t last_known_eip = cpu->EIP;
+        if (last_known_eip > 0xFFFF) return cpu_status_gpf;
         int status = cpu_step(cpu);
         switch (status) {
             case cpu_status_normal:
@@ -2060,6 +2235,7 @@ static int cpu_block(cpu_state *cpu) {
                 return status;
         }
     }
+    return 0;
 }
 
 WASM_EXPORT cpu_state *alloc_cpu(int gen) {
@@ -2071,11 +2247,12 @@ WASM_EXPORT cpu_state *alloc_cpu(int gen) {
 WASM_EXPORT int run(cpu_state *cpu) {
     int status = cpu_block(cpu);
     switch (status) {
+        case cpu_status_normal:
         case cpu_status_exit:
             return status;
         case cpu_status_halt:
             if (cpu->IF) {
-                return 0;
+                return cpu_status_halt;
             } else {
                 println("**** SYSTEM HALTED");
                 dump_regs(cpu, cpu->EIP);
@@ -2094,4 +2271,13 @@ WASM_EXPORT int run(cpu_state *cpu) {
             dump_regs(cpu, cpu->EIP);
             return status;
     }
+}
+
+WASM_EXPORT int step(cpu_state *cpu) {
+    int status = cpu_step(cpu);
+    return status;
+}
+
+WASM_EXPORT void debug_dump(cpu_state *cpu) {
+    dump_regs(cpu, cpu->EIP);
 }

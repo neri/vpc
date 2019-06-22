@@ -17,7 +17,7 @@ lib/vcpu.wasm: src/vcpu.c
 lib/bios.bin: src/bios.asm
 	nasm -f bin $? -o $@
 
-tmp/worker.js: src/worker.ts src/iomgr.ts src/env.ts src/dev.ts
+tmp/worker.js: src/worker.ts src/iomgr.ts src/env.ts src/dev.ts src/vfd.ts
 	npx tsc $< -t es6 --outDir tmp
 
 lib/worker.js: tmp/worker.js

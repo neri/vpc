@@ -1,4 +1,4 @@
-; Virtual Playground BIOS
+; Virtual Playground Basic I/O System
 ; Copyright (C) 2019 Nerry
 
 [CPU 8086]
@@ -11,16 +11,31 @@
 %define PIC_ICW2_MAS        0x08
 %define PIC_ICW2_SLA        0x70
 
-%define	PORT_TIMER_CNT0		0x0040
-%define	PORT_BEEP_CNT		0x0042
-%define	PORT_TIMER_CTL		0x0043
-%define	PORT_BEEP_FIRE		0x0061
+%define	PORT_TIMER_CNT0     0x0040
+%define	PORT_BEEP_CNT       0x0042
+%define	PORT_TIMER_CTL      0x0043
+%define	PORT_BEEP_FIRE      0x0061
 
-%define	_TIMER_RES			55
+%define	_TIMER_RES          55
 
-%define	TIMER_INIT_BEEP		10110110b
-%define	_BEEP_TICK_L		0x34DC
-%define	_BEEP_TICK_H		0x0012
+%define	TIMER_INIT_BEEP     10110110b
+%define	_BEEP_TICK_L        0x34DC
+%define	_BEEP_TICK_H        0x0012
+
+%define	STK_AX              0
+%define	STK_CX              2
+%define	STK_DX              4
+%define	STK_BX              6
+%define	STK_SI              8
+%define	STK_DI              10
+%define	STK_BP              12
+%define	STK_DS              14
+%define	STK_ES              16
+%define	STK_IP              18
+%define	STK_CS              20
+%define	STK_FLAGS           22
+
+%define VPC_FD_PORT         0xFD00
 
 %define ARGV 0x0080
 
@@ -30,11 +45,14 @@ _HEAD:
 banner:
     db "BIOS v0.0", 10, 0
 
-_boot_sound_data:
-    dw 2000, 200, 1000, 200
-    dw 0xFFFF
+    alignb 2
 
+_int10_ftbl:
+    dw i1000, i1001, i1002, i1003, i1004, i1005, i1006, i1007
+    dw i1008, i1009, i100A, i100B, i100C, i100D, i100E, i100F
+_int10_etbl:
 
+;; IRQ 0 Timer
 _irq0:
     push ds
     push ax
@@ -46,9 +64,229 @@ _irq0:
 .skip:
     mov al, 0x20
     out 0x20, al
+    int 0x1C
     pop ax
     pop ds
     iret
+
+;; Dummy
+_irq_dummy:
+    push ax
+    mov al, 0x20
+    out 0x20, al
+    pop ax
+_iret:
+    iret
+
+
+;; VIDEO BIOS
+_int10:
+    push es
+    push ds
+    push bp
+    push di
+    push si
+    push bx
+    push dx
+    push cx
+    push ax
+    mov bp, sp
+
+    cmp ah, (_int10_etbl - _int10_ftbl) / 2
+    ja .not_supported
+
+    cmp ah, 0x0E
+    jnz .no_0e
+    xor dx, dx
+    mov ds, dx
+    mov dx, [ds:0x400]
+    out dx, al
+.no_0e:
+    ; db 0xF1
+
+.not_supported:
+
+    add sp, byte 2
+    pop cx
+    pop dx
+    pop bx
+    pop si
+    pop di
+    pop bp
+    pop ds
+    pop es
+    iret
+
+
+i1000:
+i1001:
+i1002:
+i1003:
+i1004:
+i1005:
+i1006:
+i1007:
+i1008:
+i1009:
+i100A:
+i100B:
+i100C:
+i100D:
+i100E:
+i100F:
+
+
+
+;; Get Equipment List
+_int11:
+    push ds
+    xor ax, ax
+    mov ds, ax
+    mov ax, [ds: 0x410]
+    pop ds
+    iret
+
+;; Get Memory Size
+_int12:
+    push ds
+    xor ax, ax
+    mov ds, ax
+    mov ax, [ds: 0x413]
+    pop ds
+    iret
+
+;; Diskette BIOS
+_int13:
+    push es
+    push ds
+    push bp
+    push di
+    push si
+    push bx
+    push dx
+    push cx
+    push ax
+    mov bp, sp
+
+    cmp ah, 0x02
+    jnz .no_02
+    call _int13_read
+    jmp .end
+.no_02:
+
+.end:
+
+    mov cx, [bp + STK_FLAGS]
+    and cx, 0xFFFE
+    or ah, ah
+    jz .ok
+    inc cx
+.ok:
+    mov [bp + STK_FLAGS], cx
+
+    add sp, byte 2
+    pop cx
+    pop dx
+    pop bx
+    pop si
+    pop di
+    pop bp
+    pop ds
+    pop es
+    iret
+
+_int13_set_chr:
+    mov dx, VPC_FD_PORT + 6
+    mov al, [bp + STK_AX]
+    out dx, al
+    inc dx
+    mov al, [bp + STK_DX + 1]
+    out dx, al
+    inc dx
+    mov ax, [bp + STK_CX]
+    out dx, al
+    inc dx
+    mov al, ah
+    out dx, al
+    ret
+
+_int13_set_dma:
+    mov ax, [bp + STK_ES]
+    mov bx, ax
+    mov dx, [bp + STK_BX]
+    mov cl, 4
+    shl ax, cl
+    mov cl, 12
+    shr bx, cl
+    add ax, [bp + STK_BX]
+    adc bx, 0
+    mov dx, VPC_FD_PORT + 2
+    out dx, ax
+    inc dx
+    inc dx
+    mov ax, bx
+    out dx, ax
+    ret
+
+_int13_read:
+    call _int13_set_chr
+    call _int13_set_dma
+
+    mov dx, VPC_FD_PORT
+    mov ax, 1
+    out dx, ax
+    in ax, dx
+    or ax, ax
+    jz .skip
+    mov ah, 0x80
+.skip:
+    mov dx, VPC_FD_PORT + 6
+    in al, dx
+    mov cl, [bp + STK_AX]
+    sub cl, al
+    mov al, cl
+    ret
+
+
+;; Serial Port BIOS
+_int14:
+    iret
+
+
+;; System BIOS
+_int15:
+    iret
+
+
+;; Keyboard BIOS
+_int16:
+    iret
+
+
+;; Printer BIOS
+_int17:
+    iret
+
+;; boot hook
+_int18:
+    db 0xF1
+    jmp 0:0x7C00
+    ; iret
+
+;; Bootstrap
+_int19:
+    db 0xF1
+    iret
+
+;; Clock BIOS
+_int1A:
+    iret
+
+;; Ctrl-break handler
+_int1B:
+    iret
+
+
 
 
 _aux_out:
@@ -183,14 +421,95 @@ _INIT:
     mov cx, 256
     rep stosw
 
-    mov di, 8 * 4
+    mov di, 4 * 6
+    mov ax, _iret
+    stosw
+    mov ax, cs
+    stosw
+    mov ax, _iret
+    stosw
+    mov ax, cs
+    stosw
     mov ax, _irq0
     stosw
     mov ax, cs
     stosw
+    mov cx, 7
+.loop:
+    mov ax, _irq_dummy
+    stosw
+    mov ax, cs
+    stosw
+    loop .loop
 
+    mov ax, _int10
+    stosw
+    mov ax, cs
+    stosw
+    mov ax, _int11
+    stosw
+    mov ax, cs
+    stosw
+    mov ax, _int12
+    stosw
+    mov ax, cs
+    stosw
+    mov ax, _int13
+    stosw
+    mov ax, cs
+    stosw
+    mov ax, _int14
+    stosw
+    mov ax, cs
+    stosw
+    mov ax, _int15
+    stosw
+    mov ax, cs
+    stosw
+    mov ax, _int16
+    stosw
+    mov ax, cs
+    stosw
+    mov ax, _int17
+    stosw
+    mov ax, cs
+    stosw
+    mov ax, _int18
+    stosw
+    mov ax, cs
+    stosw
+    ; mov ax, _int19
+    mov ax, _repl
+    stosw
+    mov ax, cs
+    stosw
+    mov ax, _int1A
+    stosw
+    mov ax, cs
+    stosw
+    mov ax, _int1B
+    stosw
+    mov ax, cs
+    stosw
+    mov ax, _iret
+    stosw
+    mov ax, cs
+    stosw
+
+    ;; BDA
+    mov di, 0x0400
     mov ax, 0x3F8
-    mov [ss:0x0400], ax
+    stosw
+    xor ax, ax
+    mov cx, 7
+    rep stosw
+    mov ax, 0x0200
+    stosw
+    xor al, al
+    stosb
+    mov ax, 640
+    stosw
+
 
     ;; INIT PC/AT PIC
     mov al, 0xFF
@@ -233,6 +552,19 @@ _INIT:
     mov si, banner
     call puts
 
+
+    ;; READ BOOT DISK
+    mov ax, 0x0201
+    mov cx, 0x0001
+    mov dx, 0x0000
+    mov bx, 0x7C00
+    mov es, dx
+    int 0x13
+    jc _repl
+    jmp 0:0x7C00
+
+
+_repl:
 .prompt:
     mov di, ARGV
     mov al, '#'
@@ -314,7 +646,15 @@ cls_msg:
 bad_cmd_msg:
     db "Bad command or file name", 10, 0
 
+    alignb 2
+_boot_sound_data:
+    dw 2000, 200, 1000, 200
+    dw 0xFFFF
+
     times SIZE_BIOS - 16 - ($-$$) db 0
 __RESET:
     jmp SEG_BIOS:_INIT
-    times SIZE_BIOS - ($-$$) db 0
+    db "06/15/19"
+    db 0
+    db 0xFF
+    db 0

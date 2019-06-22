@@ -19,6 +19,9 @@ export class RuntimeEnvironment {
     iomgr: IOManager;
     pic: VPIC;
     worker: WorkerInterface;
+    isDebugging: boolean;
+    isPausing: boolean;
+    isRunning: boolean;
     constructor(iomgr: IOManager, pic: VPIC, worker: WorkerInterface) {
         this.worker = worker;
         this.iomgr = iomgr;
@@ -38,6 +41,8 @@ export class RuntimeEnvironment {
         }
         this.env.vpc_outb = (port: number, data: number) => this.iomgr.outb(port, data);
         this.env.vpc_inb = (port: number) => this.iomgr.inb(port);
+        this.env.vpc_outw = (port: number, data: number) => this.iomgr.outw(port, data);
+        this.env.vpc_inw = (port: number) => this.iomgr.inw(port);
         this.env.vpc_irq = () => pic.checkIRQ();
     }
     public setTimer(period: number): void {
@@ -46,28 +51,33 @@ export class RuntimeEnvironment {
     public setSound(freq: number): void {
         this.worker.postCommand('beep', freq);
     }
-    public emit(to: number, from: Uint8Array): void {
+    public emit(to: number, from: any): void {
         const l = from.length;
         let p = this.vmem + to;
         for (let i = 0; i < l; i++) {
             const v = from[i];
+            if (typeof(v) === 'string') {
+                for (let j = 0; j < v.length; j++) {
+                    this._memory[p] = v.charCodeAt(j);
+                    p++;
+                }
+            } else if (typeof(v) === 'number') {
+                this._memory[p] = v;
+                p++;
+            } else {
+                throw `Unexpected type ${typeof(v)}`;
+            }
+        }
+    }
+    public dmaWrite(at: number, data: ArrayBuffer): void {
+        const a = new Uint8Array(data);
+        const l = data.byteLength;
+        let p = this.vmem + at;
+        for (let i = 0; i < l; i++) {
+            const v = a[i];
             this._memory[p] = v;
             p++;
         }
-        // for (let i = 0; i < l; i++) {
-        //     const v = from[i];
-        //     if (typeof(v) === 'string') {
-        //         for (let j = 0; j < v.length; j++) {
-        //             this._memory[p] = v.charCodeAt(j);
-        //             p++;
-        //         }
-        //     } else if (typeof(v) === 'number') {
-        //         this._memory[p] = v;
-        //         p++;
-        //     } else {
-        //         throw `Unexpected type ${typeof(v)}`;
-        //     }
-        // }
     }
     public strlen(at: number): number {
         let result = 0;
@@ -84,6 +94,7 @@ export class RuntimeEnvironment {
     public run(gen: number): void {
         this.cpu = this.instance.exports.alloc_cpu(gen);
         console.log(`CPU started (${gen})`);
+        this.isRunning = true;
         this.cont();
     }
     public cont(): void {
@@ -95,15 +106,55 @@ export class RuntimeEnvironment {
             }
             this.lastTick = new Date().valueOf();
         }
-        const status = this.instance.exports.run(this.cpu);
-        if (status) {
+        // const time0 = new Date().valueOf();
+        const status: number = this.instance.exports.run(this.cpu);
+        // const time1 = new Date().valueOf();
+        // console.log('time', time1 - time0);
+        if (status > 1) {
+            this.isRunning = false;
             console.log(`CPU halted (${status})`);
+        } else if (this.isDebugging) {
+            this.instance.exports.debug_dump(this.cpu);
+            this.isPausing = true;
         } else {
-            const now = new Date().valueOf();
-            const expected = this.lastTick + this.period;
-            let timer = expected - now;
-            if (timer < 1) timer = 1;
+            let timer: number;
+            if (status > 0) {
+                const now = new Date().valueOf();
+                const expected = this.lastTick + this.period;
+                timer = expected - now;
+                if (timer < 1) timer = 1;
+            } else {
+                timer = 1;
+            }
             setTimeout(() => this.cont(), timer);
+        }
+    }
+    public nmi(): void {
+        if (!this.isRunning || this.isPausing) {
+            this.instance.exports.step(this.cpu);
+            this.instance.exports.debug_dump(this.cpu);
+        } else {
+            this.isDebugging = true;
+        }
+    }
+    public dump(base: number): void {
+        const addrToHex = (n: number) => ('000000' + n.toString(16)).substr(-6);
+        const toHex = (n: number) => ('00' + n.toString(16)).substr(-2);
+        for (let i = 0; i < 16; i++) {
+            const offset = base + i * 16;
+            let line = [addrToHex(offset)];
+            let chars = [];
+            for (let j = 0; j < 16; j++) {
+                const c = this._memory[this.vmem + offset + j];
+                line.push(toHex(c));
+                if (c >= 0x20 && c < 0x7F) {
+                    chars.push(String.fromCharCode(c));
+                } else {
+                    chars.push('.');
+                }
+            }
+            line.push(chars.join(''));
+            this.worker.print(`${line.join(' ')}\n`);
         }
     }
 }

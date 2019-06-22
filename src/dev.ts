@@ -27,13 +27,13 @@ export class VPIC {
         this.ISR = new Uint8Array(2);
         this.ICW = new Uint8Array(8);
 
-        iomgr.on(0x20, (port, data) => this.writeOCR(0, data), (port) => this.readOCR(0));
-        iomgr.on(0x21, (port, data) => this.writeIMR(0, data), (port) => this.readIMR(0));
-        iomgr.on(0xA0, (port, data) => this.writeOCR(1, data), (port) => this.readOCR(1));
-        iomgr.on(0xA1, (port, data) => this.writeIMR(1, data), (port) => this.readIMR(1));
+        iomgr.on(0x20, (_, data) => this.writeOCR(0, data), (_) => this.readOCR(0));
+        iomgr.on(0x21, (_, data) => this.writeIMR(0, data), (_) => this.readIMR(0));
+        iomgr.on(0xA0, (_, data) => this.writeOCR(1, data), (_) => this.readOCR(1));
+        iomgr.on(0xA1, (_, data) => this.writeIMR(1, data), (_) => this.readIMR(1));
     }
 
-    private writeOCR(port: number, data: number) {
+    private writeOCR(port: number, data: number): void {
         if (data & 0x10) { // ICW1
             this.phase[port] = 1;
             this.ICW[port * 4] = data;
@@ -54,7 +54,7 @@ export class VPIC {
         // TODO:
         return 0;
     }
-    private writeIMR(port: number, data: number) {
+    private writeIMR(port: number, data: number): void {
         const phase = this.phase[port] || 0;
         if (phase > 0 && phase < 4) { // ICW2-4
             this.ICW[port * 4 + phase] = data;
@@ -70,7 +70,7 @@ export class VPIC {
     private readIMR(port: number): number {
         return this.IMR[port];
     }
-    public setNextIRQ(port: number) {
+    private setNextIRQ(port: number): void {
         if (this.irq.length) return;
         for (let i = 0; i < 8; i++) {
             const mask = (1 << i);
@@ -83,7 +83,7 @@ export class VPIC {
             }
         }
     }
-    public raiseIRQ(n: number) {
+    public raiseIRQ(n: number): void {
         if (n < 8) {
             this.IRR[0] |= (1 << n);
             this.setNextIRQ(0);
@@ -115,10 +115,10 @@ export class VPIT {
         this.cntValues = new Uint8Array(6);
         this.p0061_data = 0;
     
-        iomgr.on(0x40, (port, data) => this.outCntReg(0, data));
-        iomgr.on(0x41, (port, data) => this.outCntReg(1, data));
-        iomgr.on(0x42, (port, data) => this.outCntReg(2, data));
-        iomgr.on(0x43, (port, data) => {
+        iomgr.on(0x40, (_, data) => this.outCntReg(0, data));
+        iomgr.on(0x41, (_, data) => this.outCntReg(1, data));
+        iomgr.on(0x42, (_, data) => this.outCntReg(2, data));
+        iomgr.on(0x43, (_, data) => {
             const counter = (data >> 6) & 3;
             const format = (data >> 4) & 3;
             // const mode = (data >> 1) & 7;
@@ -139,7 +139,7 @@ export class VPIT {
             }
             return false;
         });
-        iomgr.on(0x61, (port, data) => {
+        iomgr.on(0x61, (_, data) => {
             const old_data = this.p0061_data;
             this.p0061_data = data;
             const chg_value = old_data ^ data;
@@ -151,9 +151,9 @@ export class VPIT {
                 }
             }
             return false;
-        }, (port) => this.p0061_data);
+        }, (_) => this.p0061_data);
     }
-    private outCntReg(counter: number, data: number) {
+    private outCntReg(counter: number, data: number): void {
         if (this.cntPhases[counter] != 1) {
             this.cntValues[counter * 2] = data;
             this.cntPhases[counter] = 1;
@@ -171,13 +171,12 @@ export class VPIT {
                     break;
             }
         }
-        return false;
     }
-    public noteOn() {
+    public noteOn(): void {
         const freq = 1193181 / this.getCounter(2);
         this.timer.setSound(freq);
     }
-    public noteOff() {
+    public noteOff(): void {
         this.timer.setSound(0);
     }
     public getCounter(counter: number): number {
@@ -185,10 +184,10 @@ export class VPIT {
         if (!count_value) count_value = 0x10000;
         return count_value;
     }
-    public clearTimer() {
+    public clearTimer(): void {
         this.timer.setTimer(0);
     }
-    public setTimer() {
+    public setTimer(): void {
         const period = Math.ceil(this.getCounter(0) / 1193.181);
         this.timer.setTimer(period);
     }
@@ -204,9 +203,9 @@ export class UART {
     constructor (iomgr: IOManager, base: number, pic: VPIC, worker: WorkerInterface) {
         this.pic = pic;
         this.fifo_i = [];
-        iomgr.on(base, (port, data) => {
+        iomgr.on(base, (_, data) => {
             worker.print(String.fromCharCode(data));
-        }, (port) => {
+        }, (_) => {
             if (this.fifo_i.length > 0) {
                 return this.fifo_i.shift();
             } else {
@@ -214,7 +213,7 @@ export class UART {
             }
         });
     }
-    public onRX(data: number) {
+    public onRX(data: number): void {
         this.fifo_i.push(data & 0xFF);
     }
 }
