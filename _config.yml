@@ -42,6 +42,7 @@ exclude:
   - Makefile
   - src/
   - var/
+  - tmp/
   - node_modules/
   - package.json
   - package-lock.json

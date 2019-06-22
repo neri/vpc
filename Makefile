@@ -1,11 +1,11 @@
 .PHONY: all clean run test
 
-TARGETS := lib/vcpu.wasm lib/bios.bin lib/xterm.js lib/xterm.js.map lib/xterm.css
+TARGETS := lib/vcpu.wasm lib/bios.bin lib/worker.js lib/xterm.js lib/xterm.js.map lib/xterm.css
 
 all: $(TARGETS)
 
 clean:
-	-rm -f $(TARGETS)
+	-rm -f $(TARGETS) tmp/*
 
 run: all
 
@@ -16,6 +16,12 @@ lib/vcpu.wasm: src/vcpu.c
 
 lib/bios.bin: src/bios.asm
 	nasm -f bin $? -o $@
+
+tmp/worker.js: src/worker.ts src/iomgr.ts src/env.ts src/dev.ts
+	npx tsc $< -t es6 --outDir tmp
+
+lib/worker.js: tmp/worker.js
+	npx webpack $? -o $@
 
 lib/xterm.js: node_modules/xterm/dist/xterm.js
 	cp $? $@

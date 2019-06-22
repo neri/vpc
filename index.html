@@ -1,20 +1,28 @@
 <!DOCTYPE html>
 <html>
 <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=720">
     <title>Virtual Playground</title>
     <script src="lib/xterm.js"></script>
     <link rel="stylesheet" href="lib/xterm.css">
     <style>
+        html, body {
+            padding: 0;
+            margin: 0;
+            font-family: sans-serif;
+        }
         #screen_container {
             display: none;
             cursor: text;
+            max-width: 720px;
             min-width: 640px;
             min-height: 400px;
         }
         
         #click_to_start {
-            background: lightgray;
-            color: darkgray;
+            background: #EEE;
+            color: #777;
             width: 720px;
             line-height: 400px;
             text-align: center;
@@ -51,7 +59,7 @@
             });
             term.focus();
             
-            const worker = new Worker('worker.js');
+            const worker = new Worker('lib/worker.js');
             window.worker = worker;
             
             worker.onmessage = message => {
@@ -156,6 +164,10 @@
         window.addEventListener('DOMContentLoaded', () => {
             window.beep = new i8254Sound();
             document.querySelector('#click_to_start').addEventListener('click', e => {
+                if (!window.WebAssembly) {
+                    alert("We are sorry, but WebAssembly is not supported.");
+                    return;
+                }
                 startEmu();
             });
         });
@@ -163,11 +175,8 @@
 </script>
 </head>
 <body>
-    
-    <h1>Virtual Playground (alpha)</h1>
-    
     <div id="emulatorFrame">
-        <div id="click_to_start"><p>Click to Start</p></div>
+        <div id="click_to_start"><p>CLICK TO START</p></div>
         <div id="screen_container">
             <div id="terminal"></div>
         </div>
@@ -182,7 +191,7 @@
     <address>
         POWERED by 
         <a href="https://github.com/neri/vpc">Virtual Playground</a>
-        / <a href="https://github.com/xtermjs/xterm.js/">xterm.js</a>
+        <!-- / <a href="https://github.com/xtermjs/xterm.js/">xterm.js</a> -->
     </address>
 </body>
 </html>
