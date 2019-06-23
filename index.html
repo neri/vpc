@@ -36,9 +36,10 @@
         }
 
         #controlPanel {
-            width: 720px;
+            width: 704px;
             margin: 0;
             padding: 0 8px;
+            background: #E0E0E0;
         }
         
         address {
@@ -46,7 +47,16 @@
             text-align: right;
             font-size: smaller;
             font-style: normal;
-            color: darkgray;
+            color: #999;
+        }
+
+        address a {
+            color: inherit;
+            text-decoration: none;
+            font-weight: bold;
+        }
+        address a:hover {
+            text-decoration: underline;
         }
     </style>
     <script>
@@ -66,10 +76,10 @@
             });
             term.focus();
             
-        //     setTimeout(startSecond, 100);
-        // }
+            setTimeout(startSecond, 100);
+        }
 
-        // const startSecond = () => {
+        const startSecond = () => {
 
             const worker = new Worker('lib/worker.js');
             window.worker = worker;
@@ -224,8 +234,11 @@
         <label>
             &#x1f4be;<select id="selDiskImage">
                 <option value="../bin/osz.img" selected>osz</option>
-                <!-- <option value="../elks.img">elks</option>
-                <option value="../fdos.img" >freedos</option> -->
+                <!-- <option value="../var/PCDOS090.img">PCDOS 0.9</option>
+                <option value="../var/PCDOS100.img">PCDOS 1.0</option>
+                <option value="../var/PCDOS200.img">PCDOS 2.0</option>
+                <option value="../var/elks.img">elks</option>
+                <option value="../var/fdos.img" >freedos</option> -->
             </select>
             <input id="buttonUpload" type="button" value="Attach" disabled>
             <input id="fileUpload" type="file" style="width:0px; height:0px;">

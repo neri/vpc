@@ -179,11 +179,20 @@ _int13:
     cmp dl, 0
     jnz .err
 
+    cmp ah, 0
+    jnz .no_00
+    jmp .end
+.no_00:
     cmp ah, 0x02
     jnz .no_02
     call _int13_read
     jmp .end
 .no_02:
+    cmp ah, 0x03
+    jnz .no_03
+    call _int13_write
+    jmp .end
+.no_03:
 
 .err:
     mov ax, 0x8000
@@ -242,6 +251,11 @@ _int13_set_dma:
     ret
 
 _int13_read:
+    mov si, 1
+    jmp _int13_io
+_int13_write:
+    mov si, 2
+_int13_io:
     mov dx, VPC_FD_PORT
     xor ax, ax
     out dx, ax
@@ -256,7 +270,7 @@ _int13_read:
     call _int13_set_dma
 
     mov dx, VPC_FD_PORT
-    mov ax, 1
+    mov ax, si
     out dx, ax
     ; sti
     ; hlt
@@ -297,13 +311,14 @@ i1600:
     push ds
     xor ax, ax
     mov ds, ax
+.loop:
+    xor ax, ax
     xchg ax, [ds:0x041E]
     or ax, ax
     jnz .end
-.loop:
-    xor ah, ah
+    mov ah, 1
     int 0x16
-    jnz .end
+    jnz .loop
     sti
     hlt
     jmp .loop
@@ -316,16 +331,19 @@ i1601:
     push dx
     xor ax, ax
     mov ds, ax
+    mov ax, [ds:0x041E]
+    or ax, ax
+    jnz .end
     mov dx, [ds:0x0400]
     add dl, 5
     in al, dx
     and al, 1
-    jz .nodata
+    jz .end
     sub dl, 5
     in al, dx
     and ax, 0x00FF
     mov [ds:0x41E], ax
-.nodata:
+.end:
     pop dx
     pop ds
     retf 2
@@ -339,13 +357,15 @@ _int17:
 ;; boot hook
 _int18:
     db 0xF1
-    jmp 0:0x7C00
+    jmp _repl
+    ; jmp 0:0x7C00
     ; iret
 
 ;; Bootstrap
 _int19:
     db 0xF1
-    iret
+    jmp _repl
+    ; iret
 
 
 ;; Clock BIOS
@@ -563,7 +583,15 @@ _INIT:
 
 
 _repl:
+    cli
+    xor ax, ax
+    mov es, ax
+    mov ss, ax
+    mov sp, 0x0400
+    push cs
+    pop ds
 .prompt:
+    sti
     mov di, ARGV
     mov al, '#'
     call _aux_out

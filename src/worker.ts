@@ -52,32 +52,32 @@ const floppy = new VFD(env);
 
     wi.postCommand('loaded', null);
 })();
-// .catch(reason => {
-//     console.error(reason);
-//     wi.print(reason.toString())
-// });
+
+const loadImage = async (imageName: string) => {
+    console.log(`Loading image (${imageName})...`);
+    return fetch(imageName)
+        .then(res => {
+            if (!res.ok) { throw Error(res.statusText); }
+            return res.blob()
+        })
+        .then(blob => {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                    resolve(reader.result);
+                };
+                reader.readAsArrayBuffer(blob);
+            });
+        })
+        .then((buffer: ArrayBuffer) => {
+            floppy.attachImage(buffer);
+        })
+        .catch(reason => console.error(reason));
+}
 
 const start = async (imageName: string) => {
     if (imageName) {
-        console.log(`Loading image (${imageName})...`);
-        await fetch(imageName)
-            .then(res => {
-                if (!res.ok) { throw Error(res.statusText); }
-                return res.blob()
-            })
-            .then(blob => {
-                return new Promise((resolve, reject) => {
-                    const reader = new FileReader();
-                    reader.onloadend = () => {
-                        resolve(reader.result);
-                    };
-                    reader.readAsArrayBuffer(blob);
-                });
-            })
-            .then((buffer: ArrayBuffer) => {
-                floppy.attachImage(buffer);
-            })
-            .catch(reason => console.error(reason));
+        await loadImage(imageName);
     }
 
     env.run(1);

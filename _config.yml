@@ -41,7 +41,6 @@ exclude:
   - vendor/ruby/
   - Makefile
   - src/
-  - var/
   - tmp/
   - node_modules/
   - package.json

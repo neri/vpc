@@ -2,6 +2,8 @@
 
 A PC Emulator implemented by WebAssembly.
 
+- [preview](https://nerry.jp/vpc/)
+
 ## THIS VERSION
 
 - THIS IS JUNK
@@ -9,14 +11,22 @@ A PC Emulator implemented by WebAssembly.
 ## Implemented hardware
 
 - CPU: 80186?
-  - Don't implement: AAA AAS AAM AAD DAS DAA SETALC and minor instructions
+  - Some features are missing
 - Memory: 640KB ought to be enough for anybody.
 - I/O:
   - i8259 PIC
   - i8254 Timer & Sound
-  - UART (port 3F8 only)
+  - UART
   - RTC
   - FDC (non standard interface)
+
+## Supported OS
+
+|OS|Status|
+|-|-|
+|osz|It seems ok|
+|FreeDOS|failed|
+|elks|failed|
 
 ## License
 

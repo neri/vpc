@@ -39,6 +39,7 @@ enum {
 typedef enum cpu_status_t {
     cpu_status_normal = 0,
     cpu_status_halt,
+    cpu_status_pause,
     cpu_status_int,
     cpu_status_icebp,
     cpu_status_exit = 10000,
@@ -950,7 +951,15 @@ static int cpu_step(cpu_state *cpu) {
                 seg = &cpu->ES;
                 break;
 
-            // case 0x27: // DAA
+            case 0x27: // DAA
+            {
+                int value = (cpu->AF = (cpu->AL & 15) > 9 || cpu->AF) ? 6 : 0;
+                if ((cpu->CF = cpu->AL > 0x99 || cpu->CF)){
+                    value += 0x60;
+                }
+                cpu->AL = SETF8(cpu, cpu->AL + value);
+                return 0;
+            }
 
             case 0x28: // SUB r/g, reg8
             case 0x29:
@@ -966,16 +975,16 @@ static int cpu_step(cpu_state *cpu) {
                 seg = &cpu->CS;
                 break;
 
-            // case 0x2F: // DAS
-            // {
-            //     int value;
-            //     value = (cpu->AF = (cpu->AL & 15) > 9 || cpu->AF) ? 6 : 0;
-            //     if ((cpu->CF = cpu->AL > 0x99 || cpu->CF)){
-            //         value += 0x60;
-            //     }
-            //     cpu->AL = SETF8(cpu, cpu->AL - value);
-            //     return 0;
-            // }
+            case 0x2F: // DAS
+            {
+                int value;
+                value = (cpu->AF = (cpu->AL & 15) > 9 || cpu->AF) ? 6 : 0;
+                if ((cpu->CF = cpu->AL > 0x99 || cpu->CF)){
+                    value += 0x60;
+                }
+                cpu->AL = SETF8(cpu, cpu->AL - value);
+                return 0;
+            }
 
             case 0x30: // XOR r/g, reg8
             case 0x31:
@@ -991,7 +1000,15 @@ static int cpu_step(cpu_state *cpu) {
                 seg = &cpu->SS;
                 break;
 
-            // case 0x37: // AAA
+            case 0x37: // AAA
+            {
+                if ((cpu->AF = cpu->CF = (cpu->AL & 15) > 9 || cpu->AF)) {
+                    cpu->AL += 6;
+                    cpu->AH++;
+                }
+                cpu->AL &= 15;
+                return 0;
+            }
 
             case 0x38: // CMP r/m, reg8
             case 0x39:
@@ -1007,7 +1024,15 @@ static int cpu_step(cpu_state *cpu) {
                 seg = &cpu->DS;
                 break;
 
-            // case 0x3F: // AAS
+            case 0x3F: // AAS
+            {
+                if ((cpu->AF = cpu->CF = (cpu->AL & 15) > 9 || cpu->AF)) {
+                    cpu->AL -= 6;
+                    cpu->AH--;
+                }
+                cpu->AL &= 15;
+                return 0;
+            }
 
             case 0x40: // INC AX
             case 0x41: case 0x42: case 0x43: case 0x44: case 0x45: case 0x46: case 0x47:
@@ -1082,8 +1107,7 @@ static int cpu_step(cpu_state *cpu) {
             case 0x6C: // INSB
             {
                 sreg_t *_seg = SEGMENT(&cpu->ES);
-                if (prefix & PREFIX_REPNZ) return cpu_status_ud;
-                int rep = prefix & PREFIX_REPZ;
+                int rep = prefix & (PREFIX_REPZ | PREFIX_REPNZ);
                 if (rep && cpu->CX == 0) return 0;
                 do {
                     WRITE_MEM8(_seg, cpu->DI, INPORT8(cpu, cpu->DX));
@@ -1099,8 +1123,7 @@ static int cpu_step(cpu_state *cpu) {
             case 0x6D: // INSW
             {
                 sreg_t *_seg = SEGMENT(&cpu->ES);
-                if (prefix & PREFIX_REPNZ) return cpu_status_ud;
-                int rep = prefix & PREFIX_REPZ;
+                int rep = prefix & (PREFIX_REPZ | PREFIX_REPNZ);
                 if (rep && cpu->CX == 0) return 0;
                 do {
                     WRITE_MEM16(_seg, cpu->DI, INPORT16(cpu, cpu->DX));
@@ -1133,8 +1156,7 @@ static int cpu_step(cpu_state *cpu) {
             case 0x6F: // OUTSW
             {
                 sreg_t *_seg = SEGMENT(&cpu->DS);
-                if (prefix & PREFIX_REPNZ) return cpu_status_ud;
-                int rep = prefix & PREFIX_REPZ;
+                int rep = prefix & (PREFIX_REPZ | PREFIX_REPNZ);
                 if (rep && cpu->CX == 0) return 0;
                 do {
                     OUT16(cpu, cpu->DX, READ_MEM16(_seg, cpu->SI));
@@ -1213,7 +1235,7 @@ static int cpu_step(cpu_state *cpu) {
 
             case 0x80: // alu r/m, imm8
             case 0x81: // alu r/m, imm16
-            // case 0x82: // undocumented
+            case 0x82: // alu r/m, imm8 (mirror)
             case 0x83: // alu r/m, imm8 (sign extended)
             {
                 MODRM_W(cpu, seg, inst & 1, &set);
@@ -1320,7 +1342,11 @@ static int cpu_step(cpu_state *cpu) {
                 }
 
             case 0x90: // NOP
-                return 0;
+                if (prefix & (PREFIX_REPZ | PREFIX_REPNZ)) {
+                    return cpu_status_pause;
+                } else {
+                    return 0;
+                }
 
             case 0x91: // XCHG AX, reg16
             case 0x92: case 0x93: case 0x94: case 0x95: case 0x96: case 0x97:
@@ -1387,8 +1413,7 @@ static int cpu_step(cpu_state *cpu) {
             case 0xA4: // MOVSB
             {
                 sreg_t *_seg = SEGMENT(&cpu->DS);
-                if (prefix & PREFIX_REPNZ) return cpu_status_ud;
-                int rep = prefix & PREFIX_REPZ;
+                int rep = prefix & (PREFIX_REPZ | PREFIX_REPNZ);
                 size_t count = cpu->CX;
                 if (rep && count == 0) return 0;
                 // if (rep && cpu->DF == 0
@@ -1419,8 +1444,7 @@ static int cpu_step(cpu_state *cpu) {
             case 0xA5: // MOVSW
             {
                 sreg_t *_seg = SEGMENT(&cpu->DS);
-                if (prefix & PREFIX_REPNZ) return cpu_status_ud;
-                int rep = prefix & PREFIX_REPZ;
+                int rep = prefix & (PREFIX_REPZ | PREFIX_REPNZ);
                 size_t count = cpu->CX * 2;
                 if (rep && count == 0) return 0;
                 // if (rep && cpu->DF == 0
@@ -1513,8 +1537,7 @@ static int cpu_step(cpu_state *cpu) {
             case 0xAA: // STOSB
             {
                 sreg_t *_seg = SEGMENT(&cpu->ES);
-                if (prefix & PREFIX_REPNZ) return cpu_status_ud;
-                int rep = prefix & PREFIX_REPZ;
+                int rep = prefix & (PREFIX_REPZ | PREFIX_REPNZ);
                 size_t count = cpu->CX;
                 if (rep && count == 0) return 0;
                 // if (rep && cpu->DF == 0 && ((cpu->DI + count) <= 0x10000)) {
@@ -1538,8 +1561,7 @@ static int cpu_step(cpu_state *cpu) {
             case 0xAB: // STOSW
             {
                 sreg_t *_seg = SEGMENT(&cpu->ES);
-                if (prefix & PREFIX_REPNZ) return cpu_status_ud;
-                int rep = prefix & PREFIX_REPZ;
+                int rep = prefix & (PREFIX_REPZ | PREFIX_REPNZ);
                 if (rep && cpu->CX == 0) return 0;
                 do {
                     WRITE_MEM16(_seg, cpu->DI, cpu->AX);
@@ -1555,6 +1577,7 @@ static int cpu_step(cpu_state *cpu) {
             case 0xAC: // LODSB
             {
                 sreg_t *_seg = SEGMENT(&cpu->DS);
+                if (prefix & (PREFIX_REPZ | PREFIX_REPNZ)) return cpu_status_ud;
                 cpu->AL = READ_MEM8(_seg, cpu->SI);
                 if (cpu->DF) {
                     cpu->SI--;
@@ -1566,6 +1589,7 @@ static int cpu_step(cpu_state *cpu) {
 
             case 0xAD: // LODSW
             {
+                if (prefix & (PREFIX_REPZ | PREFIX_REPNZ)) return cpu_status_ud;
                 sreg_t *_seg = SEGMENT(&cpu->DS);
                 cpu->AX = READ_MEM16(_seg, cpu->SI);
                 if (cpu->DF) {
@@ -1743,16 +1767,23 @@ static int cpu_step(cpu_state *cpu) {
                 MODRM_W(cpu, seg, inst & 1, &set);
                 return SHIFT(cpu, &set, cpu->CL);
 
-            // case 0xD4: // AAM
-            // {
-            //     int param = FETCH8(cpu);
-            //     int al = cpu->AL;
-            //     cpu->AH = al / param;
-            //     cpu->AL = SETF8(cpu, al % param);
-            //     return 0;
-            // }
+            case 0xD4: // AAM
+            {
+                int param = FETCH8(cpu);
+                int al = cpu->AL;
+                cpu->AH = al / param;
+                cpu->AL = SETF8(cpu, al % param);
+                return 0;
+            }
 
-            // case 0xD5: // AAD
+            case 0xD5: // AAD
+            {
+                int param = FETCH8(cpu);
+                uint8_t ax = cpu->AL + cpu->AH * param;
+                cpu->EAX = ax;
+                return 0;
+            }
+
             // case 0xD6: // SETALC
 
             case 0xD7: // XLAT
@@ -2264,6 +2295,8 @@ static int cpu_block(cpu_state *cpu) {
         switch (status) {
             case cpu_status_normal:
                 break;
+            case cpu_status_pause:
+                return cpu_status_normal;
             case cpu_status_int:
                 check_irq(cpu);
                 break;

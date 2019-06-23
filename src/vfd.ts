@@ -44,7 +44,10 @@ export class VFD {
                     this.status = this.maxLBA;
                     break;
                 case 1:
-                    this.readSectors();
+                    this.status = this.readSectors();
+                    break;
+                case 2:
+                    this.status = this.writeSectors();
                     break;
             }
         }, (_) => {
@@ -57,13 +60,12 @@ export class VFD {
         env.iomgr.on(base + 8, (_, data) => this.SEC = data, (_) => this.SEC);
         env.iomgr.on(base + 9, (_, data) => this.CYL = data, (_) => this.CYL);
     }
-    private readSectors(): void {
+    private readSectors(): number {
         if (!this.image || this.SEC < 1 || this.SEC > (this.n_sectors + 1)
             || this.HEAD > this.n_heads || this.CYL > this.n_cylinders
         ) {
             console.log(`vfd_read: BAD SECTOR [C:${this.CYL} H:${this.HEAD} R:${this.SEC}]`);
-            this.status = -1;
-            return;
+            return 1;
         }
         let lba = (this.SEC - 1) + (this.HEAD + (this.CYL * this.n_heads)) * this.n_sectors;
         let ptr = this.PTR[0] + (this.PTR[1] << 16);
@@ -71,8 +73,7 @@ export class VFD {
         let counter = this.CNT;
         for (; counter > 0; counter--, lba++) {
             if (lba >= this.maxLBA) {
-                this.status = -1;
-                return;
+                return 1;
             }
             const sector = new Uint8Array(this.image.buffer, lba * this.bytesPerSector, this.bytesPerSector);
             this.env.dmaWrite(ptr, sector);
@@ -82,7 +83,35 @@ export class VFD {
             this.CNT = counter;
         }
         this.CNT = counter;
-        this.status = 0;
+        return 0;
+    }
+    private writeSectors(): number {
+        if (!this.image || this.SEC < 1 || this.SEC > (this.n_sectors + 1)
+            || this.HEAD > this.n_heads || this.CYL > this.n_cylinders
+        ) {
+            console.log(`vfd_write: BAD SECTOR [C:${this.CYL} H:${this.HEAD} R:${this.SEC}]`);
+            return 1;
+        }
+        let lba = (this.SEC - 1) + (this.HEAD + (this.CYL * this.n_heads)) * this.n_sectors;
+        let ptr = this.PTR[0] + (this.PTR[1] << 16);
+        console.log(`vfd_write [C:${this.CYL} H:${this.HEAD} R:${this.SEC}] LBA:${lba} MEM:${ptr.toString(16)} CNT:${this.CNT}`);
+        let counter = this.CNT;
+        for (; counter > 0; counter--, lba++) {
+            if (lba >= this.maxLBA) {
+                return 1;
+            }
+            const buffer = this.env.dmaRead(ptr, this.bytesPerSector);
+            const offset = lba * this.bytesPerSector;
+            for (let i = 0; i < this.bytesPerSector; i++) {
+                this.image[offset + i] = buffer[i];
+            }
+            ptr += this.bytesPerSector;
+            this.PTR[0] = ptr;
+            this.PTR[1] = ptr;
+            this.CNT = counter;
+        }
+        this.CNT = counter;
+        return 0;
     }
     public attachImage(blob: ArrayBuffer): void {
         const kb = blob.byteLength / 1024;
@@ -92,6 +121,10 @@ export class VFD {
             case 160:
                 n_heads = 1;
                 n_sectors = 8;
+                break;
+            case 180:
+                n_heads = 1;
+                n_sectors = 9;
                 break;
             case 320:
                 n_sectors = 8;

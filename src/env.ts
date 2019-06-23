@@ -82,15 +82,18 @@ export class RuntimeEnvironment {
             }
         }
     }
-    public dmaWrite(at: number, data: ArrayBuffer): void {
+    public dmaWrite(ptr: number, data: ArrayBuffer): void {
         const a = new Uint8Array(data);
         const l = data.byteLength;
-        let p = this.vmem + at;
-        for (let i = 0; i < l; i++) {
+        let p = this.vmem + ptr;
+        for (let i = 0; i < l; i++, p++) {
             const v = a[i];
             this._memory[p] = v;
-            p++;
         }
+    }
+    public dmaRead(ptr: number, size: number): Uint8Array {
+        const offset = this.vmem + ptr;
+        return this._memory.slice(offset, offset + size);
     }
     public strlen(at: number): number {
         let result = 0;
