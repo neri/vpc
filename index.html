@@ -62,24 +62,29 @@
             term.open(document.querySelector('#terminal'));
             window.term = term;
             term.onKey((e) => {
-                worker.postMessage({command: 'key', data: e.key.charCodeAt(0) });
+                window.worker.postMessage({command: 'key', data: e.key.charCodeAt(0) });
             });
             term.focus();
             
+        //     setTimeout(startSecond, 100);
+        // }
+
+        // const startSecond = () => {
+
             const worker = new Worker('lib/worker.js');
             window.worker = worker;
             
             worker.onmessage = message => {
                 switch (message.data.command) {
                     case 'loaded':
-                        worker.postMessage(
+                        window.worker.postMessage(
                             { command: 'start',
-                            imageName: '',
+                            imageName: document.querySelector('#selDiskImage').value,
                             ioRedirectMap: iomgr.ioRedirectMap }
                             );
                         break;
                     case 'write':
-                        term.write(message.data.data);
+                        window.term.write(message.data.data);
                         break;
                     case 'outb':
                         window.iomgr.outb(message.data.data.port, message.data.data.data);
@@ -197,6 +202,9 @@
                     worker.postMessage({command: 'dump', address: address})
                 }
             })
+            document.querySelector('#buttonUpload').addEventListener('click', e => {
+                document.querySelector('#fileUpload').click();
+            });
         });
         
 </script>
@@ -211,12 +219,20 @@
     
     <div id="controlPanel">
         <label id="volumeControl" style="display: none;">
-            🔇
-            <input id="inputVolume" type="range" min="0" max="10" step="1" value="5">
-            🔈
+            &#x1F64A;<input id="inputVolume" type="range" min="0" max="10" step="1" value="5">&#x1F50A;
         </label>
-        <input id="buttonNMI" type="button" value="NMI (Debug)">
-        <input id="inputAddress" value="" placeholder="00000000" size="12">
+        <label>
+            &#x1f4be;<select id="selDiskImage">
+                <option value="../bin/osz.img" selected>osz</option>
+                <!-- <option value="../elks.img">elks</option>
+                <option value="../fdos.img" >freedos</option> -->
+            </select>
+            <input id="buttonUpload" type="button" value="Attach" disabled>
+            <input id="fileUpload" type="file" style="width:0px; height:0px;">
+        </label>
+        &#x1F41B;
+        <input id="buttonNMI" type="button" value="Debug">
+        <input id="inputAddress" value="" placeholder="0000:0000" size="12">
         <input id="buttonDump" type="button" value="Dump">
     </div>
 

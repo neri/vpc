@@ -18,10 +18,10 @@ lib/bios.bin: src/bios.asm
 	nasm -f bin $? -o $@
 
 tmp/worker.js: src/worker.ts src/iomgr.ts src/env.ts src/dev.ts src/vfd.ts
-	npx tsc $< -t es6 --outDir tmp
+	npx tsc $< -t es2017 --outDir tmp
 
 lib/worker.js: tmp/worker.js
-	npx webpack $? -o $@
+	npx webpack $? -o $@ --mode production
 
 lib/xterm.js: node_modules/xterm/dist/xterm.js
 	cp $? $@

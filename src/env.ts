@@ -1,7 +1,7 @@
 // Runtime Environment for Virtual Playground
 
 import { IOManager } from './iomgr';
-import { VPIC } from './dev';
+import { VPIC, VPIT, UART, RTC } from './dev';
 
 export interface WorkerInterface {
     print(s: string): void;
@@ -9,23 +9,26 @@ export interface WorkerInterface {
 }
 
 export class RuntimeEnvironment {
-    period: number;
-    lastTick: number;
-    env: any;
-    _memory: Uint8Array;
-    instance: WebAssembly.Instance;
-    vmem: number;
-    cpu: number;
-    iomgr: IOManager;
-    pic: VPIC;
-    worker: WorkerInterface;
+    public worker: WorkerInterface;
+    public iomgr: IOManager;
+    public pic: VPIC;
+    public pit: VPIT;
+    public uart: UART;
+    public rtc: RTC;
+
+    private period: number;
+    private lastTick: number;
+    private env: any;
+    private _memory: Uint8Array;
+    private instance: WebAssembly.Instance;
+    private vmem: number;
+    private cpu: number;
     isDebugging: boolean;
     isPausing: boolean;
     isRunning: boolean;
-    constructor(iomgr: IOManager, pic: VPIC, worker: WorkerInterface) {
+
+    constructor(worker: WorkerInterface) {
         this.worker = worker;
-        this.iomgr = iomgr;
-        this.pic = pic;
         this.period = 0;
         this.lastTick = new Date().valueOf();
         this.env = {
@@ -43,7 +46,17 @@ export class RuntimeEnvironment {
         this.env.vpc_inb = (port: number) => this.iomgr.inb(port);
         this.env.vpc_outw = (port: number, data: number) => this.iomgr.outw(port, data);
         this.env.vpc_inw = (port: number) => this.iomgr.inw(port);
-        this.env.vpc_irq = () => pic.checkIRQ();
+        this.env.vpc_irq = () => this.pic.checkIRQ();
+
+        this.iomgr = new IOManager(worker);
+        this.pic = new VPIC(this.iomgr);
+        this.pit = new VPIT(this);
+        this.rtc = new RTC(this);
+        this.uart = new UART(this, 0x3F8);
+    }
+    public loadCPU(wasm: WebAssembly.Instance): void {
+        this.instance = wasm;
+        this.vmem = wasm.exports._init();
     }
     public setTimer(period: number): void {
         this.period = period;
@@ -140,6 +153,7 @@ export class RuntimeEnvironment {
     public dump(base: number): void {
         const addrToHex = (n: number) => ('000000' + n.toString(16)).substr(-6);
         const toHex = (n: number) => ('00' + n.toString(16)).substr(-2);
+        let lines = [];
         for (let i = 0; i < 16; i++) {
             const offset = base + i * 16;
             let line = [addrToHex(offset)];
@@ -154,7 +168,8 @@ export class RuntimeEnvironment {
                 }
             }
             line.push(chars.join(''));
-            this.worker.print(`${line.join(' ')}\n`);
+            lines.push(line.join(' '));
         }
+        console.log(lines.join('\n'));
     }
 }

@@ -1,8 +1,7 @@
 // Virtual Floppy
 
 import { RuntimeEnvironment } from './env';
-import { IOManager } from './iomgr';
-import { VPIC } from './dev';
+// import { IOManager } from './iomgr';
 
 /**
  * Virtual Floppy
@@ -19,29 +18,30 @@ import { VPIC } from './dev';
  * base + 9 BYTE cylinder
  */
 export class VFD {
-    image: Uint8Array;
-    env: RuntimeEnvironment;
-    status: number;
-    CNT: number;
-    CYL: number;
-    SEC: number;
-    HEAD: number;
-    PTR: Uint16Array;
-    bytesPerSector: number;
-    headsPerCylinder: number;
-    sectorsPerTrack: number;
-    maxCylinder: number;
-    maxLBA: number;
-    constructor (iomgr: IOManager, env: RuntimeEnvironment) {
+    private image: Uint8Array;
+    private env: RuntimeEnvironment;
+    private status: number;
+    private CNT: number;
+    private CYL: number;
+    private SEC: number;
+    private HEAD: number;
+    private PTR: Uint16Array;
+    private bytesPerSector: number;
+    private n_heads: number;
+    private n_sectors: number;
+    private n_cylinders: number;
+    private maxLBA: number;
+
+    constructor (env: RuntimeEnvironment) {
         const base = 0xFD00;
         this.env = env;
         this.bytesPerSector = 512;
-        this.headsPerCylinder = 2;
+        this.n_heads = 2;
         this.PTR = new Uint16Array(2);
-        iomgr.onw(base, (_, data) => {
+        env.iomgr.onw(base, (_, data) => {
             switch (data) {
                 case 0:
-                    this.status = this.image.byteLength / this.bytesPerSector;
+                    this.status = this.maxLBA;
                     break;
                 case 1:
                     this.readSectors();
@@ -50,22 +50,22 @@ export class VFD {
         }, (_) => {
             return this.status;
         });
-        iomgr.onw(base + 2, (_, data) => this.PTR[0] = data, (_) => this.PTR[0]);
-        iomgr.onw(base + 4, (_, data) => this.PTR[1] = data, (_) => this.PTR[1]);
-        iomgr.on(base + 6, (_, data) => this.CNT = data, (_) => this.CNT);
-        iomgr.on(base + 7, (_, data) => this.HEAD = data, (_) => this.HEAD);
-        iomgr.on(base + 8, (_, data) => this.SEC = data, (_) => this.SEC);
-        iomgr.on(base + 9, (_, data) => this.CYL = data, (_) => this.CYL);
+        env.iomgr.onw(base + 2, (_, data) => this.PTR[0] = data, (_) => this.PTR[0]);
+        env.iomgr.onw(base + 4, (_, data) => this.PTR[1] = data, (_) => this.PTR[1]);
+        env.iomgr.on(base + 6, (_, data) => this.CNT = data, (_) => this.CNT);
+        env.iomgr.on(base + 7, (_, data) => this.HEAD = data, (_) => this.HEAD);
+        env.iomgr.on(base + 8, (_, data) => this.SEC = data, (_) => this.SEC);
+        env.iomgr.on(base + 9, (_, data) => this.CYL = data, (_) => this.CYL);
     }
     private readSectors(): void {
-        if (!this.image || this.SEC < 1 || this.SEC > (this.sectorsPerTrack + 1)
-            || this.HEAD > this.headsPerCylinder || this.CYL > this.maxCylinder
+        if (!this.image || this.SEC < 1 || this.SEC > (this.n_sectors + 1)
+            || this.HEAD > this.n_heads || this.CYL > this.n_cylinders
         ) {
             console.log(`vfd_read: BAD SECTOR [C:${this.CYL} H:${this.HEAD} R:${this.SEC}]`);
             this.status = -1;
             return;
         }
-        let lba = (this.SEC - 1) + (this.HEAD + (this.CYL * this.headsPerCylinder)) * this.sectorsPerTrack;
+        let lba = (this.SEC - 1) + (this.HEAD + (this.CYL * this.n_heads)) * this.n_sectors;
         let ptr = this.PTR[0] + (this.PTR[1] << 16);
         console.log(`vfd_read [C:${this.CYL} H:${this.HEAD} R:${this.SEC}] LBA:${lba} MEM:${ptr.toString(16)} CNT:${this.CNT}`);
         let counter = this.CNT;
@@ -77,43 +77,45 @@ export class VFD {
             const sector = new Uint8Array(this.image.buffer, lba * this.bytesPerSector, this.bytesPerSector);
             this.env.dmaWrite(ptr, sector);
             ptr += this.bytesPerSector;
-            this.PTR[0] = ptr & 0xFFFF;
-            this.PTR[1] = ptr >> 16;
+            this.PTR[0] = ptr;
+            this.PTR[1] = ptr;
             this.CNT = counter;
         }
         this.CNT = counter;
         this.status = 0;
     }
     public attachImage(blob: ArrayBuffer): void {
-        this.image = new Uint8Array(blob);
-        this.maxLBA = this.image.byteLength / this.bytesPerSector;
-        const kb = this.image.byteLength / 1024;
-        this.headsPerCylinder = 2;
+        const kb = blob.byteLength / 1024;
+        let n_heads = 2;
+        let n_sectors: number;
         switch (kb) {
             case 160:
-                this.headsPerCylinder = 1;
-                this.sectorsPerTrack = 8;
+                n_heads = 1;
+                n_sectors = 8;
                 break;
             case 320:
-                this.sectorsPerTrack = 8;
+                n_sectors = 8;
                 break;
             case 640:
-                this.sectorsPerTrack = 8;
+                n_sectors = 8;
                 break;
             case 720:
-                this.sectorsPerTrack = 9;
+                n_sectors = 9;
                 break;
             case 1200:
-                this.sectorsPerTrack = 15;
+                n_sectors = 15;
                 break;
             case 1440:
-                this.sectorsPerTrack = 18;
+                n_sectors = 18;
                 break;
             default:
-                this.sectorsPerTrack = 1;
-                break;
+                throw new Error('Unexpected image size');
         }
-        this.maxCylinder = this.maxLBA / this.headsPerCylinder / this.sectorsPerTrack;
-        console.log(`vfd_attach: ${kb}KB [C:${this.maxCylinder} H:${this.headsPerCylinder} R:${this.sectorsPerTrack}]`)
+        this.image = new Uint8Array(blob);
+        this.maxLBA = this.image.byteLength / this.bytesPerSector;
+        this.n_heads = n_heads;
+        this.n_sectors = n_sectors;
+        this.n_cylinders = this.maxLBA / this.n_heads / this.n_sectors;
+        console.log(`vfd_attach: ${kb}KB [C:${this.n_cylinders} H:${this.n_heads} R:${this.n_sectors}] LBA:${this.maxLBA}`)
     }
 }

@@ -1,6 +1,6 @@
 // System devices
 
-import { WorkerInterface } from './env';
+import { WorkerInterface, RuntimeEnvironment } from './env';
 import { IOManager } from './iomgr';
 
 interface IntervalTimerFunction {
@@ -12,12 +12,12 @@ interface IntervalTimerFunction {
  * Programmable Interrupt Controller
  */
 export class VPIC {
-    irq: number[];
-    phase: number[];
-    IMR: Uint8Array;
-    IRR: Uint8Array;
-    ISR: Uint8Array;
-    ICW: Uint8Array;
+    private irq: number[];
+    private phase: number[];
+    private IMR: Uint8Array;
+    private IRR: Uint8Array;
+    private ISR: Uint8Array;
+    private ICW: Uint8Array;
 
     constructor (iomgr: IOManager) {
         this.irq = [];
@@ -103,22 +103,23 @@ export class VPIC {
  * Programmable Interval Timer
  */
 export class VPIT {
-    cntModes: Uint8Array;
-    cntPhases: number[];
-    cntValues: Uint8Array;
-    p0061_data: number;
-    timer: IntervalTimerFunction;
-    constructor (iomgr: IOManager, timer: IntervalTimerFunction) {
-        this.timer = timer;
+    private cntModes: Uint8Array;
+    private cntPhases: number[];
+    private cntValues: Uint8Array;
+    private p0061_data: number;
+    private env: RuntimeEnvironment;
+
+    constructor (env: RuntimeEnvironment) {
+        this.env = env;
         this.cntModes = new Uint8Array(3);
         this.cntPhases = [0, 0, 0];
         this.cntValues = new Uint8Array(6);
         this.p0061_data = 0;
     
-        iomgr.on(0x40, (_, data) => this.outCntReg(0, data));
-        iomgr.on(0x41, (_, data) => this.outCntReg(1, data));
-        iomgr.on(0x42, (_, data) => this.outCntReg(2, data));
-        iomgr.on(0x43, (_, data) => {
+        env.iomgr.on(0x40, (_, data) => this.outCntReg(0, data));
+        env.iomgr.on(0x41, (_, data) => this.outCntReg(1, data));
+        env.iomgr.on(0x42, (_, data) => this.outCntReg(2, data));
+        env.iomgr.on(0x43, (_, data) => {
             const counter = (data >> 6) & 3;
             const format = (data >> 4) & 3;
             // const mode = (data >> 1) & 7;
@@ -139,7 +140,7 @@ export class VPIT {
             }
             return false;
         });
-        iomgr.on(0x61, (_, data) => {
+        env.iomgr.on(0x61, (_, data) => {
             const old_data = this.p0061_data;
             this.p0061_data = data;
             const chg_value = old_data ^ data;
@@ -174,10 +175,10 @@ export class VPIT {
     }
     public noteOn(): void {
         const freq = 1193181 / this.getCounter(2);
-        this.timer.setSound(freq);
+        this.env.setSound(freq);
     }
     public noteOff(): void {
-        this.timer.setSound(0);
+        this.env.setSound(0);
     }
     public getCounter(counter: number): number {
         let count_value = this.cntValues[counter * 2] + (this.cntValues[counter * 2 + 1] * 256);
@@ -185,11 +186,11 @@ export class VPIT {
         return count_value;
     }
     public clearTimer(): void {
-        this.timer.setTimer(0);
+        this.env.setTimer(0);
     }
     public setTimer(): void {
         const period = Math.ceil(this.getCounter(0) / 1193.181);
-        this.timer.setTimer(period);
+        this.env.setTimer(period);
     }
 }
 
@@ -198,13 +199,12 @@ export class VPIT {
  * Universal Asynchronous Receiver Transmitter
  */
 export class UART {
-    pic: VPIC;
-    fifo_i: number[];
-    constructor (iomgr: IOManager, base: number, pic: VPIC, worker: WorkerInterface) {
-        this.pic = pic;
+    private fifo_i: number[];
+
+    constructor (env: RuntimeEnvironment, base: number) {
         this.fifo_i = [];
-        iomgr.on(base, (_, data) => {
-            worker.print(String.fromCharCode(data));
+        env.iomgr.on(base, (_, data) => {
+            env.worker.print(String.fromCharCode(data));
         }, (_) => {
             if (this.fifo_i.length > 0) {
                 return this.fifo_i.shift();
@@ -212,8 +212,63 @@ export class UART {
                 return 0;
             }
         });
+        env.iomgr.on(base + 5, null, (_) => 0x40 | ((this.fifo_i.length > 0) ? 1 : 0));
     }
     public onRX(data: number): void {
         this.fifo_i.push(data & 0xFF);
+    }
+}
+
+
+/**
+ * Real Time Clock
+ */
+export class RTC {
+    public index: number;
+    private ram: Uint8Array;
+
+    constructor (env: RuntimeEnvironment) {
+        this.ram = new Uint8Array(256);
+        env.iomgr.on(0x70, (_, data) => this.writeRTC(data), (_) => this.readRTC());
+        env.iomgr.on(0x71, (_, data) => this.index = data, (port) => this.index);
+    }
+    public writeRTC(data: number): void {
+        this.ram[this.index] = data;
+    }
+    public readRTC(): number {
+        const result = this._readRTC();
+        console.log('read_rtc', this.index, result.toString(16));
+        return result;
+    }
+    private _readRTC(): number {
+        const toBCD = (n: number) => {
+            const a1 = n % 10;
+            const a2 = (n / 10) | 0;
+            return a1 + (a2 << 4);
+        }
+        const bitmap = 0x0C2A;
+        if (this.index > 0x0D || (bitmap & (1 << this.index))) {
+            return this.ram[this.index];
+        } else {
+            const now = new Date();
+            switch (this.index) {
+            case 0:
+                return toBCD(now.getSeconds());
+            case 2:
+                return toBCD(now.getMinutes());
+            case 4:
+                return toBCD(now.getHours());
+            case 6:
+                return now.getDay();
+            case 7:
+                return toBCD(now.getDate());
+            case 8:
+                return toBCD(now.getMonth());
+            case 9:
+                return toBCD(now.getFullYear() % 100);
+            default:
+                return 0;
+            }
+        }
     }
 }

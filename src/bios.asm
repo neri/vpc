@@ -95,17 +95,25 @@ _int10:
     cmp ah, (_int10_etbl - _int10_ftbl) / 2
     ja .not_supported
 
+    cmp ah, 0
+    jnz .no_00
+    push cs
+    pop ds
+    mov si, cls_msg
+    call puts
+    jmp .end
+.no_00:
     cmp ah, 0x0E
     jnz .no_0e
     xor dx, dx
     mov ds, dx
     mov dx, [ds:0x400]
     out dx, al
+    jmp .end
 .no_0e:
-    ; db 0xF1
 
 .not_supported:
-
+.end:
     add sp, byte 2
     pop cx
     pop dx
@@ -168,12 +176,17 @@ _int13:
     push ax
     mov bp, sp
 
+    cmp dl, 0
+    jnz .err
+
     cmp ah, 0x02
     jnz .no_02
     call _int13_read
     jmp .end
 .no_02:
 
+.err:
+    mov ax, 0x8000
 .end:
 
     mov cx, [bp + STK_FLAGS]
@@ -229,12 +242,24 @@ _int13_set_dma:
     ret
 
 _int13_read:
+    mov dx, VPC_FD_PORT
+    xor ax, ax
+    out dx, ax
+    in ax, dx
+    or ax, ax
+    jnz .dev_ok
+    mov ax, 0x8000
+    ret
+.dev_ok:
+
     call _int13_set_chr
     call _int13_set_dma
 
     mov dx, VPC_FD_PORT
     mov ax, 1
     out dx, ax
+    ; sti
+    ; hlt
     in ax, dx
     or ax, ax
     jz .skip
@@ -250,22 +275,66 @@ _int13_read:
 
 ;; Serial Port BIOS
 _int14:
+    mov ax, 0x8000
     iret
 
 
 ;; System BIOS
 _int15:
-    iret
+    stc
+    retf 2
 
 
 ;; Keyboard BIOS
 _int16:
+    cmp ah, 0
+    jz i1600
+    cmp ah, 1
+    jz i1601
+    xor ax, ax
+    retf 2
+i1600:
+    push ds
+    xor ax, ax
+    mov ds, ax
+    xchg ax, [ds:0x041E]
+    or ax, ax
+    jnz .end
+.loop:
+    xor ah, ah
+    int 0x16
+    jnz .end
+    sti
+    hlt
+    jmp .loop
+.end:
+    pop ds
     iret
+
+i1601:
+    push ds
+    push dx
+    xor ax, ax
+    mov ds, ax
+    mov dx, [ds:0x0400]
+    add dl, 5
+    in al, dx
+    and al, 1
+    jz .nodata
+    sub dl, 5
+    in al, dx
+    and ax, 0x00FF
+    mov [ds:0x41E], ax
+.nodata:
+    pop dx
+    pop ds
+    retf 2
 
 
 ;; Printer BIOS
 _int17:
     iret
+
 
 ;; boot hook
 _int18:
@@ -278,15 +347,284 @@ _int19:
     db 0xF1
     iret
 
+
 ;; Clock BIOS
 _int1A:
+    cmp ah, 0
+    jz i1A00
+    cmp ah, 2
+    jz i1A02
+    cmp ah, 4
+    jz i1A04
+    xor ax, ax
+    stc
+    retf 2
+i1A00:
+    push ds
+    xor ax, ax
+    mov ds, ax
+    mov dx, [ds:0x046C]
+    mov cx, [ds:0x046E]
+    pop ds
     iret
 
-;; Ctrl-break handler
-_int1B:
-    iret
+i1A02:
+    mov al, 0
+    out 0x71, al
+    in al, 0x70
+    mov dh, al
+    mov al, 2
+    out 0x71, al
+    in al, 0x70
+    mov cl, al
+    mov al, 4
+    out 0x71, al
+    in al, 0x70
+    mov ch, al
+    xor dh, dh
+    clc
+    retf 2
+
+i1A04:
+    mov al, 7
+    out 0x71, al
+    in al, 0x70
+    mov dl, al
+    mov al, 8
+    out 0x71, al
+    in al, 0x70
+    mov dh, al
+    mov al, 9
+    out 0x71, al
+    in al, 0x70
+    mov cl, al
+    xor ch, ch
+    clc
+    retf 2
+
+_INIT:
+    cli
+    cld
+    xor ax, ax
+    mov ss, ax
+    mov sp, 0x400
+    mov cx, cs
+    mov ds, cx
+
+    mov es, ax
+
+    xor di, di
+    mov cx, 256
+    rep stosw
+
+    ;; Install IRQ and BIOS services
+    mov di, 4 * 6
+    mov ax, _iret
+    stosw
+    mov ax, cs
+    stosw
+    mov ax, _iret
+    stosw
+    mov ax, cs
+    stosw
+    mov ax, _irq0
+    stosw
+    mov ax, cs
+    stosw
+    mov cx, 7
+.loop:
+    mov ax, _irq_dummy
+    stosw
+    mov ax, cs
+    stosw
+    loop .loop
+
+    mov ax, _int10
+    stosw
+    mov ax, cs
+    stosw
+    mov ax, _int11
+    stosw
+    mov ax, cs
+    stosw
+    mov ax, _int12
+    stosw
+    mov ax, cs
+    stosw
+    mov ax, _int13
+    stosw
+    mov ax, cs
+    stosw
+    mov ax, _int14
+    stosw
+    mov ax, cs
+    stosw
+    mov ax, _int15
+    stosw
+    mov ax, cs
+    stosw
+    mov ax, _int16
+    stosw
+    mov ax, cs
+    stosw
+    mov ax, _int17
+    stosw
+    mov ax, cs
+    stosw
+    mov ax, _int18
+    stosw
+    mov ax, cs
+    stosw
+    ; mov ax, _int19
+    mov ax, _repl
+    stosw
+    mov ax, cs
+    stosw
+    mov ax, _int1A
+    stosw
+    mov ax, cs
+    stosw
+    mov ax, _iret
+    stosw
+    mov ax, cs
+    stosw
+    mov ax, _iret
+    stosw
+    mov ax, cs
+    stosw
+
+    ;; BIOS Data Area
+    mov di, 0x0400
+    mov ax, 0x3F8
+    stosw
+    xor ax, ax
+    mov cx, 7
+    rep stosw
+    mov ax, 0x0200
+    stosw
+    xor al, al
+    stosb
+    mov ax, 640
+    stosw
 
 
+    ;; init PIC
+    mov al, 0xFF
+    out 0x21, al
+    out 0xA1, al
+    mov al, 0x11
+    out 0x20, al
+    out 0xA0, al
+    mov al, PIC_ICW2_MAS
+    out 0x21, al
+    mov al, PIC_ICW2_SLA
+    out 0xA1, al
+    mov al, 0x04
+    out 0x21, al
+    mov al, 0x02
+    out 0xA1, al
+    mov al, 0x01
+    out 0x21, al
+    out 0xA1, al
+
+    mov al, 0xFA
+    out 0x21, al
+    mov al, 0xFF
+    out 0xA1, al
+    sti
+
+    ;; init PIT
+    mov al, 0x34
+    out 0x43, al
+    xor al, al
+    out 0x40, al
+    out 0x40, al
+
+
+    mov si, cls_msg
+    call puts
+
+    mov si, _boot_sound_data
+    call _play_sound
+
+    mov si, banner
+    call puts
+
+
+    ;; read MBR from disk
+    mov ax, 0x0201
+    mov cx, 0x0001
+    mov dx, 0x0000
+    mov bx, 0x7C00
+    mov es, dx
+    int 0x13
+    jc _repl
+    jmp 0:0x7C00
+
+
+_repl:
+.prompt:
+    mov di, ARGV
+    mov al, '#'
+    call _aux_out
+.loop:
+    call _aux_in
+    or al, al
+    jnz .skip
+    hlt
+    jmp .loop
+.skip:
+    cmp al, 13
+    jz .crlf
+    cmp al, 127
+    jz .del
+    ss stosb
+    call _aux_out
+    jmp .loop
+.del:
+    mov al, 8
+    call _aux_out
+    jmp .loop
+.crlf:
+    xor al, al
+    ss stosb
+    mov al, 13
+    call _aux_out
+    mov al, 10
+    call _aux_out
+
+    mov si, ARGV
+.loop_cmd:
+    ss lodsb
+    or al, al
+    jz .prompt
+    cmp al, ' '
+    jz .loop_cmd
+    cmp al, 'r'
+    jnz .no_cmd_r
+    mov dx, 0x0CF9
+    out dx, al
+    jmp $
+.no_cmd_r:
+    cmp al, 'u'
+    jnz .no_cmd_u
+    cli
+    hlt
+.no_cmd_u:
+    cmp al, 'b'
+    jnz .no_cmd_b
+    mov cx, 1000
+    call _bios_beep
+    mov cx, 200
+    call _bios_wait
+    xor cx,cx 
+    call _bios_beep
+    jmp .prompt
+.no_cmd_b:
+.bad_cmd:
+    mov si, bad_cmd_msg
+    call puts
+    jmp .prompt
 
 
 _aux_out:
@@ -406,229 +744,6 @@ _play_sound:
     ret
 
 
-_INIT:
-    cli
-    cld
-    xor ax, ax
-    mov ss, ax
-    mov sp, 0x400
-    mov cx, cs
-    mov ds, cx
-
-    mov es, ax
-
-    xor di, di
-    mov cx, 256
-    rep stosw
-
-    mov di, 4 * 6
-    mov ax, _iret
-    stosw
-    mov ax, cs
-    stosw
-    mov ax, _iret
-    stosw
-    mov ax, cs
-    stosw
-    mov ax, _irq0
-    stosw
-    mov ax, cs
-    stosw
-    mov cx, 7
-.loop:
-    mov ax, _irq_dummy
-    stosw
-    mov ax, cs
-    stosw
-    loop .loop
-
-    mov ax, _int10
-    stosw
-    mov ax, cs
-    stosw
-    mov ax, _int11
-    stosw
-    mov ax, cs
-    stosw
-    mov ax, _int12
-    stosw
-    mov ax, cs
-    stosw
-    mov ax, _int13
-    stosw
-    mov ax, cs
-    stosw
-    mov ax, _int14
-    stosw
-    mov ax, cs
-    stosw
-    mov ax, _int15
-    stosw
-    mov ax, cs
-    stosw
-    mov ax, _int16
-    stosw
-    mov ax, cs
-    stosw
-    mov ax, _int17
-    stosw
-    mov ax, cs
-    stosw
-    mov ax, _int18
-    stosw
-    mov ax, cs
-    stosw
-    ; mov ax, _int19
-    mov ax, _repl
-    stosw
-    mov ax, cs
-    stosw
-    mov ax, _int1A
-    stosw
-    mov ax, cs
-    stosw
-    mov ax, _int1B
-    stosw
-    mov ax, cs
-    stosw
-    mov ax, _iret
-    stosw
-    mov ax, cs
-    stosw
-
-    ;; BDA
-    mov di, 0x0400
-    mov ax, 0x3F8
-    stosw
-    xor ax, ax
-    mov cx, 7
-    rep stosw
-    mov ax, 0x0200
-    stosw
-    xor al, al
-    stosb
-    mov ax, 640
-    stosw
-
-
-    ;; INIT PC/AT PIC
-    mov al, 0xFF
-    out 0x21, al
-    out 0xA1, al
-    mov al, 0x11
-    out 0x20, al
-    out 0xA0, al
-    mov al, PIC_ICW2_MAS
-    out 0x21, al
-    mov al, PIC_ICW2_SLA
-    out 0xA1, al
-    mov al, 0x04
-    out 0x21, al
-    mov al, 0x02
-    out 0xA1, al
-    mov al, 0x01
-    out 0x21, al
-    out 0xA1, al
-
-    mov al, 0xFA
-    out 0x21, al
-    mov al, 0xFF
-    out 0xA1, al
-    sti
-
-    ;; INIT PIT
-    mov al, 0x34
-    out 0x43, al
-    xor al, al
-    out 0x40, al
-    out 0x40, al
-
-    mov si, cls_msg
-    call puts
-
-    mov si, _boot_sound_data
-    call _play_sound
-
-    mov si, banner
-    call puts
-
-
-    ;; READ BOOT DISK
-    mov ax, 0x0201
-    mov cx, 0x0001
-    mov dx, 0x0000
-    mov bx, 0x7C00
-    mov es, dx
-    int 0x13
-    jc _repl
-    jmp 0:0x7C00
-
-
-_repl:
-.prompt:
-    mov di, ARGV
-    mov al, '#'
-    call _aux_out
-.loop:
-    call _aux_in
-    or al, al
-    jnz .skip
-    hlt
-    jmp .loop
-.skip:
-    cmp al, 13
-    jz .crlf
-    cmp al, 127
-    jz .del
-    ss stosb
-    call _aux_out
-    jmp .loop
-.del:
-    mov al, 8
-    call _aux_out
-    jmp .loop
-.crlf:
-    xor al, al
-    ss stosb
-    mov al, 13
-    call _aux_out
-    mov al, 10
-    call _aux_out
-
-    mov si, ARGV
-.loop_cmd:
-    ss lodsb
-    or al, al
-    jz .prompt
-    cmp al, ' '
-    jz .loop_cmd
-    cmp al, 'r'
-    jnz .no_cmd_r
-    mov dx, 0x0CF9
-    out dx, al
-    jmp $
-.no_cmd_r:
-    cmp al, 'u'
-    jnz .no_cmd_u
-    cli
-    hlt
-.no_cmd_u:
-    cmp al, 'b'
-    jnz .no_cmd_b
-    mov cx, 1000
-    call _bios_beep
-    mov cx, 200
-    call _bios_wait
-    xor cx,cx 
-    call _bios_beep
-    jmp .prompt
-.no_cmd_b:
-.bad_cmd:
-    mov si, bad_cmd_msg
-    call puts
-    jmp .prompt
-
-
 puts:
 .loop:
     lodsb
@@ -648,7 +763,7 @@ bad_cmd_msg:
 
     alignb 2
 _boot_sound_data:
-    dw 2000, 200, 1000, 200
+    dw 2000, 100, 1000, 100
     dw 0xFFFF
 
     times SIZE_BIOS - 16 - ($-$$) db 0

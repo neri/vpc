@@ -15,6 +15,8 @@ A PC Emulator implemented by WebAssembly.
   - i8259 PIC
   - i8254 Timer & Sound
   - UART (port 3F8 only)
+  - RTC
+  - FDC (non standard interface)
 
 ## License
 

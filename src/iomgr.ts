@@ -9,12 +9,13 @@ type inputHandler = (port: number) => number;
 * I/O Manager
 */
 export class IOManager {
-    obHandlers: outputHandler[];
-    ibHandlers: inputHandler[];
-    owHandlers: outputHandler[];
-    iwHandlers: inputHandler[];
+    private obHandlers: outputHandler[];
+    private ibHandlers: inputHandler[];
+    private owHandlers: outputHandler[];
+    private iwHandlers: inputHandler[];
     ioRedirectMap: Uint32Array;
-    worker: WorkerInterface;
+    private worker: WorkerInterface;
+
     constructor (worker: WorkerInterface) {
         this.worker = worker;
         this.obHandlers = [];

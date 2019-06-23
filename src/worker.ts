@@ -3,8 +3,6 @@
 'use strict';
 
 import { RuntimeEnvironment, WorkerInterface } from './env';
-import { IOManager } from './iomgr';
-import { VPIC, VPIT, UART } from './dev';
 import { VFD } from './vfd';
 
 const ctx: Worker = self as any;
@@ -18,12 +16,8 @@ class WI implements WorkerInterface {
 }
 
 const wi = new WI();
-const iomgr = new IOManager(wi);
-const pic = new VPIC(iomgr);
-const env = new RuntimeEnvironment(iomgr, pic, wi);
-const pit = new VPIT(iomgr, env);
-const uart = new UART(iomgr, 0x3F8, pic, wi);
-const floppy = new VFD(iomgr, env);
+const env = new RuntimeEnvironment(wi);
+const floppy = new VFD(env);
 
 (async function() {
     console.log('Loading CPU...');
@@ -33,10 +27,7 @@ const floppy = new VFD(iomgr, env);
             return res.arrayBuffer()
         })
         .then(buffer => WebAssembly.instantiate(buffer, env))
-        .then(wasm => {
-            env.instance = wasm.instance;
-            env.vmem = env.instance.exports._init();
-        })
+        .then(wasm => env.loadCPU(wasm.instance))
     
     console.log('Loading BIOS...');
     await fetch('./bios.bin')
@@ -95,11 +86,11 @@ const start = async (imageName: string) => {
 onmessage = e => {
     switch (e.data.command) {
         case 'start':
-            iomgr.ioRedirectMap = e.data.ioRedirectMap;
+            env.iomgr.ioRedirectMap = e.data.ioRedirectMap;
             setTimeout(() => start(e.data.imageName), 10);
             break;
         case 'key':
-            uart.onRX(e.data.data);
+            env.uart.onRX(e.data.data);
             break
         case 'nmi':
             env.nmi();
