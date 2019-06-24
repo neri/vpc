@@ -42,7 +42,7 @@ export class VPIC {
                 const mask = (1 << i);
                 if (this.ISR[port] & mask) {
                     this.ISR[port] &= ~mask;
-                    this.setNextIRQ(port);
+                    this.enqueue(0);
                     break;
                 }
             }
@@ -52,7 +52,7 @@ export class VPIC {
     }
     private readOCR(port: number): number {
         // TODO:
-        return 0;
+        return this.ISR[port];
     }
     private writeIMR(port: number, data: number): void {
         const phase = this.phase[port] || 0;
@@ -70,15 +70,19 @@ export class VPIC {
     private readIMR(port: number): number {
         return this.IMR[port];
     }
-    private setNextIRQ(port: number): void {
-        if (this.irq.length) return;
+    private enqueue(port: number): void {
         for (let i = 0; i < 8; i++) {
+            if (this.irq.length) return;
             const mask = (1 << i);
+            if (port == 0 && i == this.ICW[0] && (this.IMR[0] & mask) == 0) {
+                this.enqueue(1);
+                break;
+            }
             if (this.ISR[port] & mask) break;
             if ((this.IRR[port] & mask) && (this.IMR[port] & mask) == 0) {
                 this.IRR[port] &= ~mask;
                 this.ISR[port] |= mask;
-                const vector = this.ICW[port * 4 + 1];
+                const vector = (this.ICW[port * 4 + 1] & 0xF8) + i;
                 this.irq.push(vector);
             }
         }
@@ -86,14 +90,14 @@ export class VPIC {
     public raiseIRQ(n: number): void {
         if (n < 8) {
             this.IRR[0] |= (1 << n);
-            this.setNextIRQ(0);
+            this.enqueue(0);
         } else if (n < 16) {
-            this.IRR[1] |= (1 << (n - 8));
+            this.ISR[1] |= (1 << (n - 8));
             this.IRR[0] |= this.ICW[2];
-            this.setNextIRQ(1);
+            this.enqueue(0);
         }
     }
-    public checkIRQ(): number {
+    public dequeueIRQ(): number {
         const result = this.irq.shift();
         return result || 0;
     }

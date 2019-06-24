@@ -46,7 +46,7 @@ export class RuntimeEnvironment {
         this.env.vpc_inb = (port: number) => this.iomgr.inb(port);
         this.env.vpc_outw = (port: number, data: number) => this.iomgr.outw(port, data);
         this.env.vpc_inw = (port: number) => this.iomgr.inw(port);
-        this.env.vpc_irq = () => this.pic.checkIRQ();
+        this.env.vpc_irq = () => this.pic.dequeueIRQ();
 
         this.iomgr = new IOManager(worker);
         this.pic = new VPIC(this.iomgr);

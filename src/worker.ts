@@ -36,7 +36,7 @@ const floppy = new VFD(env);
             return res.blob()
         })
         .then(blob => {
-            return new Promise((resolve, reject) => {
+            return new Promise((resolve, _) => {
                 const reader = new FileReader();
                 reader.onloadend = () => {
                     resolve(reader.result);
@@ -61,7 +61,7 @@ const loadImage = async (imageName: string) => {
             return res.blob()
         })
         .then(blob => {
-            return new Promise((resolve, reject) => {
+            return new Promise((resolve, _) => {
                 const reader = new FileReader();
                 reader.onloadend = () => {
                     resolve(reader.result);

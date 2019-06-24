@@ -129,6 +129,9 @@ export class VFD {
             case 320:
                 n_sectors = 8;
                 break;
+            case 360:
+                n_sectors = 9;
+                break;
             case 640:
                 n_sectors = 8;
                 break;

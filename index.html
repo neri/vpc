@@ -36,14 +36,16 @@
         }
 
         #controlPanel {
-            width: 704px;
+            width: 720px;
+            min-height: 2em;
             margin: 0;
-            padding: 0 8px;
-            background: #E0E0E0;
+            padding: 0;
+            background: #F7F7F7;
         }
         
         address {
             width: 720px;
+            margin: 1em 0;
             text-align: right;
             font-size: smaller;
             font-style: normal;
@@ -57,6 +59,35 @@
         }
         address a:hover {
             text-decoration: underline;
+        }
+
+        .left {
+            float: left;
+        }
+
+        summary {
+            float: right;
+            margin: 2px 8px;
+            padding: 0 4px;
+            background: #FFF;
+            border: #AAA solid 1px;
+            border-radius: 4px;
+            font-size: 10pt;
+            cursor: pointer;
+        }
+
+        details article {
+            display: block;
+            clear: both;
+            padding: 8px 1em;
+        }
+
+        address {
+            clear: both;
+        }
+
+        #terminal2 {
+            font: 10pt "Monaco", monospace;
         }
     </style>
     <script>
@@ -76,6 +107,22 @@
             });
             term.focus();
             
+            // const term = document.querySelector('#terminal2');
+            // term.write = function (message) {
+            //     this.value += message;
+            //     this.scrollTop = this.scrollHeight;
+            // }
+            // term.addEventListener('keydown', e => {
+            //     e.preventDefault();
+            //     console.log(e);
+            //     if (e.key.length > 1) {
+            //         window.worker.postMessage({command: 'key', data: e.keyCode });
+            //     } else {
+            //         window.worker.postMessage({command: 'key', data: e.key.charCodeAt(0) });
+            //     }
+            // });
+            // window.term = term;
+
             setTimeout(startSecond, 100);
         }
 
@@ -221,32 +268,45 @@
 </head>
 <body>
     <div id="emulatorFrame">
-        <div id="click_to_start"><p>CLICK TO START</p></div>
+        <div id="click_to_start"><p>はじめるときはここをクリック</p></div>
         <div id="screen_container">
             <div id="terminal"></div>
+            <!-- <textarea id="terminal2" cols="80" rows="25"></textarea> -->
         </div>
     </div>
     
     <div id="controlPanel">
-        <label id="volumeControl" style="display: none;">
+        <label id="volumeControl" style="display: none;" class="left">
             &#x1F64A;<input id="inputVolume" type="range" min="0" max="10" step="1" value="5">&#x1F50A;
         </label>
-        <label>
-            &#x1f4be;<select id="selDiskImage">
-                <option value="../bin/osz.img" selected>osz</option>
-                <!-- <option value="../var/PCDOS090.img">PCDOS 0.9</option>
-                <option value="../var/PCDOS100.img">PCDOS 1.0</option>
-                <option value="../var/PCDOS200.img">PCDOS 2.0</option>
-                <option value="../var/elks.img">elks</option>
-                <option value="../var/fdos.img" >freedos</option> -->
-            </select>
-            <input id="buttonUpload" type="button" value="Attach" disabled>
-            <input id="fileUpload" type="file" style="width:0px; height:0px;">
-        </label>
-        &#x1F41B;
-        <input id="buttonNMI" type="button" value="Debug">
-        <input id="inputAddress" value="" placeholder="0000:0000" size="12">
-        <input id="buttonDump" type="button" value="Dump">
+        <details>
+            <summary>Option</summary>
+            <article>
+                <p>
+                        &#x1f4be; Disk:
+                    <label>
+                        Preset:
+                        <select id="selDiskImage">
+                            <option value="../bin/osz.img" selected>osz</option>
+                            <option value="../var/PCDOS090.img">PCDOS 0.9</option>
+                            <option value="../var/PCDOS100.img">PCDOS 1.0</option>
+                            <option value="../var/PCDOS200.img">PCDOS 2.0</option>
+                            <option value="../var/fdos.img">FreeDOS</option>
+                            <option value="../var/elks.img">elks</option>
+                        </select>
+                        <input id="buttonUpload" type="button" value="Attach" disabled>
+                        <input id="fileUpload" type="file" style="width:0px; height:0px;">
+                    </label>
+                </p>
+
+                <form>
+                    &#x1F41B; Debug:
+                    <input id="buttonNMI" type="button" value="NMI">
+                    <input id="inputAddress" value="" placeholder="0000:0000" size="12">
+                    <input id="buttonDump" type="submit" value="Dump">
+                </form>
+            </article>
+        </details>
     </div>
 
     <address>

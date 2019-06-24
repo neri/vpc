@@ -42,11 +42,13 @@ typedef enum cpu_status_t {
     cpu_status_pause,
     cpu_status_int,
     cpu_status_icebp,
-    cpu_status_exit = 10000,
-    cpu_status_ud,
-    cpu_status_gpf,
+    cpu_status_exit = 0x10000,
     cpu_status_div,
+    cpu_status_ud,
     cpu_status_fpu,
+    cpu_status_double,
+    cpu_status_stack = 0xC0000,
+    cpu_status_gpf = 0xD0000,
 } cpu_status_t;
 
 typedef uint32_t paddr_t;
@@ -350,17 +352,21 @@ static int RETF(cpu_state *cpu, uint16_t n) {
     return 0;
 }
 
-static void INVOKE_INT(cpu_state *cpu, int n) {
+static int INVOKE_INT(cpu_state *cpu, int n) {
+    int idt_offset = cpu->IDT.base + n * 4;
+    uint32_t new_cs = READ_LE16(mem + idt_offset + 2);
+    uint32_t new_eip = READ_LE16(mem + idt_offset);
+    if (new_cs == 0 && new_eip == 0) return cpu_status_gpf;
     PUSH16(cpu, cpu->eflags);
     PUSH16(cpu, cpu->CS.sel);
     PUSH16(cpu, cpu->EIP);
-    int idt_offset = cpu->IDT.base + n * 4;
-    LOAD_SEL(cpu, &cpu->CS, READ_LE16(mem + idt_offset + 2));
-    cpu->EIP = READ_LE16(mem + idt_offset);
+    LOAD_SEL(cpu, &cpu->CS, new_cs);
+    cpu->EIP = new_eip;
+    return 0;
 }
 
 static int SETF8(cpu_state *cpu, int value) {
-    int8_t v = value & 0xFF;
+    int8_t v = value;
     cpu->OF = (value != v);
     cpu->SF = (v < 0);
     cpu->ZF = (v == 0);
@@ -369,7 +375,7 @@ static int SETF8(cpu_state *cpu, int value) {
 }
 
 static int SETF16(cpu_state *cpu, int value) {
-    int16_t v = value & 0xFFFF;
+    int16_t v = value;
     cpu->OF = (value != v);
     cpu->SF = (v < 0);
     cpu->ZF = (v == 0);
@@ -1037,7 +1043,7 @@ static int cpu_step(cpu_state *cpu) {
             case 0x40: // INC AX
             case 0x41: case 0x42: case 0x43: case 0x44: case 0x45: case 0x46: case 0x47:
             {
-                int val = SETF16(cpu, (cpu->gpr[inst & 7] + 1));
+                int val = SETF16(cpu, (MOVSXW(cpu->gpr[inst & 7]) + 1));
                 cpu->gpr[inst & 7] = val;
                 cpu->AF = !(val & 15);
                 return 0;
@@ -1046,7 +1052,7 @@ static int cpu_step(cpu_state *cpu) {
             case 0x48: // DEC AX
             case 0x49: case 0x4A: case 0x4B: case 0x4C: case 0x4D: case 0x4E: case 0x4F:
             {
-                int val = SETF16(cpu, (cpu->gpr[inst & 7] - 1));
+                int val = SETF16(cpu, (MOVSXW(cpu->gpr[inst & 7]) - 1));
                 cpu->gpr[inst & 7] = val;
                 cpu->AF = (val & 15) == 15;
                 return 0;
@@ -1071,8 +1077,44 @@ static int cpu_step(cpu_state *cpu) {
                 cpu->gpr[inst & 7] = POP16(cpu);
                 return 0;
 
-            // case 0x60: // PUSHA
-            // case 0x61: // POPA
+            case 0x60: // PUSHA
+            {
+                uint32_t temp = cpu->SP;
+                if (temp < 16) return cpu_status_stack;
+                uint32_t new_esp = temp - 16;
+                uint16_t *ptr = (uint16_t *)(mem + cpu->SS.base + new_esp);
+                cpu->SP = new_esp;
+                if (cpu->cpu_gen < cpu_gen_80286) {
+                    temp -= 10;
+                }
+                ptr[0] = cpu->DI;
+                ptr[1] = cpu->SI;
+                ptr[2] = cpu->BP;
+                ptr[3] = temp;
+                ptr[4] = cpu->BX;
+                ptr[5] = cpu->DX;
+                ptr[6] = cpu->CX;
+                ptr[7] = cpu->AX;
+                return 0;
+            }
+
+            case 0x61: // POPA
+            {
+                uint32_t temp = cpu->SP;
+                if (temp > 0xFFF0) return cpu_status_stack;
+                uint16_t *ptr = (uint16_t *)(mem + cpu->SS.base + temp);
+                cpu->DI = ptr[0];
+                cpu->SI = ptr[1];
+                cpu->BP = ptr[2];
+                // ->SP = ptr[3];
+                cpu->BX = ptr[4];
+                cpu->DX = ptr[5];
+                cpu->CX = ptr[6];
+                cpu->AX = ptr[7];
+                cpu->SP = temp + 16;
+                return 0;
+            }
+
             // case 0x62: // BOUND or EVEX
             // case 0x63: // ARPL or MOVSXD
 
@@ -1733,16 +1775,14 @@ static int cpu_step(cpu_state *cpu) {
                 return RETF(cpu, 0);
 
             case 0xCC: // INT 3
-                INVOKE_INT(cpu, 3);
-                return 0;
+                return INVOKE_INT(cpu, 3);
 
             case 0xCD: // INT
-                INVOKE_INT(cpu, FETCH8(cpu));
-                return 0;
+                return INVOKE_INT(cpu, FETCH8(cpu));
 
             case 0xCE: // INTO
                 if (cpu->OF) {
-                    INVOKE_INT(cpu, 4);
+                    return INVOKE_INT(cpu, 4);
                 }
                 return 0;
 
@@ -1784,7 +1824,7 @@ static int cpu_step(cpu_state *cpu) {
                 return 0;
             }
 
-            // case 0xD6: // SETALC
+            // case 0xD6: // SETALC (undocumented)
 
             case 0xD7: // XLAT
                 cpu->AL = READ_MEM8(SEGMENT(&cpu->DS), cpu->BX + cpu->AL);
@@ -1888,11 +1928,11 @@ static int cpu_step(cpu_state *cpu) {
                 OUT16(cpu, cpu->DX, cpu->AX);
                 return 0;
 
-            case 0xF0: // prefix LOCK
+            case 0xF0: // prefix LOCK (NOP)
                 prefix |= PREFIX_LOCK;
                 break;
 
-            case 0xF1: // ICEBP
+            case 0xF1: // ICEBP (undocumented)
                 return cpu_status_icebp;
 
             case 0xF2: // prefix REPNZ
@@ -1961,6 +2001,7 @@ static int cpu_step(cpu_state *cpu) {
                         return 0;
                     }
                 }
+
             case 0xF7:
                 MODRM_W(cpu, seg, 1, &set);
                 switch (set.opr2) {
@@ -2055,11 +2096,11 @@ static int cpu_step(cpu_state *cpu) {
                 MODRM_W(cpu, seg, 0, &set);
                 switch (set.opr2) {
                     case 0: // INC r/m8
-                        *set.opr1b = value = SETF8(cpu, *set.opr1b + 1);
+                        *set.opr1b = value = SETF8(cpu, MOVSXB(*set.opr1b) + 1);
                         cpu->AF = !(value & 15);
                         return 0;
                     case 1: // DEC r/m8
-                        *set.opr1b = value = SETF8(cpu, *set.opr1b - 1);
+                        *set.opr1b = value = SETF8(cpu, MOVSXB(*set.opr1b) - 1);
                         cpu->AF = (value & 15) == 15;
                         return 0;
                     default:
@@ -2069,14 +2110,14 @@ static int cpu_step(cpu_state *cpu) {
             case 0xFF: //
             {
                 int value;
-                int mod = MODRM_W(cpu, seg, 0, &set);
+                int mod = MODRM_W(cpu, seg, 1, &set);
                 switch (set.opr2) {
                     case 0: // INC r/m16
-                        WRITE_LE16(set.opr1, value = SETF16(cpu, READ_LE16(set.opr1) + 1));
+                        WRITE_LE16(set.opr1, value = SETF16(cpu, MOVSXW(READ_LE16(set.opr1)) + 1));
                         cpu->AF = !(value & 15);
                         return 0;
                     case 1: // DEC r/m16
-                        WRITE_LE16(set.opr1, value = SETF16(cpu, READ_LE16(set.opr1) - 1));
+                        WRITE_LE16(set.opr1, value = SETF16(cpu, MOVSXW(READ_LE16(set.opr1)) - 1));
                         cpu->AF = (value & 15) == 15;
                         return 0;
                     case 2: // CALL r/m16
@@ -2275,14 +2316,13 @@ WASM_EXPORT void *_init() {
     return mem;
 }
 
-static void check_irq(cpu_state *cpu) {
-    if (cpu->IF) {
-        int vector = vpc_irq();
-        if (vector) {
-            INVOKE_INT(cpu, vector);
-            cpu->IF = 0;
-        }
-    }
+static int check_irq(cpu_state *cpu) {
+    if (!cpu->IF) return 0;
+    int vector = vpc_irq();
+    if (!vector) return 0;
+    INVOKE_INT(cpu, vector);
+    cpu->IF = 0;
+    return 0;
 }
 
 #define CPU_INTERVAL    0x100000
