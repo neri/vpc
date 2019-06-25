@@ -75,19 +75,19 @@ const loadImage = async (imageName: string) => {
         .catch(reason => console.error(reason));
 }
 
-const start = async (imageName: string) => {
+const start = async (gen: number, imageName: string) => {
     if (imageName) {
         await loadImage(imageName);
     }
 
-    env.run(1);
+    env.run(gen);
 };
 
 onmessage = e => {
     switch (e.data.command) {
         case 'start':
             env.iomgr.ioRedirectMap = e.data.ioRedirectMap;
-            setTimeout(() => start(e.data.imageName), 10);
+            setTimeout(() => start(e.data.gen, e.data.imageName), 10);
             break;
         case 'key':
             env.uart.onRX(e.data.data);

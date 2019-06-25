@@ -87,7 +87,12 @@
         }
 
         #terminal2 {
-            font: 10pt "Monaco", monospace;
+            position: absolute;
+            width: 320px;
+            height: 240px;
+            border: none;
+            color: transparent;
+            background: transparent;
         }
     </style>
     <script>
@@ -97,11 +102,11 @@
             
             const canvasVGA = document.querySelector('#canvasVGA');
             
-            do {
+            if (canvasVGA) {
                 const ctx = canvasVGA.getContext('2d');
                 ctx.fillStyle = '#000';
                 ctx.fillRect(0, 0, 640, 480);
-            } while (false);
+            }
 
             if (window.beep) {
                 window.beep.createAudioContext();
@@ -142,12 +147,16 @@
             worker.onmessage = message => {
                 switch (message.data.command) {
                     case 'loaded':
+                    {
+                        const gen = parseInt(document.querySelector('#selCpuGen').value);
                         window.worker.postMessage(
                             { command: 'start',
+                            gen: gen,
                             imageName: document.querySelector('#selDiskImage').value,
                             ioRedirectMap: iomgr.ioRedirectMap }
                             );
                         break;
+                    }
                     case 'write':
                         window.term.write(message.data.data);
                         break;
@@ -277,14 +286,13 @@
 <body>
     <div id="emulatorFrame">
         <div id="screen_container">
-            <!-- <canvas id="canvasVGA" width="640" height="400"></canvas> -->
+            <!-- <textarea id="terminal2"></textarea>
+            <canvas id="canvasVGA" width="320" height="240"></canvas> -->
             <p></p>
             <div id="terminal"></div>
-            <!-- <textarea id="terminal2" cols="80" rows="25"></textarea> -->
         </div>
         <div id="click_to_start"><p>CLICK TO START</p></div>
     </div>
-    
 
     <div id="controlPanel">
         <label id="volumeControl" style="display: none;" class="left">
@@ -310,12 +318,25 @@
                     </label>
                 </p>
 
-                <form>
+                <p>
+                    <label>
+                        CPU:
+                        <select id="selCpuGen">
+                            <option value="0">8086</option>
+                            <option value="1">80186</option>
+                            <option value="2">80286</option>
+                            <option value="3">80386</option>
+                            <option value="4" selected>486SX</option>
+                        </select>
+                    </label>
+                </p>
+
+                <div>
                     &#x1F41B; Debug:
                     <input id="buttonNMI" type="button" value="NMI">
                     <input id="inputAddress" value="" placeholder="0000:0000" size="12">
                     <input id="buttonDump" type="submit" value="Dump">
-                </form>
+                </div>
             </article>
         </details>
     </div>

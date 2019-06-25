@@ -94,23 +94,9 @@ _int10:
 
     cmp ah, (_int10_etbl - _int10_ftbl) / 2
     ja .not_supported
-
-    cmp ah, 0
-    jnz .no_00
-    push cs
-    pop ds
-    mov si, cls_msg
-    call puts
-    jmp .end
-.no_00:
-    cmp ah, 0x0E
-    jnz .no_0e
-    call i100E
-    jmp .end
-.no_0e:
-
+    call i10_caller
 .not_supported:
-.end:
+
     add sp, byte 2
     pop cx
     pop dx
@@ -122,8 +108,18 @@ _int10:
     pop es
     iret
 
+i10_caller:
+    mov bl, ah
+    xor bh, bh
+    add bx, bx
+    mov bx, [cs:_int10_ftbl + bx]
+    push bx
+    mov bx, [bp + STK_BX]
+    ret
+
 
 i1000:
+
 i1001:
 i1002:
 i1003:
@@ -138,64 +134,17 @@ i100B:
 i100C:
 i100D:
 i100F:
+    ret
 
 i100E:
-    ; xor dx, dx
-    ; mov ds, dx
-    ; mov dx, [ds:0x400]
-    ; out dx, al
     xor dx, dx
     mov ds, dx
-    mov si, 0x0450
-    cmp al, 10
-    jz .lf
-    cmp al, 13
-    jz .cr
-    cmp al, 8
-    jz .bs
+    mov dx, [ds:0x400]
+    out dx, al
 
-    mov dl, al
-
-    mov al, [ds:si + 1]
-    mov cl, 80
-    mul cl
-    mov bl, [ds:si]
-    xor bh, bh
-    add bx, ax 
-   
-    mov cx, 0xB800
-    mov ds, cx
-    mov [ds:bx], dl
-
-    mov ax, bx
-    mov dx, 0xCA00
-    out dx, ax
-
-    mov al, [ds:si]
-    cmp al, 80
-    ja .lf
-    inc byte [ds:si]
-    jmp .end
-.bs:
-    mov al, [ds:si]
-    cmp al, 0
-    je .end
-    dec byte [ds:si]
-    jmp .end
-.cr:
-    mov [ds:si], byte 0
-    jmp .end
-.lf:
-    mov ax, [ds:si]
-    xor al, al
-    inc ah
-    mov [ds:si], ax
-    ; jmp .end
-.end:
-    mov ax, [ds:si]
-    mov dx, 0xCA02
-    out dx, ax
     ret
+
+
 
 
 ;; Get Equipment List

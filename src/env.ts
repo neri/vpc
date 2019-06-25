@@ -47,16 +47,15 @@ export class RuntimeEnvironment {
         this.env.vpc_outw = (port: number, data: number) => this.iomgr.outw(port, data);
         this.env.vpc_inw = (port: number) => this.iomgr.inw(port);
         this.env.vpc_irq = () => this.pic.dequeueIRQ();
-        this.env.TRAP_NORETURN = () => { throw new Error('INVALID CONTROL FLOW'); };
+        this.env.TRAP_NORETURN = () => { throw new Error('UNEXPECTED CONTROL FLOW'); };
+        this.env.memcpy = (p, q, n) => this.memcpy(p, q, n);
+        this.env.memset = (p, v, n) => this.memset(p, v, n);
 
         this.iomgr = new IOManager(worker);
         this.pic = new VPIC(this.iomgr);
         this.pit = new VPIT(this);
         this.rtc = new RTC(this);
         this.uart = new UART(this, 0x3F8);
-
-        this.iomgr.onw(0xCA00, (_, data) => this.updateText(data));
-        this.iomgr.onw(0xCA02, (_, data) => this.updateCursor(data));
     }
     public loadCPU(wasm: WebAssembly.Instance): void {
         this.instance = wasm;
@@ -88,16 +87,26 @@ export class RuntimeEnvironment {
     }
     public dmaWrite(ptr: number, data: ArrayBuffer): void {
         const a = new Uint8Array(data);
-        const l = data.byteLength;
-        let p = this.vmem + ptr;
-        for (let i = 0; i < l; i++, p++) {
-            const v = a[i];
-            this._memory[p] = v;
-        }
+        this._memory.set(a, this.vmem + ptr);
     }
     public dmaRead(ptr: number, size: number): Uint8Array {
         const offset = this.vmem + ptr;
         return this._memory.slice(offset, offset + size);
+    }
+    public memcpy(p: number, q: number, n: number): number {
+        const a = new Uint8Array(this._memory, this.vmem + q, n);
+        this._memory.set(a, this.vmem + p);
+        return p;
+    }
+    public memset(p: number, v: number, n: number): number {
+        const array = new Uint8Array(n);
+        if (v) {
+            for (let i = 0; i < n; i++) {
+                array[i] = v;
+            }
+        }
+        this._memory.set(array, this.vmem + p);
+        return p;
     }
     public strlen(at: number): number {
         let result = 0;
@@ -178,12 +187,5 @@ export class RuntimeEnvironment {
             lines.push(line.join(' '));
         }
         console.log(lines.join('\n'));
-    }
-    updateText(data: number): void {
-        const character = this._memory[this.vmem + 0xB800];
-        this.worker.postCommand('text', { col: data & 0xFF, row: data >> 8 });
-    }
-    updateCursor(data: number): void {
-        this.worker.postCommand('cursor', { col: data & 0xFF, row: data >> 8 });
     }
 }
