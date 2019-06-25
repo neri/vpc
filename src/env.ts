@@ -47,12 +47,16 @@ export class RuntimeEnvironment {
         this.env.vpc_outw = (port: number, data: number) => this.iomgr.outw(port, data);
         this.env.vpc_inw = (port: number) => this.iomgr.inw(port);
         this.env.vpc_irq = () => this.pic.dequeueIRQ();
+        this.env.TRAP_NORETURN = () => { throw new Error('INVALID CONTROL FLOW'); };
 
         this.iomgr = new IOManager(worker);
         this.pic = new VPIC(this.iomgr);
         this.pit = new VPIT(this);
         this.rtc = new RTC(this);
         this.uart = new UART(this, 0x3F8);
+
+        this.iomgr.onw(0xCA00, (_, data) => this.updateText(data));
+        this.iomgr.onw(0xCA02, (_, data) => this.updateCursor(data));
     }
     public loadCPU(wasm: WebAssembly.Instance): void {
         this.instance = wasm;
@@ -174,5 +178,12 @@ export class RuntimeEnvironment {
             lines.push(line.join(' '));
         }
         console.log(lines.join('\n'));
+    }
+    updateText(data: number): void {
+        const character = this._memory[this.vmem + 0xB800];
+        this.worker.postCommand('text', { col: data & 0xFF, row: data >> 8 });
+    }
+    updateCursor(data: number): void {
+        this.worker.postCommand('cursor', { col: data & 0xFF, row: data >> 8 });
     }
 }

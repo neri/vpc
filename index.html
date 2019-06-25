@@ -95,6 +95,14 @@
             document.querySelector('#screen_container').style.display = 'block';
             document.querySelector('#click_to_start').style.display = 'none';
             
+            const canvasVGA = document.querySelector('#canvasVGA');
+            
+            do {
+                const ctx = canvasVGA.getContext('2d');
+                ctx.fillStyle = '#000';
+                ctx.fillRect(0, 0, 640, 480);
+            } while (false);
+
             if (window.beep) {
                 window.beep.createAudioContext();
             }
@@ -268,13 +276,16 @@
 </head>
 <body>
     <div id="emulatorFrame">
-        <div id="click_to_start"><p>はじめるときはここをクリック</p></div>
         <div id="screen_container">
+            <!-- <canvas id="canvasVGA" width="640" height="400"></canvas> -->
+            <p></p>
             <div id="terminal"></div>
             <!-- <textarea id="terminal2" cols="80" rows="25"></textarea> -->
         </div>
+        <div id="click_to_start"><p>CLICK TO START</p></div>
     </div>
     
+
     <div id="controlPanel">
         <label id="volumeControl" style="display: none;" class="left">
             &#x1F64A;<input id="inputVolume" type="range" min="0" max="10" step="1" value="5">&#x1F50A;

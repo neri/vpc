@@ -105,10 +105,7 @@ _int10:
 .no_00:
     cmp ah, 0x0E
     jnz .no_0e
-    xor dx, dx
-    mov ds, dx
-    mov dx, [ds:0x400]
-    out dx, al
+    call i100E
     jmp .end
 .no_0e:
 
@@ -140,9 +137,65 @@ i100A:
 i100B:
 i100C:
 i100D:
-i100E:
 i100F:
 
+i100E:
+    ; xor dx, dx
+    ; mov ds, dx
+    ; mov dx, [ds:0x400]
+    ; out dx, al
+    xor dx, dx
+    mov ds, dx
+    mov si, 0x0450
+    cmp al, 10
+    jz .lf
+    cmp al, 13
+    jz .cr
+    cmp al, 8
+    jz .bs
+
+    mov dl, al
+
+    mov al, [ds:si + 1]
+    mov cl, 80
+    mul cl
+    mov bl, [ds:si]
+    xor bh, bh
+    add bx, ax 
+   
+    mov cx, 0xB800
+    mov ds, cx
+    mov [ds:bx], dl
+
+    mov ax, bx
+    mov dx, 0xCA00
+    out dx, ax
+
+    mov al, [ds:si]
+    cmp al, 80
+    ja .lf
+    inc byte [ds:si]
+    jmp .end
+.bs:
+    mov al, [ds:si]
+    cmp al, 0
+    je .end
+    dec byte [ds:si]
+    jmp .end
+.cr:
+    mov [ds:si], byte 0
+    jmp .end
+.lf:
+    mov ax, [ds:si]
+    xor al, al
+    inc ah
+    mov [ds:si], ax
+    ; jmp .end
+.end:
+    mov ax, [ds:si]
+    mov dx, 0xCA02
+    out dx, ax
+    ret
 
 
 ;; Get Equipment List

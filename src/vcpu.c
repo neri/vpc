@@ -15,14 +15,16 @@ WASM_IMPORT int vpc_inb(int port);
 WASM_IMPORT void vpc_outw(int port, int value);
 WASM_IMPORT int vpc_inw(int port);
 WASM_IMPORT int vpc_irq();
+WASM_IMPORT _Noreturn void TRAP_NORETURN();
+
 
 typedef struct cpu_state cpu_state;
 typedef struct sreg_t sreg_t;
 void cpu_reset(cpu_state *cpu, int gen);
 void dump_regs(cpu_state *cpu, uint32_t eip);
 
-
-uint8_t mem[0x110000];
+#define MAX_PHYSICAL_MEMORY 0x110000
+uint8_t mem[MAX_PHYSICAL_MEMORY];
 
 
 enum {
@@ -175,7 +177,6 @@ void *memcpy(void *p, const void *q, size_t size) {
     }
     return p;
 }
-
 
 static char *hextbl = "0123456789abcdef";
 
@@ -658,10 +659,64 @@ static void XOR(cpu_state *cpu, operand_set *set) {
     }
 }
 
-static void JCC(cpu_state *cpu, int disp, int cc) {
+static int JUMP_IF(cpu_state *cpu, int disp, int cc) {
     if (cc) {
         cpu->EIP = (cpu->EIP + disp) & 0xFFFF;
     }
+    return 0;
+}
+
+static int EVAL_CC(cpu_state *cpu, int cc) {
+    switch (cc & 0xF) {
+        case 0: // xO
+            return (cpu->OF);
+
+        case 1: // xNO
+            return (!cpu->OF);
+
+        case 2: // xC
+            return (cpu->CF);
+
+        case 3: // xNC
+            return (!cpu->CF);
+
+        case 4: // xZ
+            return (cpu->ZF);
+
+        case 5: // zNZ
+            return (!cpu->ZF);
+
+        case 6: // xBE
+            return (cpu->CF || cpu->ZF);
+
+        case 7: // xNBE
+            return (!(cpu->CF || cpu->ZF));
+
+        case 8: // xS
+            return ( cpu->SF);
+
+        case 9: // xNS
+            return ( !cpu->SF);
+
+        case 0xA: // xP d8
+            return ( cpu->PF);
+
+        case 0xB: // xNP
+            return ( !cpu->PF);
+
+        case 0xC: // xL
+            return ( cpu->SF != cpu->OF);
+
+        case 0xD: // xNL
+            return ( cpu->SF == cpu->OF);
+
+        case 0xE: // xLE
+            return ( cpu->ZF || (cpu->SF != cpu->OF));
+
+        case 0xF: // xG
+            return ( !(cpu->ZF || cpu->SF != cpu->OF));
+    }
+    TRAP_NORETURN();
 }
 
 static int SHIFT(cpu_state *cpu, operand_set *set, int c) {
@@ -1126,13 +1181,15 @@ static int cpu_step(cpu_state *cpu) {
                 seg = &cpu->GS;
                 break;
 
-            // case 0x66: // prefix 66
-            //     prefix |= PREFIX_66;
-            //     break;
+            case 0x66: // prefix 66
+                if (cpu->cpu_gen < cpu_gen_80386) return cpu_status_ud;
+                prefix |= PREFIX_66;
+                break;
 
-            // case 0x67: // prefix 67
-            //     prefix |= PREFIX_67;
-            //     break;
+            case 0x67: // prefix 67
+                if (cpu->cpu_gen < cpu_gen_80386) return cpu_status_ud;
+                prefix |= PREFIX_67;
+                break;
 
             case 0x68: // PUSH imm16
                 PUSH16(cpu, FETCH16(cpu));
@@ -1212,68 +1269,22 @@ static int cpu_step(cpu_state *cpu) {
             }
 
             case 0x70: // JO d8
-                JCC(cpu, MOVSXB(FETCH8(cpu)), cpu->OF);
-                return 0;
-
             case 0x71: // JNO d8
-                JCC(cpu, MOVSXB(FETCH8(cpu)), !cpu->OF);
-                return 0;
-
             case 0x72: // JC d8
-                JCC(cpu, MOVSXB(FETCH8(cpu)), cpu->CF);
-                return 0;
-
             case 0x73: // JNC d8
-                JCC(cpu, MOVSXB(FETCH8(cpu)), !cpu->CF);
-                return 0;
-
             case 0x74: // JZ d8
-                JCC(cpu, MOVSXB(FETCH8(cpu)), cpu->ZF);
-                return 0;
-
             case 0x75: // JNZ d8
-                JCC(cpu, MOVSXB(FETCH8(cpu)), !cpu->ZF);
-                return 0;
-
             case 0x76: // JBE d8
-                JCC(cpu, MOVSXB(FETCH8(cpu)), cpu->CF || cpu->ZF);
-                return 0;
-
             case 0x77: // JNBE d8
-                JCC(cpu, MOVSXB(FETCH8(cpu)), !(cpu->CF || cpu->ZF));
-                return 0;
-
             case 0x78: // JS d8
-                JCC(cpu, MOVSXB(FETCH8(cpu)), cpu->SF);
-                return 0;
-
             case 0x79: // JNS d8
-                JCC(cpu, MOVSXB(FETCH8(cpu)), !cpu->SF);
-                return 0;
-
             case 0x7A: // JP d8
-                JCC(cpu, MOVSXB(FETCH8(cpu)), cpu->PF);
-                return 0;
-
             case 0x7B: // JNP d8
-                JCC(cpu, MOVSXB(FETCH8(cpu)), !cpu->PF);
-                return 0;
-
             case 0x7C: // JL d8
-                JCC(cpu, MOVSXB(FETCH8(cpu)), cpu->SF != cpu->OF);
-                return 0;
-
             case 0x7D: // JNL d8
-                JCC(cpu, MOVSXB(FETCH8(cpu)), cpu->SF == cpu->OF);
-                return 0;
-
             case 0x7E: // JLE d8
-                JCC(cpu, MOVSXB(FETCH8(cpu)), cpu->ZF || (cpu->SF != cpu->OF));
-                return 0;
-
             case 0x7F: // JG d8
-                JCC(cpu, MOVSXB(FETCH8(cpu)), !(cpu->ZF || cpu->SF != cpu->OF));
-                return 0;
+                return JUMP_IF(cpu, MOVSXB(FETCH8(cpu)), EVAL_CC(cpu, inst));
 
             case 0x80: // alu r/m, imm8
             case 0x81: // alu r/m, imm16
@@ -1843,29 +1854,25 @@ static int cpu_step(cpu_state *cpu) {
             {
                 int disp = MOVSXB(FETCH8(cpu));
                 cpu->CX--;
-                JCC(cpu, disp, (cpu->CX > 0 && cpu->ZF == 0));
-                return 0;
+                return JUMP_IF(cpu, disp, (cpu->CX > 0 && cpu->ZF == 0));
             }
 
             case 0xE1: // LOOPZ
             {
                 int disp = MOVSXB(FETCH8(cpu));
                 cpu->CX--;
-                JCC(cpu, disp, (cpu->CX > 0 && cpu->ZF != 0));
-                return 0;
+                return JUMP_IF(cpu, disp, (cpu->CX > 0 && cpu->ZF != 0));
             }
 
             case 0xE2: // LOOP
             {
                 int disp = MOVSXB(FETCH8(cpu));
                 cpu->CX--;
-                JCC(cpu, disp, (cpu->CX > 0));
-                return 0;
+                return JUMP_IF(cpu, disp, (cpu->CX > 0));
             }
 
             case 0xE3: // JCXZ
-                JCC(cpu, MOVSXB(FETCH8(cpu)), cpu->CX == 0);
-                return 0;
+                return JUMP_IF(cpu, MOVSXB(FETCH8(cpu)), cpu->CX == 0);
 
             case 0xE4: // IN AL, imm8
                 cpu->AL = INPORT8(cpu, FETCH8(cpu));
@@ -1887,15 +1894,13 @@ static int cpu_step(cpu_state *cpu) {
             {
                 int disp = MOVSXW(FETCH16(cpu));
                 PUSH16(cpu, cpu->EIP);
-                JCC(cpu, disp, 1);
-                return 0;
+                return JUMP_IF(cpu, disp, 1);
             }
 
             case 0xE9: // jmp imm16
             {
                 int disp = MOVSXW(FETCH16(cpu));
-                JCC(cpu, disp, 1);
-                return 0;
+                return JUMP_IF(cpu, disp, 1);
             }
 
             case 0xEA: // jmp far imm32
@@ -1908,8 +1913,7 @@ static int cpu_step(cpu_state *cpu) {
             case 0xEB: // jmp d8
             {
                 int disp = MOVSXB(FETCH8(cpu));
-                JCC(cpu, disp, 1);
-                return 0;
+                return JUMP_IF(cpu, disp, 1);
             }
 
             case 0xEC: // IN AL, DX
@@ -2149,68 +2153,66 @@ static int cpu_step(cpu_state *cpu) {
                 }
             }
 
-            case 0x0F80: // JO d16
-                JCC(cpu, MOVSXW(FETCH16(cpu)), cpu->OF);
+            case 0x0F40: // CMOVcc reg, r/m
+            case 0x0F41:
+            case 0x0F42:
+            case 0x0F43:
+            case 0x0F44:
+            case 0x0F45:
+            case 0x0F46:
+            case 0x0F47:
+            case 0x0F48:
+            case 0x0F49:
+            case 0x0F4A:
+            case 0x0F4B:
+            case 0x0F4C:
+            case 0x0F4D:
+            case 0x0F4E:
+            case 0x0F4F:
+            {
+                MODRM_W_D(cpu, seg, 1, 0, &set);
+                if (EVAL_CC(cpu, inst)) {
+                    switch (set.size) {
+                    case 1:
+                        WRITE_LE16(set.opr1, set.opr2);
+                        break;
+                    }
+                }
                 return 0;
+            }
 
-            case 0x0F81: // JNO d16
-                JCC(cpu, MOVSXW(FETCH16(cpu)), !cpu->OF);
-                return 0;
-
+            case 0x0F80: // Jcc d16
+            case 0x0F81: // Jcc d16
             case 0x0F82: // JC d16
-                JCC(cpu, MOVSXW(FETCH16(cpu)), cpu->CF);
-                return 0;
-
             case 0x0F83: // JNC d16
-                JCC(cpu, MOVSXW(FETCH16(cpu)), !cpu->CF);
-                return 0;
-
             case 0x0F84: // JZ d16
-                JCC(cpu, MOVSXW(FETCH16(cpu)), cpu->ZF);
-                return 0;
-
             case 0x0F85: // JNZ d16
-                JCC(cpu, MOVSXW(FETCH16(cpu)), !cpu->ZF);
-                return 0;
-
             case 0x0F86: // JBE d16
-                JCC(cpu, MOVSXW(FETCH16(cpu)), cpu->CF || cpu->ZF);
-                return 0;
-
             case 0x0F87: // JNBE d16
-                JCC(cpu, MOVSXW(FETCH16(cpu)), !(cpu->CF || cpu->ZF));
-                return 0;
-
             case 0x0F88: // JS d16
-                JCC(cpu, MOVSXW(FETCH16(cpu)), cpu->SF);
-                return 0;
-
             case 0x0F89: // JNS d16
-                JCC(cpu, MOVSXW(FETCH16(cpu)), !cpu->SF);
-                return 0;
-
             case 0x0F8A: // JP d16
-                JCC(cpu, MOVSXW(FETCH16(cpu)), cpu->PF);
-                return 0;
-
             case 0x0F8B: // JNP d16
-                JCC(cpu, MOVSXW(FETCH16(cpu)), !cpu->PF);
-                return 0;
-
             case 0x0F8C: // JL d16
-                JCC(cpu, MOVSXW(FETCH16(cpu)), cpu->SF != cpu->OF);
-                return 0;
-
             case 0x0F8D: // JNL d16
-                JCC(cpu, MOVSXW(FETCH16(cpu)), cpu->SF == cpu->OF);
-                return 0;
-
             case 0x0F8E: // JLE d16
-                JCC(cpu, MOVSXW(FETCH16(cpu)), cpu->ZF || (cpu->SF != cpu->OF));
+            case 0x0F8F: // JG d16
+                return JUMP_IF(cpu, MOVSXW(FETCH16(cpu)), EVAL_CC(cpu, inst));
+
+            case 0x0FA0: // PUSH FS
+                PUSH16(cpu, cpu->FS.sel);
                 return 0;
 
-            case 0x0F8F: // JG d16
-                JCC(cpu, MOVSXW(FETCH16(cpu)), !(cpu->ZF || cpu->SF != cpu->OF));
+            case 0x0FA1: // POP FS
+                LOAD_SEL(cpu, &cpu->FS, POP16(cpu));
+                return 0;
+
+            case 0x0FA8: // PUSH GS
+                PUSH16(cpu, cpu->GS.sel);
+                return 0;
+
+            case 0x0FA9: // POP GS
+                LOAD_SEL(cpu, &cpu->GS, POP16(cpu));
                 return 0;
 
             default:
