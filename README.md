@@ -30,4 +30,6 @@ A PC Emulator implemented by WebAssembly.
 
 ## License
 
+MIT License
+
 Copyright (C)2019 Nerry
