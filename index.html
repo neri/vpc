@@ -96,11 +96,14 @@
         }
     </style>
     <script>
+
+        const $ = x => document.querySelector(x);
+
         const startEmu = () => {
-            document.querySelector('#screen_container').style.display = 'block';
-            document.querySelector('#click_to_start').style.display = 'none';
+            $('#screen_container').style.display = 'block';
+            $('#click_to_start').style.display = 'none';
             
-            const canvasVGA = document.querySelector('#canvasVGA');
+            const canvasVGA = $('#canvasVGA');
             
             if (canvasVGA) {
                 const ctx = canvasVGA.getContext('2d');
@@ -113,14 +116,14 @@
             }
 
             const term = new Terminal({convertEol: true, rendererType: 'canvas'});
-            term.open(document.querySelector('#terminal'));
+            term.open($('#terminal'));
             window.term = term;
             term.onKey((e) => {
                 window.worker.postMessage({command: 'key', data: e.key.charCodeAt(0) });
             });
             term.focus();
             
-            // const term = document.querySelector('#terminal2');
+            // const term = $('#terminal2');
             // term.write = function (message) {
             //     this.value += message;
             //     this.scrollTop = this.scrollHeight;
@@ -148,13 +151,20 @@
                 switch (message.data.command) {
                     case 'loaded':
                     {
-                        const gen = parseInt(document.querySelector('#selCpuGen').value);
-                        window.worker.postMessage(
-                            { command: 'start',
-                            gen: gen,
-                            imageName: document.querySelector('#selDiskImage').value,
-                            ioRedirectMap: iomgr.ioRedirectMap }
-                            );
+                        let cmd = { command: 'start',
+                            gen: parseInt($('#selCpuGen').value),
+                            ioRedirectMap: iomgr.ioRedirectMap
+                        };
+                        if (window.attach) {
+                            window.worker.postMessage({command: 'attach', blob: window.attach});
+                            window.attach = undefined;
+                        } else {
+                            const image = $('#selDiskImage').value;
+                            if (image) {
+                                cmd.imageName = image;
+                            }
+                        }
+                        window.worker.postMessage(cmd);
                         break;
                     }
                     case 'write':
@@ -165,6 +175,9 @@
                         break;
                     case 'beep':
                         window.beep.sound(message.data.data);
+                        break;
+                    case 'alert':
+                        alert(message.data.data);
                         break;
                     default:
                         throw message;
@@ -205,8 +218,8 @@
                 this.context = null;
                 this.src = null;
                 
-                document.querySelector('#volumeControl').style.display = 'inline-block';
-                document.querySelector('#inputVolume').addEventListener('change', e => {
+                $('#volumeControl').style.display = 'inline-block';
+                $('#inputVolume').addEventListener('change', e => {
                     if (this.gain) {
                         this.gain.gain.value = this.getGain();
                     }
@@ -243,14 +256,14 @@
                 this.gain = null;
             }
             getGain() {
-                const val = document.querySelector('#inputVolume').value;
+                const val = $('#inputVolume').value;
                 return val * 2 / 100;
             }
         }
 
         window.addEventListener('DOMContentLoaded', () => {
             window.beep = new i8254Sound();
-            document.querySelector('#click_to_start').addEventListener('click', e => {
+            $('#click_to_start').addEventListener('click', e => {
                 if (!window.WebAssembly) {
                     alert("We are sorry, but WebAssembly is not supported.");
                     return;
@@ -258,17 +271,23 @@
                 startEmu();
             });
 
-            document.querySelector('#buttonNMI').addEventListener('click', e => {
+            $('#buttonReset').addEventListener('click', e => {
+                if (window.worker) {
+                    worker.postMessage({command: 'reset', gen: parseInt($('#selCpuGen').value)});
+                }
+            });
+
+            $('#buttonNMI').addEventListener('click', e => {
                 if (window.worker) {
                     worker.postMessage({command: 'nmi' });
                 }
             });
-            document.querySelector('#buttonDump').addEventListener('click', e => {
-                const rawValue = document.querySelector('#inputAddress').value;
+            $('#buttonDump').addEventListener('click', e => {
+                const rawValue = $('#inputAddress').value;
                 let address = 0;
                 if (rawValue.indexOf(':') > 0) {
                     const pair = rawValue.split(':');
-                    address = (parseInt(`0x${pair[0]}`) << 4) + (parseInt(`0x${pair[1]}`));
+                    address = (parseInt(`0x0${pair[0]}`) << 4) + (parseInt(`0x0${pair[1]}`));
                 } else {
                     address = parseInt(`0x0${rawValue}`);
                 }
@@ -276,8 +295,21 @@
                     worker.postMessage({command: 'dump', address: address})
                 }
             })
-            document.querySelector('#buttonUpload').addEventListener('click', e => {
-                document.querySelector('#fileUpload').click();
+            $('#buttonLocal').addEventListener('click', e => {
+                $('#fileLocal').click();
+            });
+            $('#fileLocal').addEventListener('change', e => {
+                const reader = new FileReader();
+                reader.addEventListener('load', (e) => {
+                    if (window.worker) {
+                        worker.postMessage({command: 'attach', blob: e.target.result});
+                    } else {
+                        window.attach = e.target.result;
+                    }
+                });
+                reader.readAsArrayBuffer(e.target.files[0]);
+                $('#selDiskImage').value = "";
+                $('#labelLocal').innerHTML = $('#fileLocal').value;
             });
         });
         
@@ -288,7 +320,6 @@
         <div id="screen_container">
             <!-- <textarea id="terminal2"></textarea>
             <canvas id="canvasVGA" width="320" height="240"></canvas> -->
-            <p></p>
             <div id="terminal"></div>
         </div>
         <div id="click_to_start"><p>CLICK TO START</p></div>
@@ -298,35 +329,42 @@
         <label id="volumeControl" style="display: none;" class="left">
             &#x1F64A;<input id="inputVolume" type="range" min="0" max="10" step="1" value="5">&#x1F50A;
         </label>
-        <details>
+        <details open>
             <summary>Option</summary>
             <article>
                 <p>
-                        &#x1f4be; Disk:
                     <label>
-                        Preset:
+                        &#x1f4be; Disk:
                         <select id="selDiskImage">
+                            <option value="">----</option>
                             <option value="../bin/osz.img" selected>osz</option>
-                            <option value="../var/PCDOS090.img">PCDOS 0.9</option>
-                            <option value="../var/PCDOS100.img">PCDOS 1.0</option>
-                            <option value="../var/PCDOS200.img">PCDOS 2.0</option>
-                            <option value="../var/fdos.img">FreeDOS</option>
-                            <option value="../var/elks.img">elks</option>
                         </select>
-                        <input id="buttonUpload" type="button" value="Attach" disabled>
-                        <input id="fileUpload" type="file" style="width:0px; height:0px;">
+
                     </label>
+                    <label>
+                        <input id="buttonLocal" type="button" value="File">
+                        <span id="labelLocal"></span>
+                    </label>
+                    <input id="fileLocal" type="file" style="width:0px; height:0px;">
                 </p>
 
                 <p>
+                    <input id="buttonReset" type="button" value="RESET">
                     <label>
                         CPU:
                         <select id="selCpuGen">
                             <option value="0">8086</option>
                             <option value="1">80186</option>
                             <option value="2">80286</option>
-                            <option value="3">80386</option>
+                            <option value="3">386SX</option>
                             <option value="4" selected>486SX</option>
+                        </select>
+                    </label>
+
+                    <label>
+                        Memory:
+                        <select id="selMemory">
+                            <option value="640">640KB</option>
                         </select>
                     </label>
                 </p>

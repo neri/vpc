@@ -117,41 +117,50 @@ export class VFD {
         const kb = blob.byteLength / 1024;
         let n_heads = 2;
         let n_sectors: number;
-        switch (kb) {
-            case 160:
-                n_heads = 1;
-                n_sectors = 8;
-                break;
-            case 180:
-                n_heads = 1;
-                n_sectors = 9;
-                break;
-            case 320:
-                n_sectors = 8;
-                break;
-            case 360:
-                n_sectors = 9;
-                break;
-            case 640:
-                n_sectors = 8;
-                break;
-            case 720:
-                n_sectors = 9;
-                break;
-            case 1200:
-                n_sectors = 15;
-                break;
-            case 1440:
-                n_sectors = 18;
-                break;
-            default:
-                throw new Error('Unexpected image size');
+        if (blob.byteLength == 512) { // For Boot Sector Test
+            n_heads = 1;
+            n_sectors = 1;
+        } else {
+            switch (kb) {
+                case 160:
+                    n_heads = 1;
+                    n_sectors = 8;
+                    break;
+                case 180:
+                    n_heads = 1;
+                    n_sectors = 9;
+                    break;
+                case 320:
+                    n_sectors = 8;
+                    break;
+                case 360:
+                    n_sectors = 9;
+                    break;
+                case 640:
+                    n_sectors = 8;
+                    break;
+                case 720:
+                    n_sectors = 9;
+                    break;
+                case 1200:
+                    n_sectors = 15;
+                    break;
+                case 1440:
+                    n_sectors = 18;
+                    break;
+                default:
+                    throw new Error('Unexpected image size');
+            }
         }
         this.image = new Uint8Array(blob);
         this.maxLBA = this.image.byteLength / this.bytesPerSector;
         this.n_heads = n_heads;
         this.n_sectors = n_sectors;
         this.n_cylinders = this.maxLBA / this.n_heads / this.n_sectors;
-        console.log(`vfd_attach: ${kb}KB [C:${this.n_cylinders} H:${this.n_heads} R:${this.n_sectors}] LBA:${this.maxLBA}`)
+        if (this.maxLBA > 1) {
+            console.log(`vfd_attach: ${kb}KB [C:${this.n_cylinders} H:${this.n_heads} R:${this.n_sectors}] LBA:${this.maxLBA}`)
+        } else {
+            console.log(`vfd_attach: BootSector ${this.bytesPerSector}`)
+        }
     }
 }

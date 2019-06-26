@@ -9,6 +9,9 @@ export interface WorkerInterface {
 }
 
 export class RuntimeEnvironment {
+
+    static get CPU_GEN_INHERITED(): number { return -1; }
+
     public worker: WorkerInterface;
     public iomgr: IOManager;
     public pic: VPIC;
@@ -40,7 +43,8 @@ export class RuntimeEnvironment {
         this._memory = new Uint8Array(this.env.memory.buffer);
         this.env.println = (at: number) => {
             const str = this.getCString(at);
-            worker.print(`${str}\n`);
+            // worker.print(`${str}\n`);
+            console.log(str);
         }
         this.env.vpc_outb = (port: number, data: number) => this.iomgr.outb(port, data);
         this.env.vpc_inb = (port: number) => this.iomgr.inb(port);
@@ -119,6 +123,16 @@ export class RuntimeEnvironment {
         const len = this.strlen(at);
         const bytes = new Uint8Array(this._memory.buffer, at, len);
         return new TextDecoder('utf-8').decode(bytes);
+    }
+    public reset(gen: number): void {
+        if (!this.instance) return;
+        console.log(`CPU restarted (${gen})`);
+        this.instance.exports.reset(this.cpu, gen);
+        this.isPausing = false;
+        if (!this.isRunning) {
+            this.isRunning = true;
+            this.cont();
+        }
     }
     public run(gen: number): void {
         this.cpu = this.instance.exports.alloc_cpu(gen);

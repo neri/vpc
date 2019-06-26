@@ -89,6 +89,9 @@ onmessage = e => {
             env.iomgr.ioRedirectMap = e.data.ioRedirectMap;
             setTimeout(() => start(e.data.gen, e.data.imageName), 10);
             break;
+        case 'reset':
+            env.reset(e.data.gen);
+            break;
         case 'key':
             env.uart.onRX(e.data.data);
             break
@@ -97,6 +100,13 @@ onmessage = e => {
             break;
         case 'dump':
             env.dump(e.data.address);
+            break;
+        case 'attach':
+            try {
+                floppy.attachImage(e.data.blob);
+            } catch (e) {
+                wi.postCommand('alert', e.toString());
+            }
             break;
         default:
             console.log('worker.onmessage', e.data);

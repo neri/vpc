@@ -50,6 +50,7 @@ banner:
 _int10_ftbl:
     dw i1000, i1001, i1002, i1003, i1004, i1005, i1006, i1007
     dw i1008, i1009, i100A, i100B, i100C, i100D, i100E, i100F
+    dw i1010, i1011, i1012, i1013
 _int10_etbl:
 
 ;; IRQ 0 Timer
@@ -91,13 +92,14 @@ _int10:
     push cx
     push ax
     mov bp, sp
+    cld
 
     cmp ah, (_int10_etbl - _int10_ftbl) / 2
     ja .not_supported
     call i10_caller
 .not_supported:
 
-    add sp, byte 2
+    pop ax
     pop cx
     pop dx
     pop bx
@@ -119,9 +121,7 @@ i10_caller:
 
 
 i1000:
-
 i1001:
-i1002:
 i1003:
 i1004:
 i1005:
@@ -134,12 +134,88 @@ i100B:
 i100C:
 i100D:
 i100F:
+i1010:
+i1011:
+i1012:
     ret
+
+
+i1002:
+    sub sp, byte 16
+    mov di, sp
+    mov ax, 0x5B1B
+    ss stosw
+
+    mov al, dh
+    aam
+    xchg al, ah
+    or al, al
+    jz .comp1
+    add al, '0'
+    ss stosb
+.comp1:
+    xchg al, ah
+    add al, '0'
+    ss stosb
+    mov al, ';'
+    ss stosb
+
+    mov al, dl
+    aam
+    xchg al, ah
+    or al, al
+    jz .comp2
+    add al, '0'
+    ss stosb
+.comp2:
+    xchg al, ah
+    add al, '0'
+    ss stosb
+    mov ax, 'H'
+    ss stosw
+
+    xor dx, dx
+    mov es, dx
+    mov dx, [es:0x400]
+    mov si, sp
+.loop:
+    ss lodsb
+    or al, al
+    jz .end
+    out dx, al
+    jmp .loop
+.end:
+
+    add sp, byte 16
+    ret
+
+
+i1013:
+    cmp dh, 25
+    jae .end
+    cmp dl, 80
+    jae .end
+    call i1002
+    xor dx, dx
+    mov es, dx
+    mov dx, [es:0x400]
+    mov ds, [bp + STK_ES]
+    mov si, [bp + STK_BP]
+    ; mov cx, [bp + STK_CX]
+.loop:
+    lodsb
+    and al, 0x7F
+    out dx, al
+    loop .loop
+.end:
+    ret
+
 
 i100E:
     xor dx, dx
     mov ds, dx
     mov dx, [ds:0x400]
+    and al, 0x7F
     out dx, al
 
     ret
@@ -343,7 +419,8 @@ i1601:
     jz .end
     sub dl, 5
     in al, dx
-    and ax, 0x00FF
+    mov ah, al
+    or ax, ax
     mov [ds:0x41E], ax
 .end:
     pop dx
@@ -429,7 +506,7 @@ _INIT:
     cld
     xor ax, ax
     mov ss, ax
-    mov sp, 0x400
+    mov sp, 0x8000
     mov cx, cs
     mov ds, cx
 
@@ -592,6 +669,8 @@ _repl:
     mov sp, 0x0400
     push cs
     pop ds
+    mov si, boot_fail_msg
+    call puts
 .prompt:
     sti
     mov di, ARGV
@@ -787,6 +866,9 @@ puts:
 
 cls_msg:
     db 0x1b, "[H", 0x1b, "[J", 0
+
+boot_fail_msg:
+    db 10, "Boot failure", 10, 0
 
 bad_cmd_msg:
     db "Bad command or file name", 10, 0
