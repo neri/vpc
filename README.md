@@ -10,8 +10,8 @@ A PC Emulator implemented by WebAssembly.
 
 ## Implemented hardware
 
-- CPU: 80186?
-  - Some features are missing
+- CPU: 486SX?
+  - Some features are missing such as 16bit protected mode
 - Memory: 640KB ought to be enough for anybody.
 - I/O:
   - i8259 PIC
@@ -19,6 +19,7 @@ A PC Emulator implemented by WebAssembly.
   - UART
   - RTC
   - FDC (non standard interface)
+    - Supported: 160KB, 180KB, 320KB, 360KB, 640KB, 720KB, 1.2MB, 1.4MB and Boot Sector Only (512 bytes)
 
 ## Supported OS
 
@@ -27,6 +28,7 @@ A PC Emulator implemented by WebAssembly.
 |osz|It seems ok|
 |FreeDOS|failed|
 |elks|failed|
+|BootChess|buggy|
 
 ## License
 

@@ -30,13 +30,15 @@ export class RuntimeEnvironment {
     isPausing: boolean;
     isRunning: boolean;
 
+    private vgaCheck: number;
+
     constructor(worker: WorkerInterface) {
         this.worker = worker;
         this.period = 0;
         this.lastTick = new Date().valueOf();
         this.env = {
             memoryBase: 0,
-            memory: new WebAssembly.Memory({ initial: 257 }),
+            memory: new WebAssembly.Memory({ initial: 300 }),
             // tableBase: 0,
             // table: new WebAssembly.Table({ initial: 2, element: "anyfunc" }),
         }
@@ -52,14 +54,15 @@ export class RuntimeEnvironment {
         this.env.vpc_inw = (port: number) => this.iomgr.inw(port);
         this.env.vpc_irq = () => this.pic.dequeueIRQ();
         this.env.TRAP_NORETURN = () => { throw new Error('UNEXPECTED CONTROL FLOW'); };
-        this.env.memcpy = (p, q, n) => this.memcpy(p, q, n);
-        this.env.memset = (p, v, n) => this.memset(p, v, n);
+        // this.env.memcpy = (p, q, n) => this.memcpy(p, q, n);
+        // this.env.memset = (p, v, n) => this.memset(p, v, n);
 
         this.iomgr = new IOManager(worker);
         this.pic = new VPIC(this.iomgr);
         this.pit = new VPIT(this);
         this.rtc = new RTC(this);
         this.uart = new UART(this, 0x3F8);
+        this.iomgr.onw(0, null, (_) => Math.random() * 65535);
     }
     public loadCPU(wasm: WebAssembly.Instance): void {
         this.instance = wasm;
@@ -97,21 +100,21 @@ export class RuntimeEnvironment {
         const offset = this.vmem + ptr;
         return this._memory.slice(offset, offset + size);
     }
-    public memcpy(p: number, q: number, n: number): number {
-        const a = new Uint8Array(this._memory, this.vmem + q, n);
-        this._memory.set(a, this.vmem + p);
-        return p;
-    }
-    public memset(p: number, v: number, n: number): number {
-        const array = new Uint8Array(n);
-        if (v) {
-            for (let i = 0; i < n; i++) {
-                array[i] = v;
-            }
-        }
-        this._memory.set(array, this.vmem + p);
-        return p;
-    }
+    // public memcpy(p: number, q: number, n: number): number {
+    //     const a = new Uint8Array(this._memory, this.vmem + q, n);
+    //     this._memory.set(a, this.vmem + p);
+    //     return p;
+    // }
+    // public memset(p: number, v: number, n: number): number {
+    //     const array = new Uint8Array(n);
+    //     if (v) {
+    //         for (let i = 0; i < n; i++) {
+    //             array[i] = v;
+    //         }
+    //     }
+    //     this._memory.set(array, this.vmem + p);
+    //     return p;
+    // }
     public strlen(at: number): number {
         let result = 0;
         for (let i = at; this._memory[i]; i++) {
@@ -129,7 +132,8 @@ export class RuntimeEnvironment {
         console.log(`CPU restarted (${gen})`);
         this.instance.exports.reset(this.cpu, gen);
         this.isPausing = false;
-        if (!this.isRunning) {
+        if (!this.isRunning || this.isDebugging) {
+            this.isDebugging = false;
             this.isRunning = true;
             this.cont();
         }
@@ -146,6 +150,7 @@ export class RuntimeEnvironment {
             const expected = this.lastTick + this.period;
             if (now > expected) {
                 this.pic.raiseIRQ(0);
+            // setTimeout(() => this.vga_render(), 1);
             }
             this.lastTick = new Date().valueOf();
         }
@@ -202,4 +207,14 @@ export class RuntimeEnvironment {
         }
         console.log(lines.join('\n'));
     }
+    // public vga_render(): void {
+    //     const newValue = this.instance.exports.vram_check();
+    //     if (this.vgaCheck != newValue) {
+    //         this.vgaCheck = newValue;
+    //         const v: number = this.instance.exports.qvga_render();
+    //         // const a = this._memory.slice(v, v + 320 * 200 * 4);
+    //         const a = new Uint8Array(this._memory.buffer, v, 320 * 200 * 4);
+    //         this.worker.postCommand('vga', a);
+    //     }
+    // }
 }

@@ -82,8 +82,10 @@
 
         #terminal2 {
             position: absolute;
-            width: 320px;
-            height: 240px;
+            margin: 0;
+            padding: 0;
+            width: 640px;
+            height: 400px;
             border: none;
             color: transparent;
             background: transparent;
@@ -128,6 +130,7 @@
                 window.beep.createAudioContext();
             }
 
+if (true) {
             const term = new Terminal({convertEol: true, rendererType: 'canvas'});
             term.open($('#terminal'));
             window.term = term;
@@ -135,22 +138,25 @@
                 window.worker.postMessage({command: 'key', data: e.key.charCodeAt(0) });
             });
             term.focus();
-            
-            // const term = $('#terminal2');
-            // term.write = function (message) {
-            //     this.value += message;
-            //     this.scrollTop = this.scrollHeight;
-            // }
-            // term.addEventListener('keydown', e => {
-            //     e.preventDefault();
-            //     console.log(e);
-            //     if (e.key.length > 1) {
-            //         window.worker.postMessage({command: 'key', data: e.keyCode });
-            //     } else {
-            //         window.worker.postMessage({command: 'key', data: e.key.charCodeAt(0) });
-            //     }
-            // });
-            // window.term = term;
+
+} else {
+
+            const term = $('#terminal2');
+            term.write = function (message) {
+                this.value += message;
+                this.scrollTop = this.scrollHeight;
+            }
+            term.addEventListener('keydown', e => {
+                e.preventDefault();
+                if (e.key.length > 1) {
+                    window.worker.postMessage({command: 'key', data: e.keyCode });
+                } else {
+                    window.worker.postMessage({command: 'key', data: e.key.charCodeAt(0) });
+                }
+            });
+            window.term = term;
+
+}
 
             setTimeout(startSecond, 100);
         }
@@ -191,6 +197,15 @@
                         break;
                     case 'alert':
                         alert(message.data.data);
+                        break;
+                    case 'vga':
+                        {
+                            const array = message.data.data;
+                            const ctx = $('#canvasVGA').getContext('2d');
+                            let data = ctx.createImageData(320, 200);
+                            data.data.set(array);
+                            ctx.putImageData(data, 0, 0);
+                        }
                         break;
                     default:
                         throw message;
@@ -332,7 +347,7 @@
     <div id="emulatorFrame">
         <div id="screen_container">
             <!-- <textarea id="terminal2"></textarea>
-            <canvas id="canvasVGA" width="320" height="240"></canvas> -->
+            <canvas id="canvasVGA" width="320" height="200" style="width: 640px; height: 400px;"></canvas> -->
             <div id="terminal"></div>
         </div>
         <div id="click_to_start"><p>CLICK TO START</p></div>
@@ -355,7 +370,7 @@
 
                     </label>
                     <label>
-                        <a id="buttonLocal" class="buttonFace activeButton">File</a>
+                        <a id="buttonLocal" class="buttonFace activeButton">file:</a>
                         <span id="labelLocal"></span>
                     </label>
                     <input id="fileLocal" type="file" style="width:0px; height:0px;">
