@@ -35,6 +35,7 @@
 %define	STK_CS              20
 %define	STK_FLAGS           22
 
+%define VPC_MEM_PORT        0xFC00
 %define VPC_FD_PORT         0xFD00
 
 %define ARGV 0x0080
@@ -43,7 +44,7 @@ _HEAD:
     dw SEG_BIOS, SIZE_BIOS
 
 banner:
-    db "BIOS v0.0", 10, 0
+    db "BIOS v0.1", 10, 0
 
     alignb 2
 
@@ -121,6 +122,12 @@ i10_caller:
 
 
 i1000:
+    push cs
+    pop ds
+    mov si, cls_msg
+    call puts
+    ret
+
 i1001:
 i1003:
 i1004:
@@ -233,11 +240,15 @@ _int11:
 
 ;; Get Memory Size
 _int12:
-    push ds
-    xor ax, ax
-    mov ds, ax
-    mov ax, [ds: 0x413]
-    pop ds
+    push dx
+    mov dx, VPC_MEM_PORT
+    in ax, dx
+    pop dx
+    ; push ds
+    ; xor ax, ax
+    ; mov ds, ax
+    ; mov ax, [ds: 0x413]
+    ; pop ds
     iret
 
 ;; Diskette BIOS
@@ -372,6 +383,7 @@ _int14:
 
 ;; System BIOS
 _int15:
+    db 0xF1
     stc
     retf 2
 
@@ -596,7 +608,8 @@ __set_irq:
     stosw
     xor al, al
     stosb
-    mov ax, 640
+    mov dx, VPC_MEM_PORT
+    in ax, dx
     stosw
 
 
@@ -690,8 +703,8 @@ _int19:
     mov bx, sp
     int 0x13
     jc .fail
-    cmp word [es:bx+0x01FE], 0xAA55
-    jnz .fail
+;    cmp word [es:bx+0x01FE], 0xAA55
+;    jnz .fail
     call 0:0x7C00
 .fail:
 _repl:
@@ -920,7 +933,7 @@ _palette_data:
     times SIZE_BIOS - 16 - ($-$$) db 0
 __RESET:
     jmp SEG_BIOS:_INIT
-    db "06/15/19"
+    db "06/16/19"
     db 0
     db 0xFF
     db 0

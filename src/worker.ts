@@ -36,7 +36,7 @@ const floppy = new VFD(env);
             return res.blob()
         })
         .then(blob => {
-            return new Promise((resolve, _) => {
+            return new Promise(resolve => {
                 const reader = new FileReader();
                 reader.onloadend = () => {
                     resolve(reader.result);
@@ -46,8 +46,7 @@ const floppy = new VFD(env);
         })
         .then((buffer: ArrayBuffer) => {
             const bios = new Uint8Array(buffer);
-            const bios_base = (bios[0] | (bios[1] << 8)) << 4;
-            env.dmaWrite(bios_base, bios);
+            env.loadBIOS(bios);
         })
 
     wi.postCommand('loaded', null);
@@ -85,6 +84,7 @@ const start = async (gen: number, imageName: string) => {
 onmessage = e => {
     switch (e.data.command) {
         case 'start':
+            env.initMemory(e.data.mem);
             env.iomgr.ioRedirectMap = e.data.ioRedirectMap;
             setTimeout(() => start(e.data.gen, e.data.imageName), 10);
             break;

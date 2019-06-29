@@ -26,6 +26,8 @@ export class RuntimeEnvironment {
     private instance: WebAssembly.Instance;
     private vmem: number;
     private cpu: number;
+    private bios: Uint8Array;
+    private memoryConfig: Uint16Array;
     isDebugging: boolean;
     isPausing: boolean;
     isRunning: boolean;
@@ -38,7 +40,7 @@ export class RuntimeEnvironment {
         this.lastTick = new Date().valueOf();
         this.env = {
             memoryBase: 0,
-            memory: new WebAssembly.Memory({ initial: 300 }),
+            memory: new WebAssembly.Memory({ initial: 1, maximum: 1030 }),
             // tableBase: 0,
             // table: new WebAssembly.Table({ initial: 2, element: "anyfunc" }),
         }
@@ -54,6 +56,11 @@ export class RuntimeEnvironment {
         this.env.vpc_inw = (port: number) => this.iomgr.inw(port);
         this.env.vpc_irq = () => this.pic.dequeueIRQ();
         this.env.TRAP_NORETURN = () => { throw new Error('UNEXPECTED CONTROL FLOW'); };
+        this.env.vpc_grow = (n: number) => {
+            const result = this.env.memory.grow(n);
+            this._memory = new Uint8Array(this.env.memory.buffer);
+            return result;
+        }
         // this.env.memcpy = (p, q, n) => this.memcpy(p, q, n);
         // this.env.memset = (p, v, n) => this.memset(p, v, n);
 
@@ -62,11 +69,27 @@ export class RuntimeEnvironment {
         this.pit = new VPIT(this);
         this.rtc = new RTC(this);
         this.uart = new UART(this, 0x3F8);
+
         this.iomgr.onw(0, null, (_) => Math.random() * 65535);
+        this.iomgr.onw(0xFC00, null, (_) => this.memoryConfig[0]);
+        this.iomgr.onw(0xFC02, null, (_) => this.memoryConfig[1]);
     }
     public loadCPU(wasm: WebAssembly.Instance): void {
         this.instance = wasm;
-        this.vmem = wasm.exports._init();
+    }
+    public loadBIOS(bios: Uint8Array) {
+        this.bios = bios;
+    }
+    public initMemory(size: number) {
+        console.log(`Memory: ${size}KB OK`);
+        if (size < 1024) {
+            this.memoryConfig = new Uint16Array([size, 0]);
+        } else {
+            this.memoryConfig = new Uint16Array([640, size - 1024]);
+        }
+        this.vmem = this.instance.exports._init((size + 1023) / 1024);
+        const bios_base = (this.bios[0] | (this.bios[1] << 8)) << 4;
+        this.dmaWrite(bios_base, this.bios);
     }
     public setTimer(period: number): void {
         this.period = period;

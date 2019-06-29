@@ -8,6 +8,7 @@ typedef uintptr_t size_t;
 
 #define WASM_EXPORT __attribute__((visibility("default")))
 #define WASM_IMPORT extern
+#define WASM_PAGESIZE   0x10000
 
 WASM_IMPORT void println(const char *);
 WASM_IMPORT void vpc_outb(int port, int value);
@@ -16,6 +17,7 @@ WASM_IMPORT void vpc_outw(int port, int value);
 WASM_IMPORT int vpc_inw(int port);
 WASM_IMPORT int vpc_irq();
 WASM_IMPORT _Noreturn void TRAP_NORETURN();
+WASM_IMPORT int vpc_grow(size_t n);
 
 
 void *memset(void *p, int v, size_t n) {
@@ -41,12 +43,12 @@ typedef struct sreg_t sreg_t;
 void cpu_reset(cpu_state *cpu, int gen);
 void dump_regs(cpu_state *cpu, uint32_t eip);
 
-#define MAX_PHYSICAL_MEMORY 0x1000000
-uint8_t mem[MAX_PHYSICAL_MEMORY];
+size_t max_mem;
+uint8_t *mem;
 
-WASM_EXPORT void *_init() {
-    memset(mem, 0, MAX_PHYSICAL_MEMORY);
-    // memset(mem + 0xA0000, 0xFF, 0x50000);
+WASM_EXPORT void *_init(size_t n) {
+    max_mem = n * 1024 * 1024;
+    mem = (void* )(vpc_grow(max_mem / WASM_PAGESIZE + 1) * WASM_PAGESIZE);
     return mem;
 }
 
@@ -312,28 +314,30 @@ static void WRITE_LE32(void *la, uint32_t value) {
     }
 }
 
+#define OFFSET offset
+// #define OFFSET (offset & 0xFFFF)
 static uint8_t READ_MEM8(sreg_t *sreg, uint32_t offset) {
-    return mem[sreg->base + (offset & 0xFFFF)];
+    return mem[sreg->base + OFFSET];
 }
 
 static uint16_t READ_MEM16(sreg_t *sreg, uint32_t offset) {
-    return READ_LE16(mem + sreg->base + (offset & 0xFFFF));
+    return READ_LE16(mem + sreg->base + OFFSET);
 }
 
 static uint32_t READ_MEM32(sreg_t *sreg, uint32_t offset) {
-    return READ_LE32(mem + sreg->base + (offset & 0xFFFF));
+    return READ_LE32(mem + sreg->base + OFFSET);
 }
 
 static void WRITE_MEM8(sreg_t *sreg, uint32_t offset, int value) {
-    mem[sreg->base + (offset & 0xFFFF)] = value;
+    mem[sreg->base + OFFSET] = value;
 }
 
 static void WRITE_MEM16(sreg_t *sreg, uint32_t offset, uint16_t value) {
-    WRITE_LE16(mem + sreg->base + (offset & 0xFFFF), value);
+    WRITE_LE16(mem + sreg->base + OFFSET, value);
 }
 
 static void WRITE_MEM32(sreg_t *sreg, uint32_t offset, uint32_t value) {
-    WRITE_LE32(mem + sreg->base + (offset & 0xFFFF), value);
+    WRITE_LE32(mem + sreg->base + OFFSET, value);
 }
 
 static int MOVSXB(uint8_t b) {
@@ -2626,7 +2630,15 @@ static int cpu_step(cpu_state *cpu) {
                         cpu->GDT = new_dt;
                         return 0;
                     }
-                    // case 3: // LIDT
+                    case 3: // LIDT
+                    {
+                        if (mod) return cpu_status_ud;
+                        gdt_idt_t new_dt;
+                        new_dt.limit = READ_LE16(set.opr1b);
+                        new_dt.base = 0xFFFFFF & READ_LE32(set.opr1b + 2);
+                        cpu->IDT = new_dt;
+                        return 0;
+                    }
                     // case 4: // SMSW
                     // case 6: // LMSW
                     // case 7: // INVLPG
@@ -3015,16 +3027,20 @@ void cpu_reset(cpu_state *cpu, int gen) {
     switch (cpu->cpu_gen) {
         case cpu_gen_8086:
         case cpu_gen_80186:
-            cpu->flags_mask1 |= 0xF000;
+            cpu->flags_mask1 |= 0x0000F000;
             break;
         case cpu_gen_80286:
-            cpu->flags_mask &= 0xFFF;
+            cpu->flags_mask &= 0x00000FFF;
             break;
         case cpu_gen_80386:
-            cpu->flags_mask &= 0x3FFFF;
+            cpu->flags_mask &= 0x0003FFFF;
+            break;
+        case cpu_gen_80486:
+            cpu->flags_mask &= 0x0027FFFF;
             break;
     }
     LOAD_FLAGS(cpu, 0);
+
     cpu->EIP = 0x0000FFF0;
     cpu->CS.sel = 0xF000;
     cpu->CS.base = 0x000F0000;
@@ -3137,11 +3153,11 @@ WASM_EXPORT void reset(cpu_state *cpu, int gen) {
     cpu_reset(cpu, gen);
 }
 
-WASM_EXPORT int check_vram() {
+WASM_EXPORT uint32_t check_vram(uint32_t segment, size_t size) {
     int shift = 17;
     uint32_t acc = 0;
-    uint32_t *vram = (uint32_t *)(mem + 0xA0000);
-    const uint32_t max_vram = 0x10000 / 4;
+    uint32_t *vram = (uint32_t *)(mem + (segment << 4));
+    const uint32_t max_vram = size / 4;
     for (int i = 0; i < max_vram; i++) {
         uint32_t v = vram[i];
         acc = ((acc >> (32 - shift)) | (acc << shift)) ^ v;
