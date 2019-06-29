@@ -2,3 +2,4 @@
 Gemfile* linguist-detectable=false
 Makefile linguist-detectable=false
 lib/* linguist-vendored
+lib merge=ours
