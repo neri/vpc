@@ -13,6 +13,9 @@ class WI implements WorkerInterface {
     postCommand(cmd: string, data: any): void {
         ctx.postMessage({command: cmd, data: data});
     }
+    hasClass(className: string): boolean {
+        return (typeof ctx[className] === 'function');
+    }
 }
 
 const wi = new WI();

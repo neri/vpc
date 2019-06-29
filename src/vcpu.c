@@ -46,8 +46,11 @@ void dump_regs(cpu_state *cpu, uint32_t eip);
 size_t max_mem;
 uint8_t *mem;
 
-WASM_EXPORT void *_init(size_t n) {
-    max_mem = n * 1024 * 1024;
+/**
+ * Initialize internal structures.
+ */
+WASM_EXPORT void *_init(uint32_t mb) {
+    max_mem = mb * 1024 * 1024;
     mem = (void* )(vpc_grow(max_mem / WASM_PAGESIZE + 1) * WASM_PAGESIZE);
     return mem;
 }
@@ -81,9 +84,9 @@ typedef enum cpu_status_t {
     cpu_status_icebp,
     cpu_status_exit = 0x10000,
     cpu_status_div,
-    cpu_status_ud,
-    cpu_status_fpu,
-    cpu_status_double,
+    cpu_status_ud = 0x60000,
+    cpu_status_fpu = 0x70000,
+    cpu_status_double = 0x80000,
     cpu_status_stack = 0xC0000,
     cpu_status_gpf = 0xD0000,
 } cpu_status_t;
@@ -3105,12 +3108,18 @@ static int cpu_block(cpu_state *cpu) {
     return 0;
 }
 
+/**
+ * Allocate internal CPU structure.
+ */
 WASM_EXPORT cpu_state *alloc_cpu(int gen) {
     static cpu_state cpu;
     cpu_reset(&cpu, gen);
     return &cpu;
 }
 
+/**
+ * Run CPU for a while.
+ */
 WASM_EXPORT int run(cpu_state *cpu) {
     int status = cpu_block(cpu);
     switch (status) {
@@ -3140,20 +3149,31 @@ WASM_EXPORT int run(cpu_state *cpu) {
     }
 }
 
+/**
+ * Run CPU step by step.
+ */
 WASM_EXPORT int step(cpu_state *cpu) {
     int status = cpu_step(cpu);
     return status;
 }
 
+/**
+ * Dump state of CPU.
+ */
 WASM_EXPORT void debug_dump(cpu_state *cpu) {
     dump_regs(cpu, cpu->EIP);
 }
 
+/**
+ * Reset CPU.
+ */
 WASM_EXPORT void reset(cpu_state *cpu, int gen) {
     cpu_reset(cpu, gen);
 }
 
-WASM_EXPORT uint32_t check_vram(uint32_t segment, size_t size) {
+
+
+WASM_EXPORT uint32_t get_vram_signature(uint32_t segment, size_t size) {
     int shift = 17;
     uint32_t acc = 0;
     uint32_t *vram = (uint32_t *)(mem + (segment << 4));

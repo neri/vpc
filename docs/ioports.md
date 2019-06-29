@@ -12,18 +12,24 @@
 |00A0-00A1|BYTE|R/W|YES|i8259 PIC #2|
 |03C8-03C9|BYTE|WO|YES|VGA DAC|
 |03F8-03FF|BYTE|R/W|YES|UART COM1|
-|FC00-FCFF|WORD|R/W|NO|System Port|
-|FD00-FD09|MIXED|R/W|NO|Floppy|
+|FCxx|WORD|R/W|NO|System Port|
+|FDxx|MIXED|R/W|NO|Floppy|
 
 ## Original devices
-
 ### 0000: Random Number Generator
 
 |Address|Size|Read/Write|Description|
 |-|-|-|-|
 |0000|WORD|RO|Read Random Number|
 
-### FD00: Floppy Controller
+### FCxx: System Port
+
+|Address|Size|Read/Write|Description|
+|-|-|-|-|
+|FC00|WORD|RO|Get Conventional Memory Size in KB|
+|FC02|WORD|RO|Get Extended Memory Size in KB|
+
+### FDxx: Floppy Controller
 
 |Address|Size|Read/Write|Description|
 |-|-|-|-|

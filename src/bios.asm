@@ -238,6 +238,7 @@ _int11:
     pop ds
     iret
 
+
 ;; Get Memory Size
 _int12:
     push dx
@@ -250,6 +251,7 @@ _int12:
     ; mov ax, [ds: 0x413]
     ; pop ds
     iret
+
 
 ;; Diskette BIOS
 _int13:
@@ -360,8 +362,7 @@ _int13_io:
     mov dx, VPC_FD_PORT
     mov ax, si
     out dx, ax
-    ; sti
-    ; hlt
+    pause
     in ax, dx
     or ax, ax
     jz .skip
@@ -383,7 +384,6 @@ _int14:
 
 ;; System BIOS
 _int15:
-    db 0xF1
     stc
     retf 2
 
@@ -448,8 +448,6 @@ _int17:
 _int18:
     db 0xF1
     jmp _repl
-    ; jmp 0:0x7C00
-    ; iret
 
 
 ;; Clock BIOS
@@ -723,12 +721,8 @@ _repl:
     mov al, '#'
     call _aux_out
 .loop:
-    call _aux_in
-    or al, al
-    jnz .skip
-    hlt
-    jmp .loop
-.skip:
+    xor ah, ah
+    int 0x16
     cmp al, 13
     jz .crlf
     cmp al, 127
@@ -789,17 +783,6 @@ _aux_out:
     mov ds, dx
     mov dx, [ds:0x400]
     out dx, al
-    pop dx
-    pop ds
-    ret
-
-_aux_in:
-    push ds
-    push dx
-    xor dx, dx
-    mov ds, dx
-    mov dx, [ds:0x400]
-    in al, dx
     pop dx
     pop ds
     ret

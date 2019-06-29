@@ -6,6 +6,7 @@ import { VPIC, VPIT, UART, RTC } from './dev';
 export interface WorkerInterface {
     print(s: string): void;
     postCommand(cmd: string, data: any): void;
+    hasClass(className: string): boolean;
 }
 
 export class RuntimeEnvironment {
@@ -123,21 +124,6 @@ export class RuntimeEnvironment {
         const offset = this.vmem + ptr;
         return this._memory.slice(offset, offset + size);
     }
-    // public memcpy(p: number, q: number, n: number): number {
-    //     const a = new Uint8Array(this._memory, this.vmem + q, n);
-    //     this._memory.set(a, this.vmem + p);
-    //     return p;
-    // }
-    // public memset(p: number, v: number, n: number): number {
-    //     const array = new Uint8Array(n);
-    //     if (v) {
-    //         for (let i = 0; i < n; i++) {
-    //             array[i] = v;
-    //         }
-    //     }
-    //     this._memory.set(array, this.vmem + p);
-    //     return p;
-    // }
     public strlen(at: number): number {
         let result = 0;
         for (let i = at; this._memory[i]; i++) {
@@ -148,7 +134,11 @@ export class RuntimeEnvironment {
     public getCString(at: number): string {
         const len = this.strlen(at);
         const bytes = new Uint8Array(this._memory.buffer, at, len);
-        return new TextDecoder('utf-8').decode(bytes);
+        if (this.worker.hasClass('TextDecoder')) {
+            return new TextDecoder('utf-8').decode(bytes);
+        } else {
+            return String.fromCharCode.call(String, bytes);
+        }
     }
     public reset(gen: number): void {
         if (!this.instance) return;
