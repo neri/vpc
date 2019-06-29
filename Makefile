@@ -2,7 +2,7 @@
 
 TARGETS := lib/vcpu.wasm lib/bios.bin lib/worker.js lib/xterm.js lib/xterm.js.map lib/xterm.css
 
-all: $(TARGETS)
+all: lib $(TARGETS)
 
 clean:
 	-rm -f $(TARGETS) tmp/*
@@ -10,6 +10,9 @@ clean:
 run: all
 
 test: all
+
+lib:
+	mkdir lib
 
 lib/vcpu.wasm: src/vcpu.c
 	wa-compile -O $? -o $@

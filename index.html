@@ -43,6 +43,25 @@
             background: #F7F7F7;
         }
         
+        .controlFrame {
+            display: inline-block;
+            margin: 1px 3px;
+            padding: 1px 3px;
+            background: rgba(0, 0, 0, 0.125);
+            border-radius: 8px;
+            min-height: 24px;
+            vertical-align: middle;
+            border: transparent dashed 2px;
+        }
+
+        .controlActive {
+            border-color: #00F;
+        }
+
+        #volumeControl {
+            display: none;
+        }
+
         address {
             width: 720px;
             margin: 1em 0;
@@ -67,13 +86,7 @@
 
         summary {
             float: right;
-            margin: 2px 8px;
-            padding: 0 4px;
-            background: #FFF;
-            border: #AAA solid 1px;
-            border-radius: 4px;
-            font-size: 10pt;
-            cursor: pointer;
+            margin: 4px 8px;
         }
 
         details article {
@@ -87,41 +100,94 @@
         }
 
         #terminal2 {
-            font: 10pt "Monaco", monospace;
+            position: absolute;
+            margin: 0;
+            padding: 0;
+            width: 640px;
+            height: 400px;
+            border: none;
+            color: transparent;
+            background: transparent;
         }
+        
+        .buttonFace {
+            display: inline-block;
+            padding: 0 12px;
+            min-height: 16px;
+            vertical-align: middle;
+            font-size: 12px;
+            border: none;
+            background: #9E9E9E;
+            color: #FFF;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .buttonFace:hover {
+            box-shadow: 1px 1px 4px 2px rgba(0, 0, 0, 0.125);
+        }
+        
+        .activeButton {
+            background: #2196F3;
+        }
+        
+        .destructiveButton {
+            background: #F44336;
+        }
+
+        input[type=text] {
+            border: #AAA dashed 1px;
+            background: transparent;
+        }
+
     </style>
     <script>
+
+        const $ = x => document.querySelector(x);
+
         const startEmu = () => {
-            document.querySelector('#screen_container').style.display = 'block';
-            document.querySelector('#click_to_start').style.display = 'none';
+            $('#screen_container').style.display = 'block';
+            $('#click_to_start').style.display = 'none';
             
+            const canvasVGA = $('#canvasVGA');
+            
+            if (canvasVGA) {
+                const ctx = canvasVGA.getContext('2d');
+                ctx.fillStyle = '#000';
+                ctx.fillRect(0, 0, 640, 480);
+            }
+
             if (window.beep) {
                 window.beep.createAudioContext();
             }
 
+if (true) {
             const term = new Terminal({convertEol: true, rendererType: 'canvas'});
-            term.open(document.querySelector('#terminal'));
+            term.open($('#terminal'));
             window.term = term;
             term.onKey((e) => {
                 window.worker.postMessage({command: 'key', data: e.key.charCodeAt(0) });
             });
             term.focus();
-            
-            // const term = document.querySelector('#terminal2');
-            // term.write = function (message) {
-            //     this.value += message;
-            //     this.scrollTop = this.scrollHeight;
-            // }
-            // term.addEventListener('keydown', e => {
-            //     e.preventDefault();
-            //     console.log(e);
-            //     if (e.key.length > 1) {
-            //         window.worker.postMessage({command: 'key', data: e.keyCode });
-            //     } else {
-            //         window.worker.postMessage({command: 'key', data: e.key.charCodeAt(0) });
-            //     }
-            // });
-            // window.term = term;
+
+} else {
+
+            const term = $('#terminal2');
+            term.write = function (message) {
+                this.value += message;
+                this.scrollTop = this.scrollHeight;
+            }
+            term.addEventListener('keydown', e => {
+                e.preventDefault();
+                if (e.key.length > 1) {
+                    window.worker.postMessage({command: 'key', data: e.keyCode });
+                } else {
+                    window.worker.postMessage({command: 'key', data: e.key.charCodeAt(0) });
+                }
+            });
+            window.term = term;
+
+}
 
             setTimeout(startSecond, 100);
         }
@@ -134,12 +200,25 @@
             worker.onmessage = message => {
                 switch (message.data.command) {
                     case 'loaded':
-                        window.worker.postMessage(
-                            { command: 'start',
-                            imageName: document.querySelector('#selDiskImage').value,
-                            ioRedirectMap: iomgr.ioRedirectMap }
-                            );
+                    {
+                        let cmd = { command: 'start',
+                            gen: parseInt($('#selCpuGen').value),
+                            mem: parseInt($('#selMemory').value),
+                            ioRedirectMap: iomgr.ioRedirectMap
+                        };
+                        $('#selMemory').disabled = true;
+                        if (window.attach) {
+                            window.worker.postMessage({command: 'attach', blob: window.attach});
+                            window.attach = undefined;
+                        } else {
+                            const image = $('#selDiskImage').value;
+                            if (image) {
+                                cmd.imageName = image;
+                            }
+                        }
+                        window.worker.postMessage(cmd);
                         break;
+                    }
                     case 'write':
                         window.term.write(message.data.data);
                         break;
@@ -148,6 +227,18 @@
                         break;
                     case 'beep':
                         window.beep.sound(message.data.data);
+                        break;
+                    case 'alert':
+                        alert(message.data.data);
+                        break;
+                    case 'vga':
+                        {
+                            const array = message.data.data;
+                            const ctx = $('#canvasVGA').getContext('2d');
+                            let data = ctx.createImageData(320, 200);
+                            data.data.set(array);
+                            ctx.putImageData(data, 0, 0);
+                        }
                         break;
                     default:
                         throw message;
@@ -188,11 +279,9 @@
                 this.context = null;
                 this.src = null;
                 
-                document.querySelector('#volumeControl').style.display = 'inline-block';
-                document.querySelector('#inputVolume').addEventListener('change', e => {
-                    if (this.gain) {
-                        this.gain.gain.value = this.getGain();
-                    }
+                $('#volumeControl').style.display = 'inline-block';
+                $('#inputVolume').addEventListener('change', e => {
+                    this.adjustGain();
                 });
             }
             createAudioContext () {
@@ -209,7 +298,7 @@
                 // this.noteOff();
                 
                 this.gain = this.context.createGain();
-                this.gain.gain.value = this.getGain();
+                this.adjustGain();
                 
                 this.src = this.context.createOscillator();
                 this.src.type = 'square';
@@ -226,14 +315,19 @@
                 this.gain = null;
             }
             getGain() {
-                const val = document.querySelector('#inputVolume').value;
-                return val * 2 / 100;
+                const val = $('#inputVolume').value;
+                return val * val / 200;
+            }
+            adjustGain() {
+                if (this.gain) {
+                    this.gain.gain.value = this.getGain();
+                }
             }
         }
 
         window.addEventListener('DOMContentLoaded', () => {
             window.beep = new i8254Sound();
-            document.querySelector('#click_to_start').addEventListener('click', e => {
+            $('#click_to_start').addEventListener('click', e => {
                 if (!window.WebAssembly) {
                     alert("We are sorry, but WebAssembly is not supported.");
                     return;
@@ -241,17 +335,23 @@
                 startEmu();
             });
 
-            document.querySelector('#buttonNMI').addEventListener('click', e => {
+            $('#buttonReset').addEventListener('click', e => {
+                if (window.worker) {
+                    worker.postMessage({command: 'reset', gen: parseInt($('#selCpuGen').value)});
+                }
+            });
+
+            $('#buttonNMI').addEventListener('click', e => {
                 if (window.worker) {
                     worker.postMessage({command: 'nmi' });
                 }
             });
-            document.querySelector('#buttonDump').addEventListener('click', e => {
-                const rawValue = document.querySelector('#inputAddress').value;
+            $('#buttonDump').addEventListener('click', e => {
+                const rawValue = $('#inputAddress').value;
                 let address = 0;
                 if (rawValue.indexOf(':') > 0) {
                     const pair = rawValue.split(':');
-                    address = (parseInt(`0x${pair[0]}`) << 4) + (parseInt(`0x${pair[1]}`));
+                    address = (parseInt(`0x0${pair[0]}`) << 4) + (parseInt(`0x0${pair[1]}`));
                 } else {
                     address = parseInt(`0x0${rawValue}`);
                 }
@@ -259,52 +359,132 @@
                     worker.postMessage({command: 'dump', address: address})
                 }
             })
-            document.querySelector('#buttonUpload').addEventListener('click', e => {
-                document.querySelector('#fileUpload').click();
+            $('#buttonLocal').addEventListener('click', e => {
+                $('#fileLocal').click();
             });
+            const vfdAttach = (name, blob) => {
+                $('#selDiskImage').value = "";
+                $('#labelLocal').value = name;
+                if (window.worker) {
+                    worker.postMessage({command: 'attach', blob: blob});
+                } else {
+                    window.attach = blob;
+                }
+            }
+            $('#fileLocal').addEventListener('change', e => {
+                const reader = new FileReader();
+                reader.addEventListener('load', (e) => {
+                    vfdAttach($('#fileLocal').value, e.target.result);
+                });
+                reader.readAsArrayBuffer(e.target.files[0]);
+            });
+
+            $('html').addEventListener('dragover', e => {
+                e.stopPropagation();
+                e.preventDefault();
+                $('#frameFD').classList.add('controlActive');
+            }, false);
+            $('html').addEventListener('dragleave', e => {
+                e.stopPropagation();
+                e.preventDefault();
+                $('#frameFD').classList.remove('controlActive');
+            }, false);
+            $('html').addEventListener('drop', e => {
+                e.stopPropagation();
+                e.preventDefault();
+                $('#frameFD').classList.remove('controlActive');
+                const reader = new FileReader();
+                const file = e.dataTransfer.files[0]
+                reader.addEventListener('load', (e) => {
+                    vfdAttach(file.name, e.target.result);
+                });
+                reader.readAsArrayBuffer(file);
+            }, false);
         });
-        
+
 </script>
 </head>
 <body>
     <div id="emulatorFrame">
-        <div id="click_to_start"><p>はじめるときはここをクリック</p></div>
         <div id="screen_container">
+            <!-- <textarea id="terminal2"></textarea>
+            <canvas id="canvasVGA" width="320" height="200" style="width: 640px; height: 400px;"></canvas> -->
             <div id="terminal"></div>
-            <!-- <textarea id="terminal2" cols="80" rows="25"></textarea> -->
         </div>
+        <div id="click_to_start"><p>CLICK TO START</p></div>
     </div>
-    
-    <div id="controlPanel">
-        <label id="volumeControl" style="display: none;" class="left">
-            &#x1F64A;<input id="inputVolume" type="range" min="0" max="10" step="1" value="5">&#x1F50A;
-        </label>
-        <details>
-            <summary>Option</summary>
-            <article>
-                <p>
-                        &#x1f4be; Disk:
-                    <label>
-                        Preset:
-                        <select id="selDiskImage">
-                            <option value="../bin/osz.img" selected>osz</option>
-                            <option value="../var/PCDOS090.img">PCDOS 0.9</option>
-                            <option value="../var/PCDOS100.img">PCDOS 1.0</option>
-                            <option value="../var/PCDOS200.img">PCDOS 2.0</option>
-                            <option value="../var/fdos.img">FreeDOS</option>
-                            <option value="../var/elks.img">elks</option>
-                        </select>
-                        <input id="buttonUpload" type="button" value="Attach" disabled>
-                        <input id="fileUpload" type="file" style="width:0px; height:0px;">
-                    </label>
-                </p>
 
-                <form>
-                    &#x1F41B; Debug:
-                    <input id="buttonNMI" type="button" value="NMI">
+    <div id="controlPanel">
+        <div class="left">
+            <label id="volumeControl" class="controlFrame">
+                &#x1F64A;<input id="inputVolume" type="range" min="0" max="10" step="1" value="5">&#x1F649;
+            </label>
+            <span id="frameFD" class="controlFrame">
+                <label>
+                    &#x1f4be;
+                    <select id="selDiskImage">
+                        <option value="">----</option>
+                        <option value="../bin/osz.img" selected>osz</option>
+                    </select>
+                </label>
+                <label>
+                    <a id="buttonLocal" class="buttonFace activeButton">file:</a>
+                    <input id="labelLocal" type="text" readonly>
+                </label>
+                <input id="fileLocal" type="file" style="position: absolute; width:0px; height:0px;">
+            </span>
+        </div>
+        <details open>
+            <summary class="buttonFace activeButton">Option</summary>
+            <article>
+
+                <div class="controlFrame">
+                    &#x1F4A1;
+                    <a id="buttonReset" class="buttonFace destructiveButton">RESET</a>
+                    <label>
+                        CPU:
+                        <select id="selCpuGen">
+                            <option value="0">8086</option>
+                            <option value="1">80186</option>
+                            <option value="2">80286</option>
+                            <option value="3">386SX</option>
+                            <option value="4" selected>486SX</option>
+                        </select>
+                    </label>
+
+                    <label>
+                        Memory:
+                        <select id="selMemory">
+                            <option value="64">64KB</option>
+                            <option value="128">128KB</option>
+                            <option value="256">256KB</option>
+                            <option value="384">384KB</option>
+                            <option value="512">512KB</option>
+                            <option value="640" selected>640KB</option>
+                            <option value="768">768KB *</option>
+                            <option value="896">896KB *</option>
+                            <option value="960">960KB *</option>
+                            <option value="2048">2MB</option>
+                            <option value="3072">3MB</option>
+                            <option value="4096">4MB</option>
+                            <option value="6144">6MB</option>
+                            <option value="8192">8MB</option>
+                            <option value="10240">10MB</option>
+                            <option value="12288">12MB</option>
+                            <option value="16384">16MB</option>
+                            <!-- <option value="24576">24MB</option>
+                            <option value="32768">32MB</option>
+                            <option value="65536">64MB</option> -->
+                        </select>
+                    </label>
+                </div>
+
+                <div class="controlFrame">
+                    &#x1F41B;
+                    <a id="buttonNMI" class="buttonFace">NMI</a>
                     <input id="inputAddress" value="" placeholder="0000:0000" size="12">
-                    <input id="buttonDump" type="submit" value="Dump">
-                </form>
+                    <a id="buttonDump" class="buttonFace">Dump</a>
+                </div>
             </article>
         </details>
     </div>

@@ -36,7 +36,7 @@ const floppy = new VFD(env);
             return res.blob()
         })
         .then(blob => {
-            return new Promise((resolve, _) => {
+            return new Promise(resolve => {
                 const reader = new FileReader();
                 reader.onloadend = () => {
                     resolve(reader.result);
@@ -46,8 +46,7 @@ const floppy = new VFD(env);
         })
         .then((buffer: ArrayBuffer) => {
             const bios = new Uint8Array(buffer);
-            const bios_base = (bios[0] | (bios[1] << 8)) << 4;
-            env.dmaWrite(bios_base, bios);
+            env.loadBIOS(bios);
         })
 
     wi.postCommand('loaded', null);
@@ -75,19 +74,22 @@ const loadImage = async (imageName: string) => {
         .catch(reason => console.error(reason));
 }
 
-const start = async (imageName: string) => {
+const start = async (gen: number, imageName: string) => {
     if (imageName) {
         await loadImage(imageName);
     }
-
-    env.run(1);
+    env.run(gen);
 };
 
 onmessage = e => {
     switch (e.data.command) {
         case 'start':
+            env.initMemory(e.data.mem);
             env.iomgr.ioRedirectMap = e.data.ioRedirectMap;
-            setTimeout(() => start(e.data.imageName), 10);
+            setTimeout(() => start(e.data.gen, e.data.imageName), 10);
+            break;
+        case 'reset':
+            env.reset(e.data.gen);
             break;
         case 'key':
             env.uart.onRX(e.data.data);
@@ -97,6 +99,13 @@ onmessage = e => {
             break;
         case 'dump':
             env.dump(e.data.address);
+            break;
+        case 'attach':
+            try {
+                floppy.attachImage(e.data.blob);
+            } catch (e) {
+                wi.postCommand('alert', e.toString());
+            }
             break;
         default:
             console.log('worker.onmessage', e.data);

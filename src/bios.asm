@@ -35,6 +35,7 @@
 %define	STK_CS              20
 %define	STK_FLAGS           22
 
+%define VPC_MEM_PORT        0xFC00
 %define VPC_FD_PORT         0xFD00
 
 %define ARGV 0x0080
@@ -43,13 +44,14 @@ _HEAD:
     dw SEG_BIOS, SIZE_BIOS
 
 banner:
-    db "BIOS v0.0", 10, 0
+    db "BIOS v0.1", 10, 0
 
     alignb 2
 
 _int10_ftbl:
     dw i1000, i1001, i1002, i1003, i1004, i1005, i1006, i1007
     dw i1008, i1009, i100A, i100B, i100C, i100D, i100E, i100F
+    dw i1010, i1011, i1012, i1013
 _int10_etbl:
 
 ;; IRQ 0 Timer
@@ -91,30 +93,14 @@ _int10:
     push cx
     push ax
     mov bp, sp
+    cld
 
     cmp ah, (_int10_etbl - _int10_ftbl) / 2
     ja .not_supported
-
-    cmp ah, 0
-    jnz .no_00
-    push cs
-    pop ds
-    mov si, cls_msg
-    call puts
-    jmp .end
-.no_00:
-    cmp ah, 0x0E
-    jnz .no_0e
-    xor dx, dx
-    mov ds, dx
-    mov dx, [ds:0x400]
-    out dx, al
-    jmp .end
-.no_0e:
-
+    call i10_caller
 .not_supported:
-.end:
-    add sp, byte 2
+
+    pop ax
     pop cx
     pop dx
     pop bx
@@ -125,10 +111,24 @@ _int10:
     pop es
     iret
 
+i10_caller:
+    mov bl, ah
+    xor bh, bh
+    add bx, bx
+    mov bx, [cs:_int10_ftbl + bx]
+    push bx
+    mov bx, [bp + STK_BX]
+    ret
+
 
 i1000:
+    push cs
+    pop ds
+    mov si, cls_msg
+    call puts
+    ret
+
 i1001:
-i1002:
 i1003:
 i1004:
 i1005:
@@ -140,8 +140,92 @@ i100A:
 i100B:
 i100C:
 i100D:
-i100E:
 i100F:
+i1010:
+i1011:
+i1012:
+    ret
+
+
+i1002:
+    sub sp, byte 16
+    mov di, sp
+    mov ax, 0x5B1B
+    ss stosw
+
+    mov al, dh
+    aam
+    xchg al, ah
+    or al, al
+    jz .comp1
+    add al, '0'
+    ss stosb
+.comp1:
+    xchg al, ah
+    add al, '0'
+    ss stosb
+    mov al, ';'
+    ss stosb
+
+    mov al, dl
+    aam
+    xchg al, ah
+    or al, al
+    jz .comp2
+    add al, '0'
+    ss stosb
+.comp2:
+    xchg al, ah
+    add al, '0'
+    ss stosb
+    mov ax, 'H'
+    ss stosw
+
+    xor dx, dx
+    mov es, dx
+    mov dx, [es:0x400]
+    mov si, sp
+.loop:
+    ss lodsb
+    or al, al
+    jz .end
+    out dx, al
+    jmp .loop
+.end:
+
+    add sp, byte 16
+    ret
+
+
+i1013:
+    cmp dh, 25
+    jae .end
+    cmp dl, 80
+    jae .end
+    call i1002
+    xor dx, dx
+    mov es, dx
+    mov dx, [es:0x400]
+    mov ds, [bp + STK_ES]
+    mov si, [bp + STK_BP]
+    ; mov cx, [bp + STK_CX]
+.loop:
+    lodsb
+    and al, 0x7F
+    out dx, al
+    loop .loop
+.end:
+    ret
+
+
+i100E:
+    xor dx, dx
+    mov ds, dx
+    mov dx, [ds:0x400]
+    and al, 0x7F
+    out dx, al
+    ret
+
 
 
 
@@ -156,11 +240,15 @@ _int11:
 
 ;; Get Memory Size
 _int12:
-    push ds
-    xor ax, ax
-    mov ds, ax
-    mov ax, [ds: 0x413]
-    pop ds
+    push dx
+    mov dx, VPC_MEM_PORT
+    in ax, dx
+    pop dx
+    ; push ds
+    ; xor ax, ax
+    ; mov ds, ax
+    ; mov ax, [ds: 0x413]
+    ; pop ds
     iret
 
 ;; Diskette BIOS
@@ -295,6 +383,7 @@ _int14:
 
 ;; System BIOS
 _int15:
+    db 0xF1
     stc
     retf 2
 
@@ -341,7 +430,8 @@ i1601:
     jz .end
     sub dl, 5
     in al, dx
-    and ax, 0x00FF
+    mov ah, al
+    or ax, ax
     mov [ds:0x41E], ax
 .end:
     pop dx
@@ -359,12 +449,6 @@ _int18:
     db 0xF1
     jmp _repl
     ; jmp 0:0x7C00
-    ; iret
-
-;; Bootstrap
-_int19:
-    db 0xF1
-    jmp _repl
     ; iret
 
 
@@ -427,10 +511,9 @@ _INIT:
     cld
     xor ax, ax
     mov ss, ax
-    mov sp, 0x400
+    mov sp, 0x0400
     mov cx, cs
     mov ds, cx
-
     mov es, ax
 
     xor di, di
@@ -438,6 +521,7 @@ _INIT:
     rep stosw
 
     ;; Install IRQ and BIOS services
+__set_irq:
     mov di, 4 * 6
     mov ax, _iret
     stosw
@@ -524,7 +608,8 @@ _INIT:
     stosw
     xor al, al
     stosb
-    mov ax, 640
+    mov dx, VPC_MEM_PORT
+    in ax, dx
     stosw
 
 
@@ -553,6 +638,7 @@ _INIT:
     out 0xA1, al
     sti
 
+
     ;; init PIT
     mov al, 0x34
     out 0x43, al
@@ -561,27 +647,66 @@ _INIT:
     out 0x40, al
 
 
+    ;; INIT VGA PALETTE
+_init_palette:
+    mov dx, 0x03C8
+    xor ax, ax
+    out dx, ax
+    inc dx
+    mov bx, 16
+.loop1:
+    mov si, _palette_data
+    mov cx, 16
+.loop0:
+    lodsb
+    out dx, al
+    lodsb
+    out dx, al
+    lodsb
+    out dx, al
+    inc si
+    loop .loop0
+    dec bx
+    jnz .loop1
+
+__set_vram:
+    mov ax, 0xA000
+    mov es, ax
+    xor di, di
+    mov cx, 320 * 200
+.loop:
+    in ax, 0
+    stosw
+    loop .loop
+
     mov si, cls_msg
+    call puts
+
+    mov si, banner
     call puts
 
     mov si, _boot_sound_data
     call _play_sound
 
-    mov si, banner
-    call puts
 
-
+    mov dl, 0
     ;; read MBR from disk
+_int19:
+    xor ax, ax
+    mov ds, ax
+    mov es, ax
+    mov ss, ax
+    mov sp, 0x7C00
     mov ax, 0x0201
     mov cx, 0x0001
-    mov dx, 0x0000
-    mov bx, 0x7C00
-    mov es, dx
+    mov dh, 0x00
+    mov bx, sp
     int 0x13
-    jc _repl
-    jmp 0:0x7C00
-
-
+    jc .fail
+;    cmp word [es:bx+0x01FE], 0xAA55
+;    jnz .fail
+    call 0:0x7C00
+.fail:
 _repl:
     cli
     xor ax, ax
@@ -590,6 +715,8 @@ _repl:
     mov sp, 0x0400
     push cs
     pop ds
+    mov si, boot_fail_msg
+    call puts
 .prompt:
     sti
     mov di, ARGV
@@ -786,6 +913,9 @@ puts:
 cls_msg:
     db 0x1b, "[H", 0x1b, "[J", 0
 
+boot_fail_msg:
+    db 10, "Boot failure", 10, 0
+
 bad_cmd_msg:
     db "Bad command or file name", 10, 0
 
@@ -794,10 +924,16 @@ _boot_sound_data:
     dw 2000, 100, 1000, 100
     dw 0xFFFF
 
+_palette_data:
+    dd 0x000000, 0x000099, 0x009900, 0x009999
+    dd 0x990000, 0x990099, 0x999900, 0x999999
+    dd 0x666666, 0x0000FF, 0x00FF00, 0x00FFFF
+    dd 0xFF0000, 0xFF00FF, 0xFFFF00, 0xFFFFFF
+
     times SIZE_BIOS - 16 - ($-$$) db 0
 __RESET:
     jmp SEG_BIOS:_INIT
-    db "06/15/19"
+    db "06/16/19"
     db 0
     db 0xFF
     db 0
