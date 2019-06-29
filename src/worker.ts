@@ -79,7 +79,6 @@ const start = async (gen: number, imageName: string) => {
     if (imageName) {
         await loadImage(imageName);
     }
-
     env.run(gen);
 };
 

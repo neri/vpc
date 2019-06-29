@@ -689,9 +689,11 @@ _int19:
     mov dh, 0x00
     mov bx, sp
     int 0x13
-    jc _repl
+    jc .fail
+    cmp word [es:bx+0x01FE], 0xAA55
+    jnz .fail
     call 0:0x7C00
-
+.fail:
 _repl:
     cli
     xor ax, ax

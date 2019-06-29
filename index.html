@@ -248,9 +248,7 @@ if (true) {
                 
                 $('#volumeControl').style.display = 'inline-block';
                 $('#inputVolume').addEventListener('change', e => {
-                    if (this.gain) {
-                        this.gain.gain.value = this.getGain();
-                    }
+                    this.adjustGain();
                 });
             }
             createAudioContext () {
@@ -267,7 +265,7 @@ if (true) {
                 // this.noteOff();
                 
                 this.gain = this.context.createGain();
-                this.gain.gain.value = this.getGain();
+                this.adjustGain();
                 
                 this.src = this.context.createOscillator();
                 this.src.type = 'square';
@@ -285,7 +283,12 @@ if (true) {
             }
             getGain() {
                 const val = $('#inputVolume').value;
-                return val * 2 / 100;
+                return val * val / 200;
+            }
+            adjustGain() {
+                if (this.gain) {
+                    this.gain.gain.value = this.getGain();
+                }
             }
         }
 

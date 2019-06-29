@@ -154,10 +154,7 @@ export class RuntimeEnvironment {
             }
             this.lastTick = new Date().valueOf();
         }
-        // const time0 = new Date().valueOf();
         const status: number = this.instance.exports.run(this.cpu);
-        // const time1 = new Date().valueOf();
-        // console.log('time', time1 - time0);
         if (status > 1) {
             this.isRunning = false;
             console.log(`CPU halted (${status})`);
