@@ -22,7 +22,7 @@ A PC Emulator implemented by WebAssembly.
   - UART
   - RTC
   - FDC (non standard interface)
-    - Supported: 160KB, 320KB, 640KB, 720KB, 1.2MB, 1.4MB and 512 bytes (Boot Sector Only)
+    - Supported: 160KB, 360KB, 640KB, 720KB, 1.2MB, 1.4MB and 512 bytes (Boot Sector Only)
 
 ## Supported OS
 

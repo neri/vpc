@@ -31,6 +31,7 @@ export class VFD {
     private n_sectors: number;
     private n_cylinders: number;
     private maxLBA: number;
+    private driveType: number;
 
     constructor (env: RuntimeEnvironment) {
         const base = 0xFD00;
@@ -42,6 +43,10 @@ export class VFD {
             switch (data) {
                 case 0:
                     this.status = this.maxLBA;
+                    this.CNT = this.driveType;
+                    this.CYL = this.n_cylinders;
+                    this.HEAD = this.n_heads;
+                    this.SEC = this.n_sectors;
                     break;
                 case 1:
                     this.status = this.readSectors();
@@ -61,8 +66,8 @@ export class VFD {
         env.iomgr.on(base + 9, (_, data) => this.CYL = data, (_) => this.CYL);
     }
     private readSectors(): number {
-        if (!this.image || this.SEC < 1 || this.SEC > (this.n_sectors + 1)
-            || this.HEAD > this.n_heads || this.CYL > this.n_cylinders
+        if (!this.image || this.SEC < 1 || this.SEC > this.n_sectors
+            || this.HEAD >= this.n_heads || this.CYL >= this.n_cylinders
         ) {
             console.log(`vfd_read: BAD SECTOR [C:${this.CYL} H:${this.HEAD} R:${this.SEC}]`);
             return 1;
@@ -86,8 +91,8 @@ export class VFD {
         return 0;
     }
     private writeSectors(): number {
-        if (!this.image || this.SEC < 1 || this.SEC > (this.n_sectors + 1)
-            || this.HEAD > this.n_heads || this.CYL > this.n_cylinders
+        if (!this.image || this.SEC < 1 || this.SEC > this.n_sectors
+            || this.HEAD >= this.n_heads || this.CYL >= this.n_cylinders
         ) {
             console.log(`vfd_write: BAD SECTOR [C:${this.CYL} H:${this.HEAD} R:${this.SEC}]`);
             return 1;
@@ -117,7 +122,9 @@ export class VFD {
         const kb = blob.byteLength / 1024;
         let n_heads = 2;
         let n_sectors: number;
+        let driveType = 0;
         if (blob.byteLength == 512) { // For Boot Sector Test
+            driveType = 4;
             n_heads = 1;
             n_sectors = 1;
         } else {
@@ -134,19 +141,27 @@ export class VFD {
                     n_sectors = 8;
                     break;
                 case 360:
+                    driveType = 1;
                     n_sectors = 9;
                     break;
                 case 640:
                     n_sectors = 8;
                     break;
                 case 720:
+                    driveType = 3;
                     n_sectors = 9;
                     break;
                 case 1200:
+                    driveType = 2;
                     n_sectors = 15;
                     break;
                 case 1440:
+                    driveType = 4;
                     n_sectors = 18;
+                    break;
+                case 2880:
+                    driveType = 6;
+                    n_sectors = 36;
                     break;
                 default:
                     throw new Error('Unexpected image size');
@@ -154,6 +169,7 @@ export class VFD {
         }
         this.image = new Uint8Array(blob);
         this.maxLBA = this.image.byteLength / this.bytesPerSector;
+        this.driveType = driveType;
         this.n_heads = n_heads;
         this.n_sectors = n_sectors;
         this.n_cylinders = this.maxLBA / this.n_heads / this.n_sectors;

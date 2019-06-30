@@ -273,6 +273,11 @@ _int13:
     jnz .no_00
     jmp .end
 .no_00:
+    cmp ah, 0x01
+    jnz .no_01
+    call _int13_get_drive_param
+    jmp .end
+.no_01:
     cmp ah, 0x02
     jnz .no_02
     call _int13_read
@@ -306,6 +311,26 @@ _int13:
     pop ds
     pop es
     iret
+
+_int13_get_drive_param:
+    mov dx, VPC_FD_PORT
+    xor ax, ax
+    out dx, ax
+    add dl, 6
+    in al, dx
+    mov [bp + STK_BX], al
+    inc dx
+    in al, dx
+    mov [bp + STK_DX + 1], al
+    inc dx
+    in al, dx
+    mov [bp + STK_CX], al
+    inc dx
+    in al, dx
+    mov [bp + STK_CX + 1], al
+    xor ax, ax
+    mov [bp + STK_DX], al
+    ret
 
 _int13_set_chr:
     mov dx, VPC_FD_PORT + 6
@@ -602,7 +627,7 @@ __set_irq:
     xor ax, ax
     mov cx, 7
     rep stosw
-    mov ax, 0x0200
+    mov ax, 0x0201
     stosw
     xor al, al
     stosb

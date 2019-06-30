@@ -544,8 +544,8 @@ static int INVOKE_INT(cpu_state *cpu, int n) {
     return 0;
 }
 
-static int SETF8(cpu_state *cpu, int8_t value) {
-    int v = value;
+static int SETF8(cpu_state *cpu, int value) {
+    int8_t v = value;
     cpu->OF = (value != v);
     cpu->SF = (v < 0);
     cpu->ZF = (v == 0);
@@ -553,8 +553,8 @@ static int SETF8(cpu_state *cpu, int8_t value) {
     return value;
 }
 
-static int SETF16(cpu_state *cpu, int16_t value) {
-    int v = value;
+static int SETF16(cpu_state *cpu, int value) {
+    int16_t v = value;
     cpu->OF = (value != v);
     cpu->SF = (v < 0);
     cpu->ZF = (v == 0);
@@ -812,10 +812,10 @@ static void OPR(cpu_state *cpu, sreg_t *seg, uint8_t opcode, operand_set *set) {
         set->opr1 = &cpu->EAX;
         switch (set->size) {
         case 0:
-            set->opr2 = MOVSXB(FETCH8(cpu));
+            set->opr2 = FETCH8(cpu);
             break;
         case 1:
-            set->opr2 = MOVSXW(FETCH16(cpu));
+            set->opr2 = FETCH16(cpu);
             break;
         case 2:
             set->opr2 = FETCH32(cpu);
@@ -1543,7 +1543,7 @@ static int cpu_step(cpu_state *cpu) {
                     cpu->gpr[inst & 7] = val;
                     cpu->AF = (val & 15) == 15;
                 } else {
-                    int val = SETF16(cpu, (MOVSXW(cpu->gpr[inst & 7]) - 1));
+                    int val = SETF16(cpu, MOVSXW(cpu->gpr[inst & 7]) - 1);
                     WRITE_LE16(&cpu->gpr[inst & 7], val);
                     cpu->AF = (val & 15) == 15;
                 }
@@ -1566,7 +1566,7 @@ static int cpu_step(cpu_state *cpu) {
 
             case 0x58: // POP AX
             case 0x59: case 0x5A: case 0x5B: case 0x5C: case 0x5D: case 0x5E: case 0x5F:
-                cpu->gpr[inst & 7] = POPW(cpu);
+                WRITE_LE16(&cpu->gpr[inst & 7], POPW(cpu));
                 return 0;
 
             case 0x60: // PUSHA
@@ -1737,11 +1737,7 @@ static int cpu_step(cpu_state *cpu) {
                 MODRM_W(cpu, seg, inst & 1, &set);
                 int opc = set.opr2;
                 if (inst == 0x81) {
-                    if (set.size == 1) {
-                        set.opr2 = MOVSXW(FETCH16(cpu));
-                    } else {
-                        set.opr2 = FETCH32(cpu);
-                    }
+                    set.opr2 = FETCHW(cpu);
                 } else {
                     set.opr2 = MOVSXB(FETCH8(cpu));
                 }
@@ -2321,7 +2317,11 @@ static int cpu_step(cpu_state *cpu) {
             // case 0xD6: // SETALC (undocumented)
 
             case 0xD7: // XLAT
-                cpu->AL = READ_MEM8(SEGMENT(&cpu->DS), cpu->BX + cpu->AL);
+                if (cpu->cpu_context & CPU_CTX_ADDR32) {
+                    cpu->AL = READ_MEM8(SEGMENT(&cpu->DS), cpu->EBX + cpu->AL);
+                } else {
+                    cpu->AL = READ_MEM8(SEGMENT(&cpu->DS), (cpu->BX + cpu->AL) & 0xFFFF);
+                }
                 return 0;
 
             case 0xD8: // ESC
@@ -2336,26 +2336,45 @@ static int cpu_step(cpu_state *cpu) {
             case 0xE0: // LOOPNZ
             {
                 int disp = MOVSXB(FETCH8(cpu));
-                cpu->CX--;
-                return JUMP_IF(cpu, disp, (cpu->CX != 0 && cpu->ZF == 0));
+                if (cpu->cpu_context & CPU_CTX_DATA32) {
+                    cpu->ECX--;
+                    return JUMP_IF(cpu, disp, (cpu->ECX != 0 && cpu->ZF == 0));
+                } else {
+                    cpu->CX--;
+                    return JUMP_IF(cpu, disp, (cpu->CX != 0 && cpu->ZF == 0));
+                }
             }
 
             case 0xE1: // LOOPZ
             {
                 int disp = MOVSXB(FETCH8(cpu));
-                cpu->CX--;
-                return JUMP_IF(cpu, disp, (cpu->CX != 0 && cpu->ZF != 0));
+                if (cpu->cpu_context & CPU_CTX_DATA32) {
+                    cpu->ECX--;
+                    return JUMP_IF(cpu, disp, (cpu->ECX != 0 && cpu->ZF != 0));
+                } else {
+                    cpu->CX--;
+                    return JUMP_IF(cpu, disp, (cpu->CX != 0 && cpu->ZF != 0));
+                }
             }
 
             case 0xE2: // LOOP
             {
                 int disp = MOVSXB(FETCH8(cpu));
-                cpu->CX--;
-                return JUMP_IF(cpu, disp, (cpu->CX != 0));
+                if (cpu->cpu_context & CPU_CTX_DATA32) {
+                    cpu->ECX--;
+                    return JUMP_IF(cpu, disp, (cpu->ECX != 0));
+                } else {
+                    cpu->CX--;
+                    return JUMP_IF(cpu, disp, (cpu->CX != 0));
+                }
             }
 
             case 0xE3: // JCXZ
-                return JUMP_IF(cpu, MOVSXB(FETCH8(cpu)), cpu->CX == 0);
+                if (cpu->cpu_context & CPU_CTX_DATA32) {
+                    return JUMP_IF(cpu, MOVSXB(FETCH8(cpu)), cpu->ECX == 0);
+                } else {
+                    return JUMP_IF(cpu, MOVSXB(FETCH8(cpu)), cpu->CX == 0);
+                }
 
             case 0xE4: // IN AL, imm8
                 cpu->AL = INPORT8(cpu, FETCH8(cpu));
