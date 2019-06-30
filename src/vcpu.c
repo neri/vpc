@@ -83,6 +83,7 @@ typedef enum cpu_status_t {
     cpu_status_int,
     cpu_status_icebp,
     cpu_status_exit = 0x10000,
+    cpu_status_exception = cpu_status_exit,
     cpu_status_div,
     cpu_status_ud = 0x60000,
     cpu_status_fpu = 0x70000,
@@ -243,6 +244,19 @@ char *dump32(char *p, uint32_t value) {
     return p;
 }
 
+char *dump_dec(char *p, uint32_t value) {
+    char buff[16];
+    size_t l = 0;
+    for (; value; l++) {
+        buff[l] = (value % 10) + '0';
+        value /= 10;
+    }
+    for (int i = 0; i < l; i++) {
+        *p++ = buff[l - i - 1];
+    }
+    return p;
+}
+
 char *dump_string(char *p, const char *s) {
     for (; *s;) {
         *p++ = *s++;
@@ -367,6 +381,14 @@ static uint32_t FETCH32(cpu_state *cpu) {
     uint32_t result = READ_MEM32(&cpu->CS, cpu->EIP);
     cpu->EIP += 4;
     return result;
+}
+
+static uint32_t FETCHW(cpu_state *cpu) {
+    if (cpu->cpu_context & CPU_CTX_DATA32) {
+        return FETCH32(cpu);
+    } else {
+        return FETCH16(cpu);
+    }
 }
 
 static uint32_t POPW(cpu_state *cpu) {
@@ -1501,18 +1523,30 @@ static int cpu_step(cpu_state *cpu) {
             case 0x40: // INC AX
             case 0x41: case 0x42: case 0x43: case 0x44: case 0x45: case 0x46: case 0x47:
             {
-                int val = SETF16(cpu, (MOVSXW(cpu->gpr[inst & 7]) + 1));
-                cpu->gpr[inst & 7] = val;
-                cpu->AF = !(val & 15);
+                if (cpu->cpu_context & CPU_CTX_DATA32) {
+                    int val = SETF32(cpu, (cpu->gpr[inst & 7] + 1));
+                    cpu->gpr[inst & 7] = val;
+                    cpu->AF = !(val & 15);
+                } else {
+                    int val = SETF16(cpu, (MOVSXW(cpu->gpr[inst & 7]) + 1));
+                    WRITE_LE16(&cpu->gpr[inst & 7], val);
+                    cpu->AF = !(val & 15);
+                }
                 return 0;
             }
 
             case 0x48: // DEC AX
             case 0x49: case 0x4A: case 0x4B: case 0x4C: case 0x4D: case 0x4E: case 0x4F:
             {
-                int val = SETF16(cpu, (MOVSXW(cpu->gpr[inst & 7]) - 1));
-                cpu->gpr[inst & 7] = val;
-                cpu->AF = (val & 15) == 15;
+                if (cpu->cpu_context & CPU_CTX_DATA32) {
+                    int val = SETF32(cpu, (cpu->gpr[inst & 7] - 1));
+                    cpu->gpr[inst & 7] = val;
+                    cpu->AF = (val & 15) == 15;
+                } else {
+                    int val = SETF16(cpu, (MOVSXW(cpu->gpr[inst & 7]) - 1));
+                    WRITE_LE16(&cpu->gpr[inst & 7], val);
+                    cpu->AF = (val & 15) == 15;
+                }
                 return 0;
             }
 
@@ -1838,7 +1872,7 @@ static int cpu_step(cpu_state *cpu) {
 
             case 0x9A: // CALL far imm32
             {
-                uint32_t new_eip = FETCH16(cpu);
+                uint32_t new_eip = FETCHW(cpu);
                 uint16_t new_sel = FETCH16(cpu);
                 return FAR_CALL(cpu, new_sel, new_eip);
             }
@@ -2035,9 +2069,9 @@ static int cpu_step(cpu_state *cpu) {
                 set.size = inst & 1;
                 set.opr1 = &cpu->AX;
                 if (set.size) {
-                    set.opr2 = MOVSXW(FETCH16(cpu));
+                    set.opr2 = FETCHW(cpu);
                 } else {
-                    set.opr2 = MOVSXB(FETCH8(cpu));
+                    set.opr2 = FETCH8(cpu);
                 }
                 AND(cpu, &set, 1);
                 return 0;
@@ -2164,7 +2198,7 @@ static int cpu_step(cpu_state *cpu) {
                 if (cpu->cpu_context & CPU_CTX_DATA32) {
                     cpu->gpr[inst & 7] = FETCH32(cpu);
                 } else {
-                    cpu->gpr[inst & 7] = FETCH16(cpu);
+                    WRITE_LE16(&cpu->gpr[inst & 7], FETCH16(cpu));
                 }
                 return 0;
 
@@ -2341,20 +2375,20 @@ static int cpu_step(cpu_state *cpu) {
 
             case 0xE8: // call imm16
             {
-                int disp = MOVSXW(FETCH16(cpu));
+                int disp = FETCHW(cpu);
                 PUSHW(cpu, cpu->EIP);
                 return JUMP_IF(cpu, disp, 1);
             }
 
             case 0xE9: // jmp imm16
             {
-                int disp = MOVSXW(FETCH16(cpu));
+                int disp = FETCHW(cpu);
                 return JUMP_IF(cpu, disp, 1);
             }
 
             case 0xEA: // jmp far imm32
             {
-                uint32_t new_eip = FETCH16(cpu);
+                uint32_t new_eip = FETCHW(cpu);
                 uint16_t new_sel = FETCH16(cpu);
                 return FAR_JUMP(cpu, new_sel, new_eip);
             }
@@ -2941,8 +2975,13 @@ void dump_regs(cpu_state *cpu, uint32_t eip) {
     }
 
     for (int i = 0; i < 8; i++) {
-        *p++ = ' ';
-        p = dump8(p, READ_MEM8(&cpu->CS, eip + i));
+        if (cpu->CS.base + eip + i < max_mem) {
+            *p++ = ' ';
+            p = dump8(p, READ_MEM8(&cpu->CS, eip + i));
+        } else {
+            p = dump_string(p, " **");
+            break;
+        }
     }
 
     if (use32) {
@@ -3010,6 +3049,7 @@ void dump_regs(cpu_state *cpu, uint32_t eip) {
         p = dump_string(p, " GS ");
         p = dump_segment(p, &cpu->GS);
     }
+    *p = 0;
     println(buff);
 }
 
@@ -3153,7 +3193,11 @@ WASM_EXPORT int run(cpu_state *cpu) {
  * Run CPU step by step.
  */
 WASM_EXPORT int step(cpu_state *cpu) {
+    uint32_t last_eip = cpu->EIP;
     int status = cpu_step(cpu);
+    if (status >= cpu_status_exception) {
+        cpu->EIP = last_eip;
+    }
     return status;
 }
 
@@ -3172,6 +3216,63 @@ WASM_EXPORT void reset(cpu_state *cpu, int gen) {
 }
 
 
+/**
+ * Load Selector into specified Segment for debugging.
+ */
+WASM_EXPORT int debug_load_selector(cpu_state *cpu, int seg_index, uint16_t selector) {
+    return LOAD_SEL(cpu, &cpu->sregs[seg_index], selector);
+}
+
+/**
+ * Get JSON of register map for debugging.
+ */
+WASM_EXPORT const char *debug_get_register_map(cpu_state *cpu) {
+    static char buffer[1024];
+    char *p = buffer;
+    p = dump_string(p, "{");
+    p = dump_string(p, "\"AX\":");
+    p = dump_dec(p, (intptr_t)&cpu->AX);
+    p = dump_string(p, ",\"BX\":");
+    p = dump_dec(p, (intptr_t)&cpu->BX);
+    p = dump_string(p, ",\"CX\":");
+    p = dump_dec(p, (intptr_t)&cpu->CX);
+    p = dump_string(p, ",\"DX\":");
+    p = dump_dec(p, (intptr_t)&cpu->DX);
+    p = dump_string(p, ",\"BP\":");
+    p = dump_dec(p, (intptr_t)&cpu->BP);
+    p = dump_string(p, ",\"SP\":");
+    p = dump_dec(p, (intptr_t)&cpu->SP);
+    p = dump_string(p, ",\"SI\":");
+    p = dump_dec(p, (intptr_t)&cpu->SI);
+    p = dump_string(p, ",\"DI\":");
+    p = dump_dec(p, (intptr_t)&cpu->DI);
+    p = dump_string(p, ",\"IP\":");
+    p = dump_dec(p, (intptr_t)&cpu->EIP);
+    p = dump_string(p, ",\"flags\":");
+    p = dump_dec(p, (intptr_t)&cpu->eflags);
+    p = dump_string(p, ",\"CS\":");
+    p = dump_dec(p, (intptr_t)&cpu->CS.sel);
+    p = dump_string(p, ",\"CS.limit\":");
+    p = dump_dec(p, (intptr_t)&cpu->CS.limit);
+    p = dump_string(p, ",\"CS.base\":");
+    p = dump_dec(p, (intptr_t)&cpu->CS.base);
+    p = dump_string(p, ",\"CS.attr\":");
+    p = dump_dec(p, (intptr_t)&cpu->CS.attrs);
+    p = dump_string(p, ",\"DS\":");
+    p = dump_dec(p, (intptr_t)&cpu->DS.sel);
+    p = dump_string(p, ",\"ES\":");
+    p = dump_dec(p, (intptr_t)&cpu->ES.sel);
+    p = dump_string(p, ",\"SS\":");
+    p = dump_dec(p, (intptr_t)&cpu->SS.sel);
+    p = dump_string(p, ",\"FS\":");
+    p = dump_dec(p, (intptr_t)&cpu->FS.sel);
+    p = dump_string(p, ",\"GS\":");
+    p = dump_dec(p, (intptr_t)&cpu->GS.sel);
+    p = dump_string(p, ",\"CR0\":");
+    p = dump_dec(p, (intptr_t)&cpu->CR[0]);
+    p = dump_string(p, "}");
+    return buffer;
+}
 
 WASM_EXPORT uint32_t get_vram_signature(uint32_t segment, size_t size) {
     int shift = 17;
