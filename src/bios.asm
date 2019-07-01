@@ -316,10 +316,9 @@ _int13_get_drive_param:
     mov dx, VPC_FD_PORT
     xor ax, ax
     out dx, ax
-    add dl, 6
-    in al, dx
+    in ax, dx
     mov [bp + STK_BX], al
-    inc dx
+    add dl, 7
     in al, dx
     mov [bp + STK_DX + 1], al
     inc dx
@@ -371,15 +370,15 @@ _int13_read:
 _int13_write:
     mov si, 2
 _int13_io:
-    mov dx, VPC_FD_PORT
-    xor ax, ax
-    out dx, ax
-    in ax, dx
-    or ax, ax
-    jnz .dev_ok
-    mov ax, 0x8000
-    ret
-.dev_ok:
+;     mov dx, VPC_FD_PORT
+;     xor ax, ax
+;     out dx, ax
+;     in ax, dx
+;     or ax, ax
+;     jnz .dev_ok
+;     mov ax, 0x8000
+;     ret
+; .dev_ok:
 
     call _int13_set_chr
     call _int13_set_dma
@@ -455,7 +454,7 @@ i1601:
     jz .end
     sub dl, 5
     in al, dx
-    mov ah, al
+    mov ah, 0x80
     or ax, ax
     mov [ds:0x41E], ax
 .end:
@@ -634,7 +633,10 @@ __set_irq:
     mov dx, VPC_MEM_PORT
     in ax, dx
     stosw
-
+    mov di, 0x41A
+    mov ax, 0x1E
+    stosw
+    stosw
 
     ;; init PIC
     mov al, 0xFF

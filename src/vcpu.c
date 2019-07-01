@@ -2773,7 +2773,7 @@ static int cpu_step(cpu_state *cpu) {
             case 0x0F8D: // JNL d16
             case 0x0F8E: // JLE d16
             case 0x0F8F: // JG d16
-                return JUMP_IF(cpu, MOVSXW(FETCH16(cpu)), EVAL_CC(cpu, inst));
+                return JUMP_IF(cpu, FETCHW(cpu), EVAL_CC(cpu, inst));
 
             case 0x0F90: // SETcc r/m8
             case 0x0F91:
@@ -3210,6 +3210,23 @@ WASM_EXPORT int run(cpu_state *cpu) {
 
 /**
  * Run CPU step by step.
+ * When an exception occurs during `step`, the status code is returned but no interrupt is generated
+ * 
+ * |Status Code|Cause|Continuity|Description|
+ * |-|-|-|-|
+ * |0|Periodic|Y|Periodic return|
+ * |1|Halt|Y|CPU runs HLT instruction|
+ * |2|Pause|Y|CPU runs PAUSE instruction|
+ * |3|Int|Y|Check for IRQ|
+ * |4|ICEBP|Y|CPU runs ICEBP instruction|
+ * |>0x10000|Exit|N|CPU enters to shutdown|
+ * ||#DE|conditional|Divide by zero|
+ * |0x60000|#UD|conditional|Undefined instruction|
+ * |0x70000|#FP|conditional|FPU error|
+ * |0x8XXXX|#DF|N|Double Fault|
+ * |0xCXXXX|#SS|conditional|Stack Exception|
+ * |0xDXXXX|#GP|conditional|General Protection Exception|
+ * 
  */
 WASM_EXPORT int step(cpu_state *cpu) {
     uint32_t last_eip = cpu->EIP;
@@ -3228,7 +3245,8 @@ WASM_EXPORT void debug_dump(cpu_state *cpu) {
 }
 
 /**
- * Reset CPU.
+ * Reset CPU and change generation to specified value.
+ * All registers are reset to predefined values.
  */
 WASM_EXPORT void reset(cpu_state *cpu, int gen) {
     cpu_reset(cpu, gen);
@@ -3290,6 +3308,7 @@ WASM_EXPORT const char *debug_get_register_map(cpu_state *cpu) {
     p = dump_string(p, ",\"CR0\":");
     p = dump_dec(p, (intptr_t)&cpu->CR[0]);
     p = dump_string(p, "}");
+    *p = 0;
     return buffer;
 }
 

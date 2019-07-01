@@ -63,7 +63,7 @@ class RuntimeEnvironment {
         this.emit(0xFFFF0, object);
     }
     reset(n = -1) {
-        return env.wasm.exports.reset(this.vcpu, n);
+        return this.wasm.exports.reset(this.vcpu, n);
     }
     step() {
         return this.wasm.exports.step(this.vcpu);

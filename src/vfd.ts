@@ -12,7 +12,7 @@ import { RuntimeEnvironment } from './env';
  *      2 WRITE SECTORS
  * base + 2 WORD transfer linear low
  * base + 4 WORD transfer linear high
- * base + 6 BYTE transfer counter
+ * base + 6 BYTE transfer sector count
  * base + 7 BYTE head
  * base + 8 BYTE sector
  * base + 9 BYTE cylinder
@@ -42,8 +42,7 @@ export class VFD {
         env.iomgr.onw(base, (_, data) => {
             switch (data) {
                 case 0:
-                    this.status = this.maxLBA;
-                    this.CNT = this.driveType;
+                    this.status = this.driveType;
                     this.CYL = this.n_cylinders;
                     this.HEAD = this.n_heads;
                     this.SEC = this.n_sectors;
@@ -124,9 +123,13 @@ export class VFD {
         let n_sectors: number;
         let driveType = 0;
         if (blob.byteLength == 512) { // For Boot Sector Test
-            driveType = 4;
-            n_heads = 1;
-            n_sectors = 1;
+            this.image = new Uint8Array(blob);
+            this.maxLBA = 1;
+            this.driveType = 4;
+            this.n_heads = 2;
+            this.n_sectors = 18;
+            this.n_cylinders = 80;
+            console.log(`vfd_attach: BootSector ${this.bytesPerSector}`)
         } else {
             switch (kb) {
                 case 160:
@@ -166,17 +169,13 @@ export class VFD {
                 default:
                     throw new Error('Unexpected image size');
             }
-        }
-        this.image = new Uint8Array(blob);
-        this.maxLBA = this.image.byteLength / this.bytesPerSector;
-        this.driveType = driveType;
-        this.n_heads = n_heads;
-        this.n_sectors = n_sectors;
-        this.n_cylinders = this.maxLBA / this.n_heads / this.n_sectors;
-        if (this.maxLBA > 1) {
+            this.image = new Uint8Array(blob);
+            this.maxLBA = this.image.byteLength / this.bytesPerSector;
+            this.driveType = driveType;
+            this.n_heads = n_heads;
+            this.n_sectors = n_sectors;
+            this.n_cylinders = this.maxLBA / this.n_heads / this.n_sectors;
             console.log(`vfd_attach: ${kb}KB [C:${this.n_cylinders} H:${this.n_heads} R:${this.n_sectors}] LBA:${this.maxLBA}`)
-        } else {
-            console.log(`vfd_attach: BootSector ${this.bytesPerSector}`)
         }
     }
 }
