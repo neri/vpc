@@ -125,6 +125,16 @@ describe('CPU', () => {
             prepare().then(() => done()).catch(reason => done(reason))
         });
 
+        it('RESET', () => {
+            env.setReg('CS', 0x12345678);
+            env.setReg('IP', 0x12345678);
+            env.reset(0);
+            expect(env.getReg('CS')).toBe(0x0000F000);
+            expect(env.getReg('CS.base')).toBe(0x000F0000);
+            expect(env.getReg('CS.attr')).toBe(0x0000009B);
+            expect(env.getReg('IP')).toBe(0x0000FFF0);
+        });
+
         it('#8086', () => {
             env.reset(0);
             expect(env.getReg('CS')).toBe(0x0000F000);
@@ -189,24 +199,71 @@ describe('CPU', () => {
             expect(env.getReg('IP')).toBe(0xFFF0);
         });
 
-        it('NOP', () => {
+        it('NOP regular', () => {
             env.emitTest([0x90]);
             expect(env.step()).toBe(0);
             expect(env.getReg('IP')).toBe(0xFFF1);
             expect(env.changed()).toStrictEqual(['IP']);
         });
 
-        it('PAUSE', () => {
+        it('NOP (PAUSE)', () => {
             env.emitTest([0xF3, 0x90]);
             expect(env.step()).toBe(2);
             expect(env.getReg('IP')).toBe(0xFFF2);
             expect(env.changed()).toStrictEqual(['IP']);
         });
 
-        it('LOCK (NOP PREFIX)', () => {
-            env.emitTest([0xF0, 0x90]);
+        it('NOP (PREFIX)', () => {
+            env.emitTest([0x26, 0x90, 0x2E, 0x90, 0x36, 0x90, 0x3E, 0x90, 0xF0, 0x90]);
             expect(env.step()).toBe(0);
             expect(env.getReg('IP')).toBe(0xFFF2);
+            expect(env.changed()).toStrictEqual(['IP']);
+
+            env.saveState();
+            expect(env.step()).toBe(0);
+            expect(env.getReg('IP')).toBe(0xFFF4);
+            expect(env.changed()).toStrictEqual(['IP']);
+
+            env.saveState();
+            expect(env.step()).toBe(0);
+            expect(env.getReg('IP')).toBe(0xFFF6);
+            expect(env.changed()).toStrictEqual(['IP']);
+
+            env.saveState();
+            expect(env.step()).toBe(0);
+            expect(env.getReg('IP')).toBe(0xFFF8);
+            expect(env.changed()).toStrictEqual(['IP']);
+
+            env.saveState();
+            expect(env.step()).toBe(0);
+            expect(env.getReg('IP')).toBe(0xFFFA);
+            expect(env.changed()).toStrictEqual(['IP']);
+
+            env.reset();
+            env.emitTest([0x64, 0x90, 0x65, 0x90, 0xF2, 0x90, 0x66, 0x90, 0x67, 0x90]);
+            env.saveState();
+            expect(env.step()).toBe(0);
+            expect(env.getReg('IP')).toBe(0xFFF2);
+            expect(env.changed()).toStrictEqual(['IP']);
+
+            env.saveState();
+            expect(env.step()).toBe(0);
+            expect(env.getReg('IP')).toBe(0xFFF4);
+            expect(env.changed()).toStrictEqual(['IP']);
+
+            env.saveState();
+            expect(env.step()).toBe(0);
+            expect(env.getReg('IP')).toBe(0xFFF6);
+            expect(env.changed()).toStrictEqual(['IP']);
+
+            env.saveState();
+            expect(env.step()).toBe(0);
+            expect(env.getReg('IP')).toBe(0xFFF8);
+            expect(env.changed()).toStrictEqual(['IP']);
+
+            env.saveState();
+            expect(env.step()).toBe(0);
+            expect(env.getReg('IP')).toBe(0xFFFA);
             expect(env.changed()).toStrictEqual(['IP']);
         });
 
@@ -554,6 +611,97 @@ describe('CPU', () => {
             expect(env.changed()).toStrictEqual(['DX','IP','flags']);
         });
 
+        it ('NOT', () => {
+            env.emitTest([0xF6, 0xD1, 0xF6, 0xD1, 0xF6, 0xD6, 0xF7, 0xD5, 0x66, 0xF7, 0xD6]);
+            env.setReg('CX', 0x123456FF);
+            env.setReg('DX', 0x12345678);
+            env.setReg('BP', 0x123455AA);
+            env.setReg('SI', 0x12345678);
+            env.saveState();
+            expect(env.step()).toBe(0);
+            expect(env.getReg('IP')).toBe(0xFFF2);
+            expect(env.getReg('CX')).toBe(0x12345600);
+            expect(env.changed()).toStrictEqual(['CX','IP']);
+
+            env.saveState();
+            expect(env.step()).toBe(0);
+            expect(env.getReg('IP')).toBe(0xFFF4);
+            expect(env.getReg('CX')).toBe(0x123456FF);
+            expect(env.changed()).toStrictEqual(['CX','IP']);
+
+            env.saveState();
+            expect(env.step()).toBe(0);
+            expect(env.getReg('IP')).toBe(0xFFF6);
+            expect(env.getReg('DX')).toBe(0x1234A978);
+            expect(env.changed()).toStrictEqual(['DX','IP']);
+
+            env.saveState();
+            expect(env.step()).toBe(0);
+            expect(env.getReg('IP')).toBe(0xFFF8);
+            expect(env.getReg('BP')).toBe(0x1234AA55);
+            expect(env.changed()).toStrictEqual(['BP','IP']);
+
+            env.saveState();
+            expect(env.step()).toBe(0);
+            expect(env.getReg('IP')).toBe(0xFFFB);
+            expect(env.getReg('SI')).toBe(0xEDCBA987);
+            expect(env.changed()).toStrictEqual(['IP','SI']);
+        });
+
+        it ('NEG', () => {
+            env.emitTest([0xF6, 0xD9, 0xF6, 0xDE, 0xF6, 0xDA, 0xF7, 0xD9, 0xF7, 0xDD]);
+            env.setReg('CX', 0x55555555);
+            env.setReg('DX', 0x12340080);
+            env.setReg('BP', 0x00008000);
+            env.saveState();
+            expect(env.step()).toBe(0);
+            expect(env.getReg('IP')).toBe(0xFFF2);
+            expect(env.getReg('CX')).toBe(0x555555AB);
+            expect(env.getReg('flags')).toBe(0x0093);
+            expect(env.changed()).toStrictEqual(['CX','IP','flags']);
+
+            env.saveState();
+            expect(env.step()).toBe(0);
+            expect(env.getReg('IP')).toBe(0xFFF4);
+            expect(env.getReg('flags')).toBe(0x0046);
+            expect(env.changed()).toStrictEqual(['IP','flags']);
+
+            env.saveState();
+            expect(env.step()).toBe(0);
+            expect(env.getReg('IP')).toBe(0xFFF6);
+            expect(env.getReg('flags')).toBe(0x0883);
+            expect(env.changed()).toStrictEqual(['IP','flags']);
+
+            env.saveState();
+            expect(env.step()).toBe(0);
+            expect(env.getReg('IP')).toBe(0xFFF8);
+            expect(env.getReg('CX')).toBe(0x5555AA55);
+            expect(env.getReg('flags')).toBe(0x0097);
+            expect(env.changed()).toStrictEqual(['CX','IP','flags']);
+
+            env.saveState();
+            expect(env.step()).toBe(0);
+            expect(env.getReg('IP')).toBe(0xFFFA);
+            expect(env.getReg('flags')).toBe(0x0887);
+            expect(env.changed()).toStrictEqual(['IP','flags']);
+
+            env.reset();
+            env.emitTest([0x66, 0xF7, 0xDE, 0x66, 0xF7, 0xDF]);
+            env.setReg('SI', 0x12345678);
+            env.setReg('DI', 0x80000000);
+            env.saveState();
+            expect(env.step()).toBe(0);
+            expect(env.getReg('IP')).toBe(0xFFF3);
+            expect(env.getReg('SI')).toBe(0xEDCBA988);
+            expect(env.getReg('flags')).toBe(0x0097);
+            expect(env.changed()).toStrictEqual(['IP','SI','flags']);
+
+            env.saveState();
+            expect(env.step()).toBe(0);
+            expect(env.getReg('IP')).toBe(0xFFF6);
+            expect(env.getReg('flags')).toBe(0x0887);
+            expect(env.changed()).toStrictEqual(['IP','flags']);
+        });
 
         it ('ADD', () => {
             env.emitTest([0x01, 0xCB, 0x01, 0xDA, 0x81, 0xC3, 0x9A, 0x78]);

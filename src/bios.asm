@@ -544,7 +544,11 @@ _INIT:
 
     ;; Install IRQ and BIOS services
 __set_irq:
-    mov di, 4 * 6
+    mov di, 4 * 5
+    mov ax, _iret
+    stosw
+    mov ax, cs
+    stosw
     mov ax, _iret
     stosw
     mov ax, cs

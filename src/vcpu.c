@@ -900,87 +900,81 @@ static void SUB(cpu_state *cpu, operand_set *set, int c, int cmp) {
 }
 
 static void OR(cpu_state *cpu, operand_set *set) {
-    int value;
     switch (set->size) {
         case 0:
         {
-            value = *set->opr1b | set->opr2;
-            cpu->CF = 0;
+            int value = *set->opr1b | set->opr2;
             *set->opr1b = SETF8(cpu, value);
             break;
         }
         case 1:
         {
-            value = READ_LE16(set->opr1) | set->opr2;
-            cpu->CF = 0;
+            int value = READ_LE16(set->opr1) | set->opr2;
             WRITE_LE16(set->opr1, SETF16(cpu, value));
             break;
         }
         case 2:
         {
-            value = READ_LE32(set->opr1) | set->opr2;
-            cpu->CF = 0;
+            int value = READ_LE32(set->opr1) | set->opr2;
             WRITE_LE32(set->opr1, SETF32(cpu, value));
             break;
         }
     }
+    cpu->CF = 0;
+    cpu->OF = 0;
 }
 
 static void AND(cpu_state *cpu, operand_set *set, int test) {
-    int value;
     switch (set->size) {
         case 0:
         {
-            value = *set->opr1b & set->opr2;
-            cpu->CF = 0;
+            int value = *set->opr1b & set->opr2;
             SETF8(cpu, value);
             if (!test) *set->opr1b = value;
             break;
         }
         case 1:
         {
-            value = READ_LE16(set->opr1) & set->opr2;
-            cpu->CF = 0;
+            int value = READ_LE16(set->opr1) & set->opr2;
             SETF16(cpu, value);
             if (!test) WRITE_LE16(set->opr1, value);
             break;
         }
         case 2:
         {
-            value = READ_LE32(set->opr1) & set->opr2;
-            cpu->CF = 0;
+            int value = READ_LE32(set->opr1) & set->opr2;
             SETF32(cpu, value);
             if (!test) WRITE_LE32(set->opr1, value);
             break;
         }
     }
+    cpu->CF = 0;
+    cpu->OF = 0;
 }
 
 static void XOR(cpu_state *cpu, operand_set *set) {
-    int value;
     switch (set->size) {
         case 0:
         {
-            value = *set->opr1b ^ set->opr2;
-            cpu->CF = 0;
+            int value = *set->opr1b ^ set->opr2;
             *set->opr1b = SETF8(cpu, value);
             break;
         }
         case 1:
         {
-            value = READ_LE16(set->opr1) ^ set->opr2;
-            cpu->CF = 0;
+            int value = READ_LE16(set->opr1) ^ set->opr2;
             WRITE_LE16(set->opr1, SETF16(cpu, value));
             break;
         }
         case 2:
         {
-            value = READ_LE32(set->opr1) ^ set->opr2;
-            cpu->CF = 0;
+            int value = READ_LE32(set->opr1) ^ set->opr2;
             WRITE_LE32(set->opr1, SETF32(cpu, value));
             break;
         }
     }
+    cpu->CF = 0;
+    cpu->OF = 0;
 }
 
 static int JUMP_IF(cpu_state *cpu, int disp, int cc) {
@@ -1021,28 +1015,28 @@ static int EVAL_CC(cpu_state *cpu, int cc) {
             return (!(cpu->CF || cpu->ZF));
 
         case 8: // xS
-            return ( cpu->SF);
+            return (cpu->SF);
 
         case 9: // xNS
-            return ( !cpu->SF);
+            return (!cpu->SF);
 
         case 0xA: // xP d8
-            return ( cpu->PF);
+            return (cpu->PF);
 
         case 0xB: // xNP
-            return ( !cpu->PF);
+            return (!cpu->PF);
 
         case 0xC: // xL
-            return ( cpu->SF != cpu->OF);
+            return (cpu->SF != cpu->OF);
 
         case 0xD: // xNL
-            return ( cpu->SF == cpu->OF);
+            return (cpu->SF == cpu->OF);
 
         case 0xE: // xLE
-            return ( cpu->ZF || (cpu->SF != cpu->OF));
+            return (cpu->ZF || (cpu->SF != cpu->OF));
 
         case 0xF: // xG
-            return ( !(cpu->ZF || cpu->SF != cpu->OF));
+            return (!(cpu->ZF || (cpu->SF != cpu->OF)));
     }
     TRAP_NORETURN();
 }
@@ -1309,7 +1303,7 @@ static int LDS(cpu_state *cpu, sreg_t *seg_ovr, sreg_t *target) {
     if (MODRM_W(cpu, seg_ovr, 1, &set)) return cpu_status_ud; // VEX
     uint16_t new_sel;
     uint32_t offset;
-    if (cpu->cpu_context & CPU_CTX_DATA32) {
+    if (set.size == 2) {
         offset = READ_LE32(set.opr1);
         new_sel = READ_LE16(set.opr1b + 4);
     } else {
@@ -1318,7 +1312,11 @@ static int LDS(cpu_state *cpu, sreg_t *seg_ovr, sreg_t *target) {
     }
     int status = LOAD_SEL(cpu, target, new_sel);
     if (status) return status;
-    cpu->gpr[set.opr2] = offset;
+    if (set.size == 2) {
+        cpu->gpr[set.opr2] = offset;
+    } else {
+        WRITE_LE32(&cpu->gpr[set.opr2], offset);
+    }
     return 0;
 }
 
@@ -1566,7 +1564,11 @@ static int cpu_step(cpu_state *cpu) {
 
             case 0x58: // POP AX
             case 0x59: case 0x5A: case 0x5B: case 0x5C: case 0x5D: case 0x5E: case 0x5F:
-                WRITE_LE16(&cpu->gpr[inst & 7], POPW(cpu));
+                if (cpu->cpu_context & CPU_CTX_DATA32) {
+                    cpu->gpr[inst & 7] = POPW(cpu);
+                } else {
+                    WRITE_LE16(&cpu->gpr[inst & 7], POPW(cpu));
+                }
                 return 0;
 
             case 0x60: // PUSHA
@@ -1840,7 +1842,7 @@ static int cpu_step(cpu_state *cpu) {
                 }
 
             case 0x90: // NOP
-                if (prefix & (PREFIX_REPZ | PREFIX_REPNZ)) {
+                if (prefix & PREFIX_REPZ) {
                     return cpu_status_pause;
                 } else {
                     return 0;
@@ -2470,8 +2472,8 @@ static int cpu_step(cpu_state *cpu) {
                         return 0;
                     case 3: // NEG r/m8
                     {
-                        int src = *set.opr1b;
-                        cpu->AF = (src & 15);
+                        int src = MOVSXB(*set.opr1b);
+                        cpu->AF = !!(src & 15);
                         cpu->CF = !!src;
                         *set.opr1b = SETF8(cpu, -src);
                         return 0;
@@ -2513,19 +2515,43 @@ static int cpu_step(cpu_state *cpu) {
                 switch (set.opr2) {
                     case 0: // TEST r/m16, imm16
                         cpu->CF = 0;
-                        SETF16(cpu, *set.opr1b & FETCH16(cpu));
+                        if (set.size == 1) {
+                            SETF16(cpu, *set.opr1b & FETCH16(cpu));
+                        } else {
+                            SETF32(cpu, *set.opr1b & FETCH32(cpu));
+                        }
                         return 0;
                     case 1: // TEST?
                         return cpu_status_ud;
                     case 2: // NOT r/m16
-                        WRITE_LE16(set.opr1, READ_LE16(set.opr1));
+                        if (set.size == 1) {
+                            WRITE_LE16(set.opr1, ~ READ_LE16(set.opr1));
+                        } else {
+                            WRITE_LE32(set.opr1, ~ READ_LE32(set.opr1));
+                        }
                         return 0;
                     case 3: // NEG r/m16
                     {
-                        int src = READ_LE16(set.opr1);
-                        cpu->AF = (src & 15);
-                        cpu->CF = !!src;
-                        WRITE_LE16(set.opr1, SETF16(cpu, -src));
+                        if (set.size == 1) {
+                            int src = MOVSXW(READ_LE16(set.opr1));
+                            cpu->AF = !!(src & 15);
+                            cpu->CF = !!src;
+                            WRITE_LE16(set.opr1, SETF16(cpu, -src));
+                        } else {
+                            int src = READ_LE32(set.opr1);
+                            if (src == INT32_MIN) {
+                                cpu->CF = 1;
+                                cpu->PF = 1;
+                                cpu->AF = 0;
+                                cpu->ZF = 0;
+                                cpu->SF = 1;
+                                cpu->OF = 1;
+                            } else {
+                                cpu->AF = !!(src & 15);
+                                cpu->CF = !!src;
+                                WRITE_LE32(set.opr1, SETF32(cpu, -src));
+                            }
+                        }
                         return 0;
                     }
                     case 4: // MUL ax, r/m16
