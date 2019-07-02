@@ -574,7 +574,7 @@ describe('CPU', () => {
 
 
         it ('INC reg16', () => {
-            env.emitTest([0x45, 0x45]);
+            env.emitTest([0x45, 0x45, 0x46, 0x46]);
             env.setReg('BP', 0xFFFFFFFF);
             env.saveState();
 
@@ -590,10 +590,27 @@ describe('CPU', () => {
             expect(env.getReg('BP')).toBe(0xFFFF0001);
             expect(env.getReg('flags')).toBe(0x0002);
             expect(env.changed()).toStrictEqual(['BP','IP','flags']);
+
+            env.setReg('SI', 0xFFFFFFFF);
+            env.setReg('flags', 0x0003);
+            env.saveState();
+            expect(env.step()).toBe(0);
+            expect(env.getReg('IP')).toBe(0xFFF3);
+            expect(env.getReg('SI')).toBe(0xFFFF0000);
+            expect(env.getReg('flags')).toBe(0x0057);
+            expect(env.changed()).toStrictEqual(['IP','SI','flags']);
+
+            env.saveState();
+            expect(env.step()).toBe(0);
+            expect(env.getReg('IP')).toBe(0xFFF4);
+            expect(env.getReg('SI')).toBe(0xFFFF0001);
+            expect(env.getReg('flags')).toBe(0x0003);
+            expect(env.changed()).toStrictEqual(['IP','SI','flags']);
+
         });
 
         it ('DEC reg16', () => {
-            env.emitTest([0x4A, 0x4A]);
+            env.emitTest([0x4A, 0x4A, 0x49, 0x49]);
             env.setReg('DX', 0x12340000);
             env.saveState();
 
@@ -609,6 +626,22 @@ describe('CPU', () => {
             expect(env.getReg('DX')).toBe(0x1234FFFE);
             expect(env.getReg('flags')).toBe(0x0082);
             expect(env.changed()).toStrictEqual(['DX','IP','flags']);
+
+            env.setReg('CX', 0x56780000);
+            env.setReg('flags', 0x0003);
+            env.saveState();
+            expect(env.step()).toBe(0);
+            expect(env.getReg('IP')).toBe(0xFFF3);
+            expect(env.getReg('CX')).toBe(0x5678FFFF);
+            expect(env.getReg('flags')).toBe(0x0097);
+            expect(env.changed()).toStrictEqual(['CX','IP','flags']);
+
+            env.saveState();
+            expect(env.step()).toBe(0);
+            expect(env.getReg('IP')).toBe(0xFFF4);
+            expect(env.getReg('CX')).toBe(0x5678FFFE);
+            expect(env.getReg('flags')).toBe(0x0083);
+            expect(env.changed()).toStrictEqual(['CX','IP','flags']);
         });
 
         it ('NOT', () => {

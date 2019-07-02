@@ -48,6 +48,7 @@ uint8_t *mem;
 
 /**
  * Initialize internal structures.
+ * THIS FUNCTION MUST BE CALLED BEFORE ALL OTHER FUNCTIONS.
  */
 WASM_EXPORT void *_init(uint32_t mb) {
     max_mem = mb * 1024 * 1024;
@@ -82,8 +83,8 @@ typedef enum cpu_status_t {
     cpu_status_pause,
     cpu_status_int,
     cpu_status_icebp,
-    cpu_status_exit = 0x10000,
-    cpu_status_exception = cpu_status_exit,
+    cpu_status_exception = 0x10000,
+    cpu_status_exit,
     cpu_status_div,
     cpu_status_ud = 0x60000,
     cpu_status_fpu = 0x70000,
@@ -277,7 +278,7 @@ static uint8_t *LEA_REG8(cpu_state *cpu, int index) {
     }
 }
 
-static void MOVE_TO_REG8(cpu_state *cpu, int index, uint8_t value) {
+static void WRITE_REG8(cpu_state *cpu, int index, uint8_t value) {
     *LEA_REG8(cpu, index) = value;
 }
 
@@ -363,6 +364,10 @@ static int MOVSXB(uint8_t b) {
 
 static int MOVSXW(uint16_t w) {
     return (int)(int16_t)w;
+}
+
+static int64_t MOVSXD(uint32_t d) {
+    return (int64_t)(int32_t)d;
 }
 
 static uint8_t FETCH8(cpu_state *cpu) {
@@ -1783,7 +1788,7 @@ static int cpu_step(cpu_state *cpu) {
                 MODRM_W(cpu, seg, 0, &set);
                 int temp = *set.opr1b;
                 *set.opr1b = LOAD_REG8(cpu, set.opr2);
-                MOVE_TO_REG8(cpu, set.opr2, temp);
+                WRITE_REG8(cpu, set.opr2, temp);
                 return 0;
             }
 
@@ -1800,7 +1805,7 @@ static int cpu_step(cpu_state *cpu) {
             case 0x89: // MOV rm, r16
             case 0x8A: // MOV r8, rm
             case 0x8B: // MOV r16, rm
-                MODRM_W_D(cpu, seg, inst & 1, inst &2, &set);
+                MODRM_W_D(cpu, seg, inst & 1, inst & 2, &set);
                 switch (set.size) {
                 case 0:
                     *set.opr1b = set.opr2;
@@ -1956,18 +1961,6 @@ static int cpu_step(cpu_state *cpu) {
                 int rep = prefix & (PREFIX_REPZ | PREFIX_REPNZ);
                 size_t count = cpu->CX;
                 if (rep && count == 0) return 0;
-                // if (rep && cpu->DF == 0
-                //     && ((cpu->SI + count) <= 0x10000)
-                //     && ((cpu->DI + count) <= 0x10000)
-                // ) {
-                //     uint8_t *src = mem + _seg->base + cpu->SI;
-                //     uint8_t *dst = mem + cpu->ES.base + cpu->DI;
-                //     memcpy(dst, src, count);
-                //     cpu->SI += count;
-                //     cpu->DI += count;
-                //     cpu->CX = 0;
-                //     return 0;
-                // }
                 do {
                     WRITE_MEM8(&cpu->ES, cpu->DI, READ_MEM8(_seg, cpu->SI));
                     if (cpu->DF) {
@@ -2188,7 +2181,7 @@ static int cpu_step(cpu_state *cpu) {
 
             case 0xB0: // MOV AL, imm8
             case 0xB1: case 0xB2: case 0xB3: case 0xB4: case 0xB5: case 0xB6: case 0xB7:
-                MOVE_TO_REG8(cpu, inst, FETCH8(cpu));
+                WRITE_REG8(cpu, inst, FETCH8(cpu));
                 return 0;
 
             case 0xB8: // MOV AX, imm16
@@ -3236,7 +3229,7 @@ WASM_EXPORT int run(cpu_state *cpu) {
 
 /**
  * Run CPU step by step.
- * When an exception occurs during `step`, the status code is returned but no interrupt is generated
+ * When an exception occurs during `step`, the status code is returned but no interrupt is generated.
  * 
  * |Status Code|Cause|Continuity|Description|
  * |-|-|-|-|
