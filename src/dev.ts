@@ -203,9 +203,14 @@ export class VPIT {
  * Universal Asynchronous Receiver Transmitter
  */
 export class UART {
+    private env: RuntimeEnvironment;
     private fifo_i: number[];
+    private irq: number;
+    private IER: number;
 
-    constructor (env: RuntimeEnvironment, base: number) {
+    constructor (env: RuntimeEnvironment, base: number, irq: number) {
+        this.env = env;
+        this.irq = irq;
         this.fifo_i = [];
         env.iomgr.on(base, (_, data) => {
             env.worker.print(String.fromCharCode(data));
@@ -216,10 +221,14 @@ export class UART {
                 return 0;
             }
         });
-        env.iomgr.on(base + 5, null, (_) => 0x40 | ((this.fifo_i.length > 0) ? 1 : 0));
+        env.iomgr.on(base + 1, (_, data) => this.IER = data, (_) => this.IER);
+        env.iomgr.on(base + 5, null, (_) => 0x20 | ((this.fifo_i.length > 0) ? 1 : 0));
     }
     public onRX(data: number): void {
         this.fifo_i.push(data & 0xFF);
+        if (this.IER & 1) {
+            this.env.pic.raiseIRQ(this.irq);
+        }
     }
 }
 

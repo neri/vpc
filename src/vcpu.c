@@ -866,6 +866,13 @@ static void ADD(cpu_state *cpu, operand_set *set, int c) {
     }
 }
 
+static void INC(cpu_state *cpu, operand_set *set) {
+    int saved_cf = cpu->CF;
+    set->opr2 = 1;
+    ADD(cpu, set, 0);
+    cpu->CF = saved_cf;
+}
+
 static void SUB(cpu_state *cpu, operand_set *set, int c, int cmp) {
     int value;
     int src = set->opr2;
@@ -902,6 +909,13 @@ static void SUB(cpu_state *cpu, operand_set *set, int c, int cmp) {
             break;
         }
     }
+}
+
+static void DEC(cpu_state *cpu, operand_set *set) {
+    int saved_cf = cpu->CF;
+    set->opr2 = 1;
+    SUB(cpu, set, 0, 0);
+    cpu->CF = saved_cf;
 }
 
 static void OR(cpu_state *cpu, operand_set *set) {
@@ -1523,33 +1537,33 @@ static int cpu_step(cpu_state *cpu) {
                 return 0;
             }
 
-            case 0x40: // INC AX
-            case 0x41: case 0x42: case 0x43: case 0x44: case 0x45: case 0x46: case 0x47:
+            case 0x40: // INC reg16
+            case 0x41:
+            case 0x42:
+            case 0x43:
+            case 0x44:
+            case 0x45:
+            case 0x46:
+            case 0x47:
             {
-                if (cpu->cpu_context & CPU_CTX_DATA32) {
-                    int val = SETF32(cpu, (cpu->gpr[inst & 7] + 1));
-                    cpu->gpr[inst & 7] = val;
-                    cpu->AF = !(val & 15);
-                } else {
-                    int val = SETF16(cpu, (MOVSXW(cpu->gpr[inst & 7]) + 1));
-                    WRITE_LE16(&cpu->gpr[inst & 7], val);
-                    cpu->AF = !(val & 15);
-                }
+                set.size = (cpu->cpu_context & CPU_CTX_DATA32) ? 2 : 1;
+                set.opr1 = &cpu->gpr[inst & 7];
+                INC(cpu, &set);
                 return 0;
             }
 
-            case 0x48: // DEC AX
-            case 0x49: case 0x4A: case 0x4B: case 0x4C: case 0x4D: case 0x4E: case 0x4F:
+            case 0x48: // DEC reg16
+            case 0x49:
+            case 0x4A:
+            case 0x4B:
+            case 0x4C:
+            case 0x4D:
+            case 0x4E:
+            case 0x4F:
             {
-                if (cpu->cpu_context & CPU_CTX_DATA32) {
-                    int val = SETF32(cpu, (cpu->gpr[inst & 7] - 1));
-                    cpu->gpr[inst & 7] = val;
-                    cpu->AF = (val & 15) == 15;
-                } else {
-                    int val = SETF16(cpu, MOVSXW(cpu->gpr[inst & 7]) - 1);
-                    WRITE_LE16(&cpu->gpr[inst & 7], val);
-                    cpu->AF = (val & 15) == 15;
-                }
+                set.size = (cpu->cpu_context & CPU_CTX_DATA32) ? 2 : 1;
+                set.opr1 = &cpu->gpr[inst & 7];
+                DEC(cpu, &set);
                 return 0;
             }
 
@@ -2410,7 +2424,17 @@ static int cpu_step(cpu_state *cpu) {
             case 0xEB: // jmp d8
             {
                 int disp = MOVSXB(FETCH8(cpu));
-                return JUMP_IF(cpu, disp, 1);
+                if (disp == -2) {
+                    // Reduce CPU power of forever loop
+                    cpu->EIP += disp;
+                    if (cpu->IF) {
+                        return cpu_status_pause;
+                    } else {
+                        return cpu_status_exit;
+                    }
+                } else {
+                    return JUMP_IF(cpu, disp, 1);
+                }
             }
 
             case 0xEC: // IN AL, DX
@@ -2621,12 +2645,10 @@ static int cpu_step(cpu_state *cpu) {
                 MODRM_W(cpu, seg, 0, &set);
                 switch (set.opr2) {
                     case 0: // INC r/m8
-                        *set.opr1b = value = SETF8(cpu, MOVSXB(*set.opr1b) + 1);
-                        cpu->AF = !(value & 15);
+                        INC(cpu, &set);
                         return 0;
                     case 1: // DEC r/m8
-                        *set.opr1b = value = SETF8(cpu, MOVSXB(*set.opr1b) - 1);
-                        cpu->AF = (value & 15) == 15;
+                        DEC(cpu, &set);
                         return 0;
                     default:
                         return cpu_status_ud;
@@ -2638,12 +2660,10 @@ static int cpu_step(cpu_state *cpu) {
                 int mod = MODRM_W(cpu, seg, 1, &set);
                 switch (set.opr2) {
                     case 0: // INC r/m16
-                        WRITE_LE16(set.opr1, value = SETF16(cpu, MOVSXW(READ_LE16(set.opr1)) + 1));
-                        cpu->AF = !(value & 15);
+                        INC(cpu, &set);
                         return 0;
                     case 1: // DEC r/m16
-                        WRITE_LE16(set.opr1, value = SETF16(cpu, MOVSXW(READ_LE16(set.opr1)) - 1));
-                        cpu->AF = (value & 15) == 15;
+                        DEC(cpu, &set);
                         return 0;
                     case 2: // CALL r/m16
                         PUSHW(cpu, cpu->EIP);

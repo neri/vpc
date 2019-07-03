@@ -38,6 +38,13 @@
 %define VPC_MEM_PORT        0xFC00
 %define VPC_FD_PORT         0xFD00
 
+%define BDA_SEG             0x0040
+%define BDA_COMPORT         0x0000
+%define BDA_KBD_BUFF_HEAD   0x001A
+%define BDA_KBD_BUFF_TAIL   0x001C
+%define BDA_KBD_BUFF_BEGIN  0x001E
+%define BDA_KBD_BUFF_MASK   0x001F
+
 %define ARGV 0x0080
 
 _HEAD:
@@ -62,7 +69,14 @@ _irq0:
     mov ds, ax
     inc word [ds:0x046C]
     jnz .skip
-    inc word [ds:0x046E]
+    mov ax, [ds:0x046E]
+    inc ax
+    cmp ax, 24
+    jb .nb
+    sub ax, 24
+    mov byte [ds:0x0470], 1
+.nb:
+    mov [ds:0x046E], ax
 .skip:
     mov al, 0x20
     out 0x20, al
@@ -70,6 +84,50 @@ _irq0:
     pop ax
     pop ds
     iret
+
+_irq4:
+    push ds
+    push ax
+    push dx
+    mov ax, BDA_SEG
+    mov ds, ax
+.loop:
+    mov dx, [BDA_COMPORT]
+    add dl, 5
+    in al, dx
+    and al, 1
+    jz .end
+    sub dl, 5
+    in al, dx
+    call ir4_vacuum
+    jmp .loop
+.end:
+    mov al, 0x20
+    out 0x20, al
+    pop dx
+    pop ax
+    pop ds
+    iret
+
+ir4_vacuum:
+    push cx
+    push bx
+    mov dx, [BDA_KBD_BUFF_HEAD]
+    mov bx, [BDA_KBD_BUFF_TAIL]
+    lea cx, [bx + 2 - BDA_KBD_BUFF_BEGIN]
+    and cx, BDA_KBD_BUFF_MASK
+    add cx, BDA_KBD_BUFF_BEGIN
+    cmp dx, cx
+    jz .of
+    mov ah, al
+    mov [bx], ax
+    mov [BDA_KBD_BUFF_TAIL], cx
+.of:
+    pop bx
+    pop cx
+    ret
+
+
 
 ;; Dummy
 _irq_dummy:
@@ -419,48 +477,48 @@ _int16:
     cmp ah, 1
     jz i1601
     xor ax, ax
-    retf 2
+    iret
+
 i1600:
     push ds
-    xor ax, ax
+    push bx
+    push cx
+    mov ax, BDA_SEG
     mov ds, ax
 .loop:
-    xor ax, ax
-    xchg ax, [ds:0x041E]
-    or ax, ax
-    jnz .end
-    mov ah, 1
-    int 0x16
-    jnz .loop
+    mov bx, [BDA_KBD_BUFF_HEAD]
+    mov ax, [BDA_KBD_BUFF_TAIL]
+    cmp ax, bx
+    jnz .has_data
     sti
     hlt
     jmp .loop
-.end:
+.has_data:
+    mov ax, [bx]
+    lea cx, [bx + 2 - BDA_KBD_BUFF_BEGIN]
+    and cx, BDA_KBD_BUFF_MASK
+    add cx, BDA_KBD_BUFF_BEGIN
+    mov [BDA_KBD_BUFF_HEAD], cx
+    pop cx
+    pop bx
     pop ds
     iret
 
 i1601:
     push ds
-    push dx
-    xor ax, ax
+    push bx
+    mov ax, BDA_SEG
     mov ds, ax
-    mov ax, [ds:0x041E]
-    or ax, ax
-    jnz .end
-    mov dx, [ds:0x0400]
-    add dl, 5
-    in al, dx
-    and al, 1
+    mov ax, [BDA_KBD_BUFF_HEAD]
+    mov bx, [BDA_KBD_BUFF_TAIL]
+    sub ax, bx
     jz .end
-    sub dl, 5
-    in al, dx
-    mov ah, 0x80
-    or ax, ax
-    mov [ds:0x41E], ax
+    mov ax, [bx]
 .end:
-    pop dx
-    pop ds
+    pop bx
+    pop ax
     retf 2
+
 
 
 ;; Printer BIOS
@@ -637,8 +695,8 @@ __set_irq:
     mov dx, VPC_MEM_PORT
     in ax, dx
     stosw
-    mov di, 0x41A
-    mov ax, 0x1E
+    mov di, 0x400 + BDA_KBD_BUFF_HEAD
+    mov ax, BDA_KBD_BUFF_BEGIN
     stosw
     stosw
 
@@ -675,6 +733,23 @@ __set_irq:
     out 0x40, al
     out 0x40, al
 
+    ;; ENABLE UART
+    cli
+    xor ax, ax
+    mov es, ax
+    mov di, (8 + 4) * 4
+    mov ax, _irq4
+    stosw
+    mov ax, cs
+    stosw
+    in al, 0x21
+    and al, 0xEF
+    out 0x21, al
+    mov dx, [ss:0x0400]
+    inc dx
+    mov al, 0x01
+    out dx, al
+    sti
 
     ;; INIT VGA PALETTE
 _init_palette:

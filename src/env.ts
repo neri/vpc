@@ -70,7 +70,7 @@ export class RuntimeEnvironment {
         this.pic = new VPIC(this.iomgr);
         this.pit = new VPIT(this);
         this.rtc = new RTC(this);
-        this.uart = new UART(this, 0x3F8);
+        this.uart = new UART(this, 0x3F8, 4);
 
         this.iomgr.onw(0, null, (_) => Math.random() * 65535);
         this.iomgr.onw(0xFC00, null, (_) => this.memoryConfig[0]);
