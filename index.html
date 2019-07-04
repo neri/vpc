@@ -7,6 +7,10 @@
     <script src="lib/xterm.js"></script>
     <link rel="stylesheet" href="lib/xterm.css">
     <style>
+        :root {
+            --main-screen-width: 720px;
+            --main-screen-height: 400px;
+        }
         html, body {
             padding: 0;
             margin: 0;
@@ -16,16 +20,15 @@
         #screen_container {
             display: none;
             cursor: text;
-            max-width: 720px;
-            min-width: 640px;
-            min-height: 400px;
+            width: var(--main-screen-width);
+            min-height: var(--main-screen-height);
         }
         
         #click_to_start {
             background: #EEE;
             color: #777;
-            width: 720px;
-            line-height: 400px;
+            width: var(--main-screen-width);
+            line-height: var(--main-screen-height);
             text-align: center;
             cursor: pointer;
         }
@@ -37,7 +40,7 @@
         }
 
         #controlPanel {
-            width: 720px;
+            width: var(--main-screen-width);
             min-height: 2em;
             margin: 0;
             padding: 0;
@@ -64,7 +67,7 @@
         }
 
         address {
-            width: 720px;
+            width: var(--main-screen-width);
             margin: 1em 0;
             text-align: right;
             font-size: smaller;
@@ -512,7 +515,8 @@ if (true) {
                         <option value="CR0">CR0</option>
                     </select>
                     <input id="inputRegister" value="" placeholder="00000000" size="12">
-                    <a id="buttonReg" class="buttonFace">Write</a>
+                    <a id="buttonRegR" class="buttonFace">Read</a>
+                    <a id="buttonRegW" class="buttonFace">Write</a>
                     <input id="inputAddress" value="" placeholder="0000:0000" size="12">
                     <a id="buttonDump" class="buttonFace">Dump</a>
                 </div>

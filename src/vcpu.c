@@ -2,7 +2,7 @@
 // Copyright (c) 2019 Nerry
 
 #include <stdint.h>
-// #include <stdlib.h>
+
 #define NULL 0
 typedef uintptr_t size_t;
 
@@ -17,7 +17,7 @@ WASM_IMPORT void vpc_outw(int port, int value);
 WASM_IMPORT int vpc_inw(int port);
 WASM_IMPORT int vpc_irq();
 WASM_IMPORT _Noreturn void TRAP_NORETURN();
-WASM_IMPORT int vpc_grow(size_t n);
+WASM_IMPORT int vpc_grow(int n);
 
 
 void *memset(void *p, int v, size_t n) {
@@ -43,29 +43,6 @@ typedef struct sreg_t sreg_t;
 void cpu_reset(cpu_state *cpu, int gen);
 void dump_regs(cpu_state *cpu, uint32_t eip);
 
-size_t max_mem;
-uint8_t *mem;
-
-/**
- * Initialize internal structures.
- * THIS FUNCTION MUST BE CALLED BEFORE ALL OTHER FUNCTIONS.
- */
-WASM_EXPORT void *_init(uint32_t mb) {
-    max_mem = mb * 1024 * 1024;
-    mem = (void* )(vpc_grow(max_mem / WASM_PAGESIZE + 1) * WASM_PAGESIZE);
-    return mem;
-}
-
-
-static void set_flag_to(uint32_t *word, uint32_t mask, int value) {
-    if (value) {
-        *word |= mask;
-    } else {
-        *word &= ~mask;
-    }
-}
-
-
 enum {
     cpu_gen_8086 = 0,
     cpu_gen_80186,
@@ -78,10 +55,10 @@ enum {
 } cpu_gen;
 
 typedef enum cpu_status_t {
-    cpu_status_normal = 0,
+    cpu_status_periodic = 0,
     cpu_status_halt,
     cpu_status_pause,
-    cpu_status_int,
+    cpu_status_inta,
     cpu_status_icebp,
     cpu_status_exception = 0x10000,
     cpu_status_exit,
@@ -92,10 +69,6 @@ typedef enum cpu_status_t {
     cpu_status_stack = 0xC0000,
     cpu_status_gpf = 0xD0000,
 } cpu_status_t;
-
-static int RAISE_GPF(uint16_t errcode) {
-    return cpu_status_gpf | errcode;
-}
 
 typedef uint32_t paddr_t;
 
@@ -217,9 +190,39 @@ typedef struct cpu_state {
     uint32_t flags_mask, flags_mask1;
     int cpu_gen;
     uint32_t cpu_context, default_context;
+    uint32_t cr0_valid;
 
 } cpu_state;
 
+
+
+
+size_t max_mem = 0;
+uint8_t *mem = NULL;
+
+/**
+ * Initialize internal structures.
+ * THIS FUNCTION MUST BE CALLED BEFORE ALL OTHER FUNCTIONS.
+ */
+WASM_EXPORT void *_init(uint32_t mb) {
+    max_mem = mb * 1024 * 1024;
+    mem = (void* )(vpc_grow(max_mem / WASM_PAGESIZE + 1) * WASM_PAGESIZE);
+    return mem;
+}
+
+
+static void set_flag_to(uint32_t *word, uint32_t mask, int value) {
+    if (value) {
+        *word |= mask;
+    } else {
+        *word &= ~mask;
+    }
+}
+
+
+static int RAISE_GPF(uint16_t errcode) {
+    return cpu_status_gpf | errcode;
+}
 
 static char *hextbl = "0123456789abcdef";
 
@@ -444,32 +447,6 @@ static void PUSHW(cpu_state *cpu, uint32_t value) {
     }
 }
 
-static void OUT8(cpu_state *cpu, uint16_t port, uint8_t value) {
-    switch (port) {
-        case 0xCF9: // ACPI reset
-            cpu_reset(cpu, -1);
-            break;
-        default:
-            vpc_outb(port, value);
-            break;
-    }
-}
-
-static void OUT16(cpu_state *cpu, uint16_t port, uint16_t value) {
-    vpc_outw(port, value);
-}
-
-static uint8_t INPORT8(cpu_state *cpu, uint16_t port) {
-    switch (port) {
-        default:
-            return vpc_inb(port);
-    }
-}
-
-static uint16_t INPORT16(cpu_state *cpu, uint16_t port) {
-    return vpc_inw(port);
-}
-
 static int LOAD_SEL(cpu_state *cpu, sreg_t *sreg, uint16_t value) {
     if (cpu->CR[0] & 1) { // Protected Mode
         // NULL SELECTOR
@@ -519,6 +496,7 @@ static int FAR_CALL(cpu_state *cpu, uint16_t new_sel, uint32_t new_eip) {
 
 static int FAR_JUMP(cpu_state *cpu, uint16_t new_sel, uint32_t new_eip) {
     int status = LOAD_SEL(cpu, &cpu->CS, new_sel);
+    if (status) return status;
     cpu->EIP = new_eip;
     return 0;
 }
@@ -546,6 +524,7 @@ static int INVOKE_INT(cpu_state *cpu, int n) {
     PUSHW(cpu, cpu->eflags);
     PUSHW(cpu, old_cs);
     PUSHW(cpu, old_eip);
+    cpu->TF = 0;
     return 0;
 }
 
@@ -1356,6 +1335,24 @@ static int CPUID(cpu_state *cpu) {
     return 0;
 }
 
+static int MOV_CR(cpu_state *cpu, int cr, uint32_t value) {
+    switch (cr) {
+        case 0:
+        {
+            uint32_t old_value = cpu->CR[cr];
+            uint32_t changed = value & (old_value ^ value);
+            if (changed & ~cpu->cr0_valid) return cpu_status_gpf;
+            cpu->CR[cr] = value;
+            return 0;
+        }
+        case 4:
+            return cpu_status_gpf;
+        default:
+            return cpu_status_gpf;
+    }
+}
+
+
 #define PREFIX_LOCK     0x00000001
 #define PREFIX_REPZ     0x00000002
 #define PREFIX_REPNZ    0x00000004
@@ -1673,7 +1670,7 @@ static int cpu_step(cpu_state *cpu) {
                 int rep = prefix & (PREFIX_REPZ | PREFIX_REPNZ);
                 if (rep && cpu->CX == 0) return 0;
                 do {
-                    WRITE_MEM8(_seg, cpu->DI, INPORT8(cpu, cpu->DX));
+                    WRITE_MEM8(_seg, cpu->DI, vpc_inb(cpu->DX));
                     if (cpu->DF) {
                         cpu->DI--;
                     } else {
@@ -1689,7 +1686,7 @@ static int cpu_step(cpu_state *cpu) {
                 int rep = prefix & (PREFIX_REPZ | PREFIX_REPNZ);
                 if (rep && cpu->CX == 0) return 0;
                 do {
-                    WRITE_MEM16(_seg, cpu->DI, INPORT16(cpu, cpu->DX));
+                    WRITE_MEM16(_seg, cpu->DI, vpc_inw(cpu->DX));
                     if (cpu->DF) {
                         cpu->DI -= 2;
                     } else {
@@ -1706,7 +1703,7 @@ static int cpu_step(cpu_state *cpu) {
                 int rep = prefix & PREFIX_REPZ;
                 if (rep && cpu->CX == 0) return 0;
                 do {
-                    OUT8(cpu, cpu->DX, READ_MEM8(_seg, cpu->SI));
+                    vpc_outb(cpu->DX, READ_MEM8(_seg, cpu->SI));
                     if (cpu->DF) {
                         cpu->SI--;
                     } else {
@@ -1722,7 +1719,7 @@ static int cpu_step(cpu_state *cpu) {
                 int rep = prefix & (PREFIX_REPZ | PREFIX_REPNZ);
                 if (rep && cpu->CX == 0) return 0;
                 do {
-                    OUT16(cpu, cpu->DX, READ_MEM16(_seg, cpu->SI));
+                    vpc_outw(cpu->DX, READ_MEM16(_seg, cpu->SI));
                     if (cpu->DF) {
                         cpu->SI -= 2;
                     } else {
@@ -1903,7 +1900,7 @@ static int cpu_step(cpu_state *cpu) {
 
             case 0x9D: // POPF
                 LOAD_FLAGS(cpu, POPW(cpu));
-                return cpu_status_int;
+                return cpu_status_inta;
 
             case 0x9E: // SAHF
                 LOAD_FLAGS(cpu, (cpu->eflags & 0xFFFFFF00) | cpu->AH);
@@ -2293,7 +2290,7 @@ static int cpu_step(cpu_state *cpu) {
                 if (status) return status;
                 cpu->EIP = ret_eip;
                 LOAD_FLAGS(cpu, ret_fl);
-                return cpu_status_int;
+                return cpu_status_inta;
             }
 
             case 0xD0: // shift r/m, 1
@@ -2386,19 +2383,19 @@ static int cpu_step(cpu_state *cpu) {
                 }
 
             case 0xE4: // IN AL, imm8
-                cpu->AL = INPORT8(cpu, FETCH8(cpu));
+                cpu->AL = vpc_inb(FETCH8(cpu));
                 return 0;
             
             case 0xE5: // IN AX, imm8
-                cpu->AX = INPORT16(cpu, FETCH8(cpu));
+                cpu->AX = vpc_inw(FETCH8(cpu));
                 return 0;
 
             case 0xE6: // OUT imm8, AL
-                OUT8(cpu, FETCH8(cpu), cpu->AL);
+                vpc_outb(FETCH8(cpu), cpu->AL);
                 return 0;
 
             case 0xE7: // OUT imm8, AX
-                OUT16(cpu, FETCH8(cpu), cpu->AX);
+                vpc_outw(FETCH8(cpu), cpu->AX);
                 return 0;
 
             case 0xE8: // call imm16
@@ -2438,19 +2435,19 @@ static int cpu_step(cpu_state *cpu) {
             }
 
             case 0xEC: // IN AL, DX
-                cpu->AL = INPORT8(cpu, cpu->DX);
+                cpu->AL = vpc_inb(cpu->DX);
                 return 0;
 
             case 0xED: // IN AX, DX
-                cpu->AX = INPORT16(cpu, cpu->DX);
+                cpu->AX = vpc_inw(cpu->DX);
                 return 0;
 
             case 0xEE: // OUT DX, AL
-                OUT8(cpu, cpu->DX, cpu->AL);
+                vpc_outb(cpu->DX, cpu->AL);
                 return 0;
 
             case 0xEF: // OUT DX, AX
-                OUT16(cpu, cpu->DX, cpu->AX);
+                vpc_outw(cpu->DX, cpu->AX);
                 return 0;
 
             case 0xF0: // prefix LOCK (NOP)
@@ -2627,7 +2624,7 @@ static int cpu_step(cpu_state *cpu) {
             case 0xFB: // STI
                 if (!cpu->IF) {
                     cpu->IF = 1;
-                    return cpu_status_int;
+                    return cpu_status_inta;
                 }
                 return 0;
 
@@ -2759,7 +2756,7 @@ static int cpu_step(cpu_state *cpu) {
                 if (!MODRM(cpu, NULL, &modrm)) return cpu_status_ud;
                 if ((1 << modrm.reg) & 0xFEE2) return cpu_status_gpf;
                 if (inst & 2) {
-                    cpu->CR[modrm.reg] = cpu->gpr[modrm.rm];
+                    return MOV_CR(cpu, modrm.reg, cpu->gpr[modrm.rm]);
                 } else {
                     cpu->gpr[modrm.rm] = cpu->CR[modrm.reg];
                 }
@@ -3093,7 +3090,7 @@ void dump_regs(cpu_state *cpu, uint32_t eip) {
     *p++ = cpu->ZF ? 'Z' : '-';
     *p++ = cpu->PF ? 'P' : '-';
     *p++ = cpu->CF ? 'C' : '-';
-    if (use32) {
+    if (cpu->cpu_gen >= cpu_gen_80286) {
         p = dump_string(p, "\nCS ");
         p = dump_segment(p, &cpu->CS);
         p = dump_string(p, " SS ");
@@ -3142,6 +3139,21 @@ void cpu_reset(cpu_state *cpu, int gen) {
     }
     LOAD_FLAGS(cpu, 0);
 
+    cpu->cr0_valid = 0x6005003F;
+    switch (cpu->cpu_gen) {
+        case cpu_gen_8086:
+        case cpu_gen_80186:
+            cpu->cr0_valid = 0;
+        case cpu_gen_80286:
+            cpu->cr0_valid &= 0x0000FFFF;
+            break;
+        case cpu_gen_80386:
+            cpu->cr0_valid &= 0x8000FFFF;
+            break;
+        case cpu_gen_80486:
+            break;
+    }
+
     cpu->EIP = 0x0000FFF0;
     cpu->CS.sel = 0xF000;
     cpu->CS.base = 0x000F0000;
@@ -3162,39 +3174,41 @@ void cpu_reset(cpu_state *cpu, int gen) {
     cpu->EDX = cpu->cpu_gen << 8;
 }
 
-static int check_irq(cpu_state *cpu) {
-    if (!cpu->IF) return 0;
+static void check_irq(cpu_state *cpu) {
+    if (!cpu->IF) return;
     int vector = vpc_irq();
-    if (!vector) return 0;
+    if (!vector) return;
     INVOKE_INT(cpu, vector);
     cpu->IF = 0;
-    return 0;
 }
 
 #define CPU_INTERVAL    0x100000
 static int cpu_block(cpu_state *cpu) {
+    int periodic = CPU_INTERVAL;
+    if (cpu->TF) periodic = 1;
     check_irq(cpu);
-    for (int i = 0; i < CPU_INTERVAL; i++) {
+    for (int i = 0; i < periodic; i++) {
         uint32_t last_known_eip = cpu->EIP;
         if (last_known_eip > 0xFFFF) return cpu_status_gpf;
         int status = cpu_step(cpu);
+        if (status == cpu_status_periodic) continue;
         switch (status) {
-            case cpu_status_normal:
-                break;
+            // case cpu_status_periodic:
+            //     continue;
             case cpu_status_pause:
-                return cpu_status_normal;
-            case cpu_status_int:
+                return cpu_status_periodic;
+            case cpu_status_inta:
                 check_irq(cpu);
-                break;
+                continue;
             case cpu_status_icebp:
                 dump_regs(cpu, cpu->EIP);
-                break;
+                continue;
             case cpu_status_div:
                 if (cpu->cpu_gen >= cpu_gen_80286) {
                     cpu->EIP = last_known_eip;
                 }
                 INVOKE_INT(cpu, 0); // #DE
-                break;
+                continue;
             case cpu_status_halt:
                 return status;
             case cpu_status_ud:
@@ -3203,7 +3217,8 @@ static int cpu_block(cpu_state *cpu) {
                 return status;
         }
     }
-    return 0;
+    if (cpu->TF) INVOKE_INT(cpu, 1);
+    return cpu_status_periodic;
 }
 
 /**
@@ -3221,7 +3236,7 @@ WASM_EXPORT cpu_state *alloc_cpu(int gen) {
 WASM_EXPORT int run(cpu_state *cpu) {
     int status = cpu_block(cpu);
     switch (status) {
-        case cpu_status_normal:
+        case cpu_status_periodic:
         case cpu_status_exit:
             return status;
         case cpu_status_halt:
@@ -3256,7 +3271,7 @@ WASM_EXPORT int run(cpu_state *cpu) {
  * |0|Periodic|Y|Periodic return|
  * |1|Halt|Y|CPU runs HLT instruction|
  * |2|Pause|Y|CPU runs PAUSE instruction|
- * |3|Int|Y|Check for IRQ|
+ * |3|INTA|Y|Interrupt acknowledge cycle|
  * |4|ICEBP|Y|CPU runs ICEBP instruction|
  * |>0x10000|Exit|N|CPU enters to shutdown|
  * ||#DE|conditional|Divide by zero|

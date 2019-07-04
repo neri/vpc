@@ -88,7 +88,9 @@ _irq0:
 _irq4:
     push ds
     push ax
+    push cx
     push dx
+    push bx
     mov ax, BDA_SEG
     mov ds, ax
 .loop:
@@ -97,36 +99,28 @@ _irq4:
     in al, dx
     and al, 1
     jz .end
-    sub dl, 5
-    in al, dx
-    call ir4_vacuum
-    jmp .loop
-.end:
-    mov al, 0x20
-    out 0x20, al
-    pop dx
-    pop ax
-    pop ds
-    iret
-
-ir4_vacuum:
-    push cx
-    push bx
-    mov dx, [BDA_KBD_BUFF_HEAD]
+    mov ax, [BDA_KBD_BUFF_HEAD]
     mov bx, [BDA_KBD_BUFF_TAIL]
     lea cx, [bx + 2 - BDA_KBD_BUFF_BEGIN]
     and cx, BDA_KBD_BUFF_MASK
     add cx, BDA_KBD_BUFF_BEGIN
-    cmp dx, cx
-    jz .of
+    cmp ax, cx
+    jz .end
+    sub dl, 5
+    in al, dx
     mov ah, al
     mov [bx], ax
     mov [BDA_KBD_BUFF_TAIL], cx
-.of:
+    jmp .loop
+.end:
+    mov al, 0x20
+    out 0x20, al
     pop bx
+    pop dx
     pop cx
-    ret
-
+    pop ax
+    pop ds
+    iret
 
 
 ;; Dummy
@@ -516,7 +510,7 @@ i1601:
     mov ax, [bx]
 .end:
     pop bx
-    pop ax
+    pop ds
     retf 2
 
 

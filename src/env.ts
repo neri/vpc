@@ -11,8 +11,6 @@ export interface WorkerInterface {
 
 export class RuntimeEnvironment {
 
-    static get CPU_GEN_INHERITED(): number { return -1; }
-
     public worker: WorkerInterface;
     public iomgr: IOManager;
     public pic: VPIC;
@@ -49,7 +47,6 @@ export class RuntimeEnvironment {
         this._memory = new Uint8Array(this.env.memory.buffer);
         this.env.println = (at: number) => {
             const str = this.getCString(at);
-            // worker.print(`${str}\n`);
             console.log(str);
         }
         this.env.vpc_outb = (port: number, data: number) => this.iomgr.outb(port, data);
@@ -63,8 +60,6 @@ export class RuntimeEnvironment {
             this._memory = new Uint8Array(this.env.memory.buffer);
             return result;
         }
-        // this.env.memcpy = (p, q, n) => this.memcpy(p, q, n);
-        // this.env.memset = (p, v, n) => this.memset(p, v, n);
 
         this.iomgr = new IOManager(worker);
         this.pic = new VPIC(this.iomgr);
@@ -169,7 +164,6 @@ export class RuntimeEnvironment {
             const expected = this.lastTick + this.period;
             if (now > expected) {
                 this.pic.raiseIRQ(0);
-            // setTimeout(() => this.vga_render(), 1);
             }
             this.lastTick = new Date().valueOf();
         }
