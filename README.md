@@ -1,6 +1,6 @@
 # Virtual Playground
 
-![screen shot](images/ss1.png)
+[![screen shot](images/ss1.png)](https://nerry.jp/vpc/)
 
 A PC Emulator implemented by WebAssembly.
 

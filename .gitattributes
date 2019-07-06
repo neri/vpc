@@ -1,5 +1,5 @@
 *.h linguist-language=C
 Gemfile* linguist-detectable=false
 Makefile linguist-detectable=false
-lib/* linguist-vendored
-lib merge=ours
+lib/* merge=ours
+bin/* merge=ours
