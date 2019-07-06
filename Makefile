@@ -10,6 +10,7 @@ clean:
 run: all
 
 test: all
+	npm test
 
 lib:
 	mkdir lib

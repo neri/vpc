@@ -38,6 +38,13 @@
 %define VPC_MEM_PORT        0xFC00
 %define VPC_FD_PORT         0xFD00
 
+%define BDA_SEG             0x0040
+%define BDA_COMPORT         0x0000
+%define BDA_KBD_BUFF_HEAD   0x001A
+%define BDA_KBD_BUFF_TAIL   0x001C
+%define BDA_KBD_BUFF_BEGIN  0x001E
+%define BDA_KBD_BUFF_MASK   0x001F
+
 %define ARGV 0x0080
 
 _HEAD:
@@ -62,7 +69,14 @@ _irq0:
     mov ds, ax
     inc word [ds:0x046C]
     jnz .skip
-    inc word [ds:0x046E]
+    mov ax, [ds:0x046E]
+    inc ax
+    cmp ax, 24
+    jb .nb
+    sub ax, 24
+    mov byte [ds:0x0470], 1
+.nb:
+    mov [ds:0x046E], ax
 .skip:
     mov al, 0x20
     out 0x20, al
@@ -70,6 +84,44 @@ _irq0:
     pop ax
     pop ds
     iret
+
+_irq4:
+    push ds
+    push ax
+    push cx
+    push dx
+    push bx
+    mov ax, BDA_SEG
+    mov ds, ax
+.loop:
+    mov dx, [BDA_COMPORT]
+    add dl, 5
+    in al, dx
+    and al, 1
+    jz .end
+    mov ax, [BDA_KBD_BUFF_HEAD]
+    mov bx, [BDA_KBD_BUFF_TAIL]
+    lea cx, [bx + 2 - BDA_KBD_BUFF_BEGIN]
+    and cx, BDA_KBD_BUFF_MASK
+    add cx, BDA_KBD_BUFF_BEGIN
+    cmp ax, cx
+    jz .end
+    sub dl, 5
+    in al, dx
+    mov ah, al
+    mov [bx], ax
+    mov [BDA_KBD_BUFF_TAIL], cx
+    jmp .loop
+.end:
+    mov al, 0x20
+    out 0x20, al
+    pop bx
+    pop dx
+    pop cx
+    pop ax
+    pop ds
+    iret
+
 
 ;; Dummy
 _irq_dummy:
@@ -126,6 +178,11 @@ i1000:
     pop ds
     mov si, cls_msg
     call puts
+    xor ax, ax
+    ret
+
+i100F:
+    xor al, al
     ret
 
 i1001:
@@ -140,7 +197,6 @@ i100A:
 i100B:
 i100C:
 i100D:
-i100F:
 i1010:
 i1011:
 i1012:
@@ -238,6 +294,7 @@ _int11:
     pop ds
     iret
 
+
 ;; Get Memory Size
 _int12:
     push dx
@@ -250,6 +307,7 @@ _int12:
     ; mov ax, [ds: 0x413]
     ; pop ds
     iret
+
 
 ;; Diskette BIOS
 _int13:
@@ -271,6 +329,11 @@ _int13:
     jnz .no_00
     jmp .end
 .no_00:
+    cmp ah, 0x01
+    jnz .no_01
+    call _int13_get_drive_param
+    jmp .end
+.no_01:
     cmp ah, 0x02
     jnz .no_02
     call _int13_read
@@ -304,6 +367,25 @@ _int13:
     pop ds
     pop es
     iret
+
+_int13_get_drive_param:
+    mov dx, VPC_FD_PORT
+    xor ax, ax
+    out dx, ax
+    in ax, dx
+    mov [bp + STK_BX], al
+    add dl, 7
+    in al, dx
+    mov [bp + STK_DX + 1], al
+    inc dx
+    in al, dx
+    mov [bp + STK_CX], al
+    inc dx
+    in al, dx
+    mov [bp + STK_CX + 1], al
+    xor ax, ax
+    mov [bp + STK_DX], al
+    ret
 
 _int13_set_chr:
     mov dx, VPC_FD_PORT + 6
@@ -344,15 +426,15 @@ _int13_read:
 _int13_write:
     mov si, 2
 _int13_io:
-    mov dx, VPC_FD_PORT
-    xor ax, ax
-    out dx, ax
-    in ax, dx
-    or ax, ax
-    jnz .dev_ok
-    mov ax, 0x8000
-    ret
-.dev_ok:
+;     mov dx, VPC_FD_PORT
+;     xor ax, ax
+;     out dx, ax
+;     in ax, dx
+;     or ax, ax
+;     jnz .dev_ok
+;     mov ax, 0x8000
+;     ret
+; .dev_ok:
 
     call _int13_set_chr
     call _int13_set_dma
@@ -360,8 +442,7 @@ _int13_io:
     mov dx, VPC_FD_PORT
     mov ax, si
     out dx, ax
-    ; sti
-    ; hlt
+    pause
     in ax, dx
     or ax, ax
     jz .skip
@@ -383,7 +464,6 @@ _int14:
 
 ;; System BIOS
 _int15:
-    db 0xF1
     stc
     retf 2
 
@@ -395,48 +475,48 @@ _int16:
     cmp ah, 1
     jz i1601
     xor ax, ax
-    retf 2
+    iret
+
 i1600:
     push ds
-    xor ax, ax
+    push bx
+    push cx
+    mov ax, BDA_SEG
     mov ds, ax
 .loop:
-    xor ax, ax
-    xchg ax, [ds:0x041E]
-    or ax, ax
-    jnz .end
-    mov ah, 1
-    int 0x16
-    jnz .loop
+    mov bx, [BDA_KBD_BUFF_HEAD]
+    mov ax, [BDA_KBD_BUFF_TAIL]
+    cmp ax, bx
+    jnz .has_data
     sti
     hlt
     jmp .loop
-.end:
+.has_data:
+    mov ax, [bx]
+    lea cx, [bx + 2 - BDA_KBD_BUFF_BEGIN]
+    and cx, BDA_KBD_BUFF_MASK
+    add cx, BDA_KBD_BUFF_BEGIN
+    mov [BDA_KBD_BUFF_HEAD], cx
+    pop cx
+    pop bx
     pop ds
     iret
 
 i1601:
     push ds
-    push dx
-    xor ax, ax
+    push bx
+    mov ax, BDA_SEG
     mov ds, ax
-    mov ax, [ds:0x041E]
-    or ax, ax
-    jnz .end
-    mov dx, [ds:0x0400]
-    add dl, 5
-    in al, dx
-    and al, 1
+    mov ax, [BDA_KBD_BUFF_TAIL]
+    mov bx, [BDA_KBD_BUFF_HEAD]
+    sub ax, bx
     jz .end
-    sub dl, 5
-    in al, dx
-    mov ah, al
-    or ax, ax
-    mov [ds:0x41E], ax
+    mov ax, [bx]
 .end:
-    pop dx
+    pop bx
     pop ds
     retf 2
+
 
 
 ;; Printer BIOS
@@ -448,8 +528,6 @@ _int17:
 _int18:
     db 0xF1
     jmp _repl
-    ; jmp 0:0x7C00
-    ; iret
 
 
 ;; Clock BIOS
@@ -474,35 +552,38 @@ i1A00:
 
 i1A02:
     mov al, 0
-    out 0x71, al
-    in al, 0x70
+    out 0x70, al
+    in al, 0x71
     mov dh, al
     mov al, 2
-    out 0x71, al
-    in al, 0x70
+    out 0x70, al
+    in al, 0x71
     mov cl, al
     mov al, 4
-    out 0x71, al
-    in al, 0x70
+    out 0x70, al
+    in al, 0x71
     mov ch, al
-    xor dh, dh
+    xor dl, dl
     clc
     retf 2
 
 i1A04:
     mov al, 7
-    out 0x71, al
-    in al, 0x70
+    out 0x70, al
+    in al, 0x71
     mov dl, al
     mov al, 8
-    out 0x71, al
-    in al, 0x70
+    out 0x70, al
+    in al, 0x71
     mov dh, al
     mov al, 9
-    out 0x71, al
-    in al, 0x70
+    out 0x70, al
+    in al, 0x71
     mov cl, al
-    xor ch, ch
+    mov al, 0x32
+    out 0x70, al
+    in al, 0x71
+    mov ch, al
     clc
     retf 2
 
@@ -522,7 +603,11 @@ _INIT:
 
     ;; Install IRQ and BIOS services
 __set_irq:
-    mov di, 4 * 6
+    mov di, 4 * 5
+    mov ax, _iret
+    stosw
+    mov ax, cs
+    stosw
     mov ax, _iret
     stosw
     mov ax, cs
@@ -604,14 +689,17 @@ __set_irq:
     xor ax, ax
     mov cx, 7
     rep stosw
-    mov ax, 0x0200
+    mov ax, 0x0201
     stosw
     xor al, al
     stosb
     mov dx, VPC_MEM_PORT
     in ax, dx
     stosw
-
+    mov di, 0x400 + BDA_KBD_BUFF_HEAD
+    mov ax, BDA_KBD_BUFF_BEGIN
+    stosw
+    stosw
 
     ;; init PIC
     mov al, 0xFF
@@ -645,6 +733,47 @@ __set_irq:
     xor al, al
     out 0x40, al
     out 0x40, al
+
+    mov ah, 2
+    int 0x1A
+    mov al, ch
+    aam 16
+    aad 10
+    mov [ss:0x46E], al
+    mov al, cl
+    aam 16
+    aad 10
+    mov bl, 60
+    mul bl
+    mov cx, ax
+    mov al, dh
+    aam 16
+    aad 10
+    xor ah, ah
+    add ax, cx
+    mov dx, ax
+    xor ax, ax
+    mov cx, 3600
+    div cx
+    mov [ss:0x46C], ax
+
+    ;; ENABLE UART
+    cli
+    xor ax, ax
+    mov es, ax
+    mov di, (8 + 4) * 4
+    mov ax, _irq4
+    stosw
+    mov ax, cs
+    stosw
+    in al, 0x21
+    and al, 0xEF
+    out 0x21, al
+    mov dx, [ss:0x0400]
+    inc dx
+    mov al, 0x01
+    out dx, al
+    sti
 
 
     ;; INIT VGA PALETTE
@@ -723,12 +852,8 @@ _repl:
     mov al, '#'
     call _aux_out
 .loop:
-    call _aux_in
-    or al, al
-    jnz .skip
-    hlt
-    jmp .loop
-.skip:
+    xor ah, ah
+    int 0x16
     cmp al, 13
     jz .crlf
     cmp al, 127
@@ -789,17 +914,6 @@ _aux_out:
     mov ds, dx
     mov dx, [ds:0x400]
     out dx, al
-    pop dx
-    pop ds
-    ret
-
-_aux_in:
-    push ds
-    push dx
-    xor dx, dx
-    mov ds, dx
-    mov dx, [ds:0x400]
-    in al, dx
     pop dx
     pop ds
     ret

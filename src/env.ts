@@ -6,11 +6,10 @@ import { VPIC, VPIT, UART, RTC } from './dev';
 export interface WorkerInterface {
     print(s: string): void;
     postCommand(cmd: string, data: any): void;
+    hasClass(className: string): boolean;
 }
 
 export class RuntimeEnvironment {
-
-    static get CPU_GEN_INHERITED(): number { return -1; }
 
     public worker: WorkerInterface;
     public iomgr: IOManager;
@@ -26,6 +25,7 @@ export class RuntimeEnvironment {
     private instance: WebAssembly.Instance;
     private vmem: number;
     private cpu: number;
+    private regmap: Object;
     private bios: Uint8Array;
     private memoryConfig: Uint16Array;
     isDebugging: boolean;
@@ -47,7 +47,6 @@ export class RuntimeEnvironment {
         this._memory = new Uint8Array(this.env.memory.buffer);
         this.env.println = (at: number) => {
             const str = this.getCString(at);
-            // worker.print(`${str}\n`);
             console.log(str);
         }
         this.env.vpc_outb = (port: number, data: number) => this.iomgr.outb(port, data);
@@ -61,14 +60,12 @@ export class RuntimeEnvironment {
             this._memory = new Uint8Array(this.env.memory.buffer);
             return result;
         }
-        // this.env.memcpy = (p, q, n) => this.memcpy(p, q, n);
-        // this.env.memset = (p, v, n) => this.memset(p, v, n);
 
         this.iomgr = new IOManager(worker);
         this.pic = new VPIC(this.iomgr);
         this.pit = new VPIT(this);
         this.rtc = new RTC(this);
-        this.uart = new UART(this, 0x3F8);
+        this.uart = new UART(this, 0x3F8, 4);
 
         this.iomgr.onw(0, null, (_) => Math.random() * 65535);
         this.iomgr.onw(0xFC00, null, (_) => this.memoryConfig[0]);
@@ -77,7 +74,7 @@ export class RuntimeEnvironment {
     public loadCPU(wasm: WebAssembly.Instance): void {
         this.instance = wasm;
     }
-    public loadBIOS(bios: Uint8Array) {
+    public fetchBIOS(bios: Uint8Array) {
         this.bios = bios;
     }
     public initMemory(size: number) {
@@ -88,6 +85,9 @@ export class RuntimeEnvironment {
             this.memoryConfig = new Uint16Array([640, size - 1024]);
         }
         this.vmem = this.instance.exports._init((size + 1023) / 1024);
+        this.loadBIOS();
+    }
+    public loadBIOS(): void {
         const bios_base = (this.bios[0] | (this.bios[1] << 8)) << 4;
         this.dmaWrite(bios_base, this.bios);
     }
@@ -123,21 +123,6 @@ export class RuntimeEnvironment {
         const offset = this.vmem + ptr;
         return this._memory.slice(offset, offset + size);
     }
-    // public memcpy(p: number, q: number, n: number): number {
-    //     const a = new Uint8Array(this._memory, this.vmem + q, n);
-    //     this._memory.set(a, this.vmem + p);
-    //     return p;
-    // }
-    // public memset(p: number, v: number, n: number): number {
-    //     const array = new Uint8Array(n);
-    //     if (v) {
-    //         for (let i = 0; i < n; i++) {
-    //             array[i] = v;
-    //         }
-    //     }
-    //     this._memory.set(array, this.vmem + p);
-    //     return p;
-    // }
     public strlen(at: number): number {
         let result = 0;
         for (let i = at; this._memory[i]; i++) {
@@ -148,11 +133,16 @@ export class RuntimeEnvironment {
     public getCString(at: number): string {
         const len = this.strlen(at);
         const bytes = new Uint8Array(this._memory.buffer, at, len);
-        return new TextDecoder('utf-8').decode(bytes);
+        if (this.worker.hasClass('TextDecoder')) {
+            return new TextDecoder('utf-8').decode(bytes);
+        } else {
+            return String.fromCharCode.call(String, bytes);
+        }
     }
     public reset(gen: number): void {
         if (!this.instance) return;
         console.log(`CPU restarted (${gen})`);
+        this.loadBIOS();
         this.instance.exports.reset(this.cpu, gen);
         this.isPausing = false;
         if (!this.isRunning || this.isDebugging) {
@@ -163,6 +153,7 @@ export class RuntimeEnvironment {
     }
     public run(gen: number): void {
         this.cpu = this.instance.exports.alloc_cpu(gen);
+        this.regmap = JSON.parse(this.getCString(this.instance.exports.debug_get_register_map(this.cpu)));
         console.log(`CPU started (${gen})`);
         this.isRunning = true;
         this.cont();
@@ -173,9 +164,8 @@ export class RuntimeEnvironment {
             const expected = this.lastTick + this.period;
             if (now > expected) {
                 this.pic.raiseIRQ(0);
-            // setTimeout(() => this.vga_render(), 1);
+                this.lastTick = now;
             }
-            this.lastTick = new Date().valueOf();
         }
         const status: number = this.instance.exports.run(this.cpu);
         if (status > 1) {
@@ -204,6 +194,18 @@ export class RuntimeEnvironment {
         } else {
             this.isDebugging = true;
         }
+    }
+    public setReg(regName: string, value: number) {
+        const reg: number = this.regmap[regName];
+        if (!reg) throw new Error(`Unexpected Regsiter Name: ${regName}`);
+        let a = new Uint32Array(this.env.memory.buffer, reg, 1);
+        a[0] = value;
+    }
+    public getReg(regName: string): number {
+        const reg: number = this.regmap[regName];
+        if (!reg) throw new Error(`Unexpected Regsiter Name: ${regName}`);
+        let a = new Uint32Array(this.env.memory.buffer, reg, 1);
+        return a[0];
     }
     public dump(base: number): void {
         const addrToHex = (n: number) => ('000000' + n.toString(16)).substr(-6);

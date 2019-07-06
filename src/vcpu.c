@@ -2,7 +2,7 @@
 // Copyright (c) 2019 Nerry
 
 #include <stdint.h>
-// #include <stdlib.h>
+
 #define NULL 0
 typedef uintptr_t size_t;
 
@@ -17,7 +17,7 @@ WASM_IMPORT void vpc_outw(int port, int value);
 WASM_IMPORT int vpc_inw(int port);
 WASM_IMPORT int vpc_irq();
 WASM_IMPORT _Noreturn void TRAP_NORETURN();
-WASM_IMPORT int vpc_grow(size_t n);
+WASM_IMPORT int vpc_grow(int n);
 
 
 void *memset(void *p, int v, size_t n) {
@@ -43,25 +43,6 @@ typedef struct sreg_t sreg_t;
 void cpu_reset(cpu_state *cpu, int gen);
 void dump_regs(cpu_state *cpu, uint32_t eip);
 
-size_t max_mem;
-uint8_t *mem;
-
-WASM_EXPORT void *_init(size_t n) {
-    max_mem = n * 1024 * 1024;
-    mem = (void* )(vpc_grow(max_mem / WASM_PAGESIZE + 1) * WASM_PAGESIZE);
-    return mem;
-}
-
-
-static void set_flag_to(uint32_t *word, uint32_t mask, int value) {
-    if (value) {
-        *word |= mask;
-    } else {
-        *word &= ~mask;
-    }
-}
-
-
 enum {
     cpu_gen_8086 = 0,
     cpu_gen_80186,
@@ -74,23 +55,20 @@ enum {
 } cpu_gen;
 
 typedef enum cpu_status_t {
-    cpu_status_normal = 0,
+    cpu_status_periodic = 0,
     cpu_status_halt,
     cpu_status_pause,
-    cpu_status_int,
+    cpu_status_inta,
     cpu_status_icebp,
-    cpu_status_exit = 0x10000,
+    cpu_status_exception = 0x10000,
+    cpu_status_exit,
     cpu_status_div,
-    cpu_status_ud,
-    cpu_status_fpu,
-    cpu_status_double,
+    cpu_status_ud = 0x60000,
+    cpu_status_fpu = 0x70000,
+    cpu_status_double = 0x80000,
     cpu_status_stack = 0xC0000,
     cpu_status_gpf = 0xD0000,
 } cpu_status_t;
-
-static int RAISE_GPF(uint16_t errcode) {
-    return cpu_status_gpf | errcode;
-}
 
 typedef uint32_t paddr_t;
 
@@ -212,9 +190,39 @@ typedef struct cpu_state {
     uint32_t flags_mask, flags_mask1;
     int cpu_gen;
     uint32_t cpu_context, default_context;
+    uint32_t cr0_valid;
 
 } cpu_state;
 
+
+
+
+size_t max_mem = 0;
+uint8_t *mem = NULL;
+
+/**
+ * Initialize internal structures.
+ * THIS FUNCTION MUST BE CALLED BEFORE ALL OTHER FUNCTIONS.
+ */
+WASM_EXPORT void *_init(uint32_t mb) {
+    max_mem = mb * 1024 * 1024;
+    mem = (void* )(vpc_grow(max_mem / WASM_PAGESIZE + 1) * WASM_PAGESIZE);
+    return mem;
+}
+
+
+static void set_flag_to(uint32_t *word, uint32_t mask, int value) {
+    if (value) {
+        *word |= mask;
+    } else {
+        *word &= ~mask;
+    }
+}
+
+
+static int RAISE_GPF(uint16_t errcode) {
+    return cpu_status_gpf | errcode;
+}
 
 static char *hextbl = "0123456789abcdef";
 
@@ -240,6 +248,19 @@ char *dump32(char *p, uint32_t value) {
     return p;
 }
 
+char *dump_dec(char *p, uint32_t value) {
+    char buff[16];
+    size_t l = 0;
+    for (; value; l++) {
+        buff[l] = (value % 10) + '0';
+        value /= 10;
+    }
+    for (int i = 0; i < l; i++) {
+        *p++ = buff[l - i - 1];
+    }
+    return p;
+}
+
 char *dump_string(char *p, const char *s) {
     for (; *s;) {
         *p++ = *s++;
@@ -260,7 +281,7 @@ static uint8_t *LEA_REG8(cpu_state *cpu, int index) {
     }
 }
 
-static void MOVE_TO_REG8(cpu_state *cpu, int index, uint8_t value) {
+static void WRITE_REG8(cpu_state *cpu, int index, uint8_t value) {
     *LEA_REG8(cpu, index) = value;
 }
 
@@ -348,6 +369,10 @@ static int MOVSXW(uint16_t w) {
     return (int)(int16_t)w;
 }
 
+static int64_t MOVSXD(uint32_t d) {
+    return (int64_t)(int32_t)d;
+}
+
 static uint8_t FETCH8(cpu_state *cpu) {
     uint8_t result = mem[cpu->CS.base + cpu->EIP];
     cpu->EIP += 1;
@@ -364,6 +389,14 @@ static uint32_t FETCH32(cpu_state *cpu) {
     uint32_t result = READ_MEM32(&cpu->CS, cpu->EIP);
     cpu->EIP += 4;
     return result;
+}
+
+static uint32_t FETCHW(cpu_state *cpu) {
+    if (cpu->cpu_context & CPU_CTX_DATA32) {
+        return FETCH32(cpu);
+    } else {
+        return FETCH16(cpu);
+    }
 }
 
 static uint32_t POPW(cpu_state *cpu) {
@@ -412,32 +445,6 @@ static void PUSHW(cpu_state *cpu, uint32_t value) {
     } else {
         cpu->SP = esp;
     }
-}
-
-static void OUT8(cpu_state *cpu, uint16_t port, uint8_t value) {
-    switch (port) {
-        case 0xCF9: // ACPI reset
-            cpu_reset(cpu, -1);
-            break;
-        default:
-            vpc_outb(port, value);
-            break;
-    }
-}
-
-static void OUT16(cpu_state *cpu, uint16_t port, uint16_t value) {
-    vpc_outw(port, value);
-}
-
-static uint8_t INPORT8(cpu_state *cpu, uint16_t port) {
-    switch (port) {
-        default:
-            return vpc_inb(port);
-    }
-}
-
-static uint16_t INPORT16(cpu_state *cpu, uint16_t port) {
-    return vpc_inw(port);
 }
 
 static int LOAD_SEL(cpu_state *cpu, sreg_t *sreg, uint16_t value) {
@@ -489,6 +496,7 @@ static int FAR_CALL(cpu_state *cpu, uint16_t new_sel, uint32_t new_eip) {
 
 static int FAR_JUMP(cpu_state *cpu, uint16_t new_sel, uint32_t new_eip) {
     int status = LOAD_SEL(cpu, &cpu->CS, new_sel);
+    if (status) return status;
     cpu->EIP = new_eip;
     return 0;
 }
@@ -516,11 +524,12 @@ static int INVOKE_INT(cpu_state *cpu, int n) {
     PUSHW(cpu, cpu->eflags);
     PUSHW(cpu, old_cs);
     PUSHW(cpu, old_eip);
+    cpu->TF = 0;
     return 0;
 }
 
-static int SETF8(cpu_state *cpu, int8_t value) {
-    int v = value;
+static int SETF8(cpu_state *cpu, int value) {
+    int8_t v = value;
     cpu->OF = (value != v);
     cpu->SF = (v < 0);
     cpu->ZF = (v == 0);
@@ -528,8 +537,8 @@ static int SETF8(cpu_state *cpu, int8_t value) {
     return value;
 }
 
-static int SETF16(cpu_state *cpu, int16_t value) {
-    int v = value;
+static int SETF16(cpu_state *cpu, int value) {
+    int16_t v = value;
     cpu->OF = (value != v);
     cpu->SF = (v < 0);
     cpu->ZF = (v == 0);
@@ -787,10 +796,10 @@ static void OPR(cpu_state *cpu, sreg_t *seg, uint8_t opcode, operand_set *set) {
         set->opr1 = &cpu->EAX;
         switch (set->size) {
         case 0:
-            set->opr2 = MOVSXB(FETCH8(cpu));
+            set->opr2 = FETCH8(cpu);
             break;
         case 1:
-            set->opr2 = MOVSXW(FETCH16(cpu));
+            set->opr2 = FETCH16(cpu);
             break;
         case 2:
             set->opr2 = FETCH32(cpu);
@@ -836,6 +845,13 @@ static void ADD(cpu_state *cpu, operand_set *set, int c) {
     }
 }
 
+static void INC(cpu_state *cpu, operand_set *set) {
+    int saved_cf = cpu->CF;
+    set->opr2 = 1;
+    ADD(cpu, set, 0);
+    cpu->CF = saved_cf;
+}
+
 static void SUB(cpu_state *cpu, operand_set *set, int c, int cmp) {
     int value;
     int src = set->opr2;
@@ -874,88 +890,89 @@ static void SUB(cpu_state *cpu, operand_set *set, int c, int cmp) {
     }
 }
 
+static void DEC(cpu_state *cpu, operand_set *set) {
+    int saved_cf = cpu->CF;
+    set->opr2 = 1;
+    SUB(cpu, set, 0, 0);
+    cpu->CF = saved_cf;
+}
+
 static void OR(cpu_state *cpu, operand_set *set) {
-    int value;
     switch (set->size) {
         case 0:
         {
-            value = *set->opr1b | set->opr2;
-            cpu->CF = 0;
+            int value = *set->opr1b | set->opr2;
             *set->opr1b = SETF8(cpu, value);
             break;
         }
         case 1:
         {
-            value = READ_LE16(set->opr1) | set->opr2;
-            cpu->CF = 0;
+            int value = READ_LE16(set->opr1) | set->opr2;
             WRITE_LE16(set->opr1, SETF16(cpu, value));
             break;
         }
         case 2:
         {
-            value = READ_LE32(set->opr1) | set->opr2;
-            cpu->CF = 0;
+            int value = READ_LE32(set->opr1) | set->opr2;
             WRITE_LE32(set->opr1, SETF32(cpu, value));
             break;
         }
     }
+    cpu->CF = 0;
+    cpu->OF = 0;
 }
 
 static void AND(cpu_state *cpu, operand_set *set, int test) {
-    int value;
     switch (set->size) {
         case 0:
         {
-            value = *set->opr1b & set->opr2;
-            cpu->CF = 0;
+            int value = *set->opr1b & set->opr2;
             SETF8(cpu, value);
             if (!test) *set->opr1b = value;
             break;
         }
         case 1:
         {
-            value = READ_LE16(set->opr1) & set->opr2;
-            cpu->CF = 0;
+            int value = READ_LE16(set->opr1) & set->opr2;
             SETF16(cpu, value);
             if (!test) WRITE_LE16(set->opr1, value);
             break;
         }
         case 2:
         {
-            value = READ_LE32(set->opr1) & set->opr2;
-            cpu->CF = 0;
+            int value = READ_LE32(set->opr1) & set->opr2;
             SETF32(cpu, value);
             if (!test) WRITE_LE32(set->opr1, value);
             break;
         }
     }
+    cpu->CF = 0;
+    cpu->OF = 0;
 }
 
 static void XOR(cpu_state *cpu, operand_set *set) {
-    int value;
     switch (set->size) {
         case 0:
         {
-            value = *set->opr1b ^ set->opr2;
-            cpu->CF = 0;
+            int value = *set->opr1b ^ set->opr2;
             *set->opr1b = SETF8(cpu, value);
             break;
         }
         case 1:
         {
-            value = READ_LE16(set->opr1) ^ set->opr2;
-            cpu->CF = 0;
+            int value = READ_LE16(set->opr1) ^ set->opr2;
             WRITE_LE16(set->opr1, SETF16(cpu, value));
             break;
         }
         case 2:
         {
-            value = READ_LE32(set->opr1) ^ set->opr2;
-            cpu->CF = 0;
+            int value = READ_LE32(set->opr1) ^ set->opr2;
             WRITE_LE32(set->opr1, SETF32(cpu, value));
             break;
         }
     }
+    cpu->CF = 0;
+    cpu->OF = 0;
 }
 
 static int JUMP_IF(cpu_state *cpu, int disp, int cc) {
@@ -996,28 +1013,28 @@ static int EVAL_CC(cpu_state *cpu, int cc) {
             return (!(cpu->CF || cpu->ZF));
 
         case 8: // xS
-            return ( cpu->SF);
+            return (cpu->SF);
 
         case 9: // xNS
-            return ( !cpu->SF);
+            return (!cpu->SF);
 
         case 0xA: // xP d8
-            return ( cpu->PF);
+            return (cpu->PF);
 
         case 0xB: // xNP
-            return ( !cpu->PF);
+            return (!cpu->PF);
 
         case 0xC: // xL
-            return ( cpu->SF != cpu->OF);
+            return (cpu->SF != cpu->OF);
 
         case 0xD: // xNL
-            return ( cpu->SF == cpu->OF);
+            return (cpu->SF == cpu->OF);
 
         case 0xE: // xLE
-            return ( cpu->ZF || (cpu->SF != cpu->OF));
+            return (cpu->ZF || (cpu->SF != cpu->OF));
 
         case 0xF: // xG
-            return ( !(cpu->ZF || cpu->SF != cpu->OF));
+            return (!(cpu->ZF || (cpu->SF != cpu->OF)));
     }
     TRAP_NORETURN();
 }
@@ -1284,7 +1301,7 @@ static int LDS(cpu_state *cpu, sreg_t *seg_ovr, sreg_t *target) {
     if (MODRM_W(cpu, seg_ovr, 1, &set)) return cpu_status_ud; // VEX
     uint16_t new_sel;
     uint32_t offset;
-    if (cpu->cpu_context & CPU_CTX_DATA32) {
+    if (set.size == 2) {
         offset = READ_LE32(set.opr1);
         new_sel = READ_LE16(set.opr1b + 4);
     } else {
@@ -1293,7 +1310,11 @@ static int LDS(cpu_state *cpu, sreg_t *seg_ovr, sreg_t *target) {
     }
     int status = LOAD_SEL(cpu, target, new_sel);
     if (status) return status;
-    cpu->gpr[set.opr2] = offset;
+    if (set.size == 2) {
+        cpu->gpr[set.opr2] = offset;
+    } else {
+        WRITE_LE32(&cpu->gpr[set.opr2], offset);
+    }
     return 0;
 }
 
@@ -1313,6 +1334,24 @@ static int CPUID(cpu_state *cpu) {
     }
     return 0;
 }
+
+static int MOV_CR(cpu_state *cpu, int cr, uint32_t value) {
+    switch (cr) {
+        case 0:
+        {
+            uint32_t old_value = cpu->CR[cr];
+            uint32_t changed = value & (old_value ^ value);
+            if (changed & ~cpu->cr0_valid) return cpu_status_gpf;
+            cpu->CR[cr] = value;
+            return 0;
+        }
+        case 4:
+            return cpu_status_gpf;
+        default:
+            return cpu_status_gpf;
+    }
+}
+
 
 #define PREFIX_LOCK     0x00000001
 #define PREFIX_REPZ     0x00000002
@@ -1495,26 +1534,43 @@ static int cpu_step(cpu_state *cpu) {
                 return 0;
             }
 
-            case 0x40: // INC AX
-            case 0x41: case 0x42: case 0x43: case 0x44: case 0x45: case 0x46: case 0x47:
+            case 0x40: // INC reg16
+            case 0x41:
+            case 0x42:
+            case 0x43:
+            case 0x44:
+            case 0x45:
+            case 0x46:
+            case 0x47:
             {
-                int val = SETF16(cpu, (MOVSXW(cpu->gpr[inst & 7]) + 1));
-                cpu->gpr[inst & 7] = val;
-                cpu->AF = !(val & 15);
+                set.size = (cpu->cpu_context & CPU_CTX_DATA32) ? 2 : 1;
+                set.opr1 = &cpu->gpr[inst & 7];
+                INC(cpu, &set);
                 return 0;
             }
 
-            case 0x48: // DEC AX
-            case 0x49: case 0x4A: case 0x4B: case 0x4C: case 0x4D: case 0x4E: case 0x4F:
+            case 0x48: // DEC reg16
+            case 0x49:
+            case 0x4A:
+            case 0x4B:
+            case 0x4C:
+            case 0x4D:
+            case 0x4E:
+            case 0x4F:
             {
-                int val = SETF16(cpu, (MOVSXW(cpu->gpr[inst & 7]) - 1));
-                cpu->gpr[inst & 7] = val;
-                cpu->AF = (val & 15) == 15;
+                set.size = (cpu->cpu_context & CPU_CTX_DATA32) ? 2 : 1;
+                set.opr1 = &cpu->gpr[inst & 7];
+                DEC(cpu, &set);
                 return 0;
             }
 
-            case 0x50: // PUSH AX
-            case 0x51: case 0x52: case 0x53: case 0x55: case 0x56: case 0x57:
+            case 0x50: // PUSH reg16
+            case 0x51:
+            case 0x52:
+            case 0x53:
+            case 0x55:
+            case 0x56:
+            case 0x57:
                 PUSHW(cpu, cpu->gpr[inst & 7]);
                 return 0;
             
@@ -1527,9 +1583,19 @@ static int cpu_step(cpu_state *cpu) {
                 }
                 return 0;
 
-            case 0x58: // POP AX
-            case 0x59: case 0x5A: case 0x5B: case 0x5C: case 0x5D: case 0x5E: case 0x5F:
-                cpu->gpr[inst & 7] = POPW(cpu);
+            case 0x58: // POP reg16
+            case 0x59:
+            case 0x5A:
+            case 0x5B:
+            case 0x5C:
+            case 0x5D:
+            case 0x5E:
+            case 0x5F:
+                if (cpu->cpu_context & CPU_CTX_DATA32) {
+                    cpu->gpr[inst & 7] = POPW(cpu);
+                } else {
+                    WRITE_LE16(&cpu->gpr[inst & 7], POPW(cpu));
+                }
                 return 0;
 
             case 0x60: // PUSHA
@@ -1615,7 +1681,7 @@ static int cpu_step(cpu_state *cpu) {
                 int rep = prefix & (PREFIX_REPZ | PREFIX_REPNZ);
                 if (rep && cpu->CX == 0) return 0;
                 do {
-                    WRITE_MEM8(_seg, cpu->DI, INPORT8(cpu, cpu->DX));
+                    WRITE_MEM8(_seg, cpu->DI, vpc_inb(cpu->DX));
                     if (cpu->DF) {
                         cpu->DI--;
                     } else {
@@ -1631,7 +1697,7 @@ static int cpu_step(cpu_state *cpu) {
                 int rep = prefix & (PREFIX_REPZ | PREFIX_REPNZ);
                 if (rep && cpu->CX == 0) return 0;
                 do {
-                    WRITE_MEM16(_seg, cpu->DI, INPORT16(cpu, cpu->DX));
+                    WRITE_MEM16(_seg, cpu->DI, vpc_inw(cpu->DX));
                     if (cpu->DF) {
                         cpu->DI -= 2;
                     } else {
@@ -1648,7 +1714,7 @@ static int cpu_step(cpu_state *cpu) {
                 int rep = prefix & PREFIX_REPZ;
                 if (rep && cpu->CX == 0) return 0;
                 do {
-                    OUT8(cpu, cpu->DX, READ_MEM8(_seg, cpu->SI));
+                    vpc_outb(cpu->DX, READ_MEM8(_seg, cpu->SI));
                     if (cpu->DF) {
                         cpu->SI--;
                     } else {
@@ -1664,7 +1730,7 @@ static int cpu_step(cpu_state *cpu) {
                 int rep = prefix & (PREFIX_REPZ | PREFIX_REPNZ);
                 if (rep && cpu->CX == 0) return 0;
                 do {
-                    OUT16(cpu, cpu->DX, READ_MEM16(_seg, cpu->SI));
+                    vpc_outw(cpu->DX, READ_MEM16(_seg, cpu->SI));
                     if (cpu->DF) {
                         cpu->SI -= 2;
                     } else {
@@ -1692,24 +1758,20 @@ static int cpu_step(cpu_state *cpu) {
             case 0x7F: // JG d8
                 return JUMP_IF(cpu, MOVSXB(FETCH8(cpu)), EVAL_CC(cpu, inst));
 
-            case 0x80: // alu r/m, imm8
-            case 0x81: // alu r/m, imm16
-            case 0x82: // alu r/m, imm8 (mirror)
-            case 0x83: // alu r/m, imm8 (sign extended)
+            case 0x80: // alu r/m8, imm8
+            case 0x81: // alu r/m16, imm16
+            case 0x82: // alu r/m8, imm8 (mirror)
+            case 0x83: // alu r/m16, imm8 (sign extended)
             {
                 MODRM_W(cpu, seg, inst & 1, &set);
                 int opc = set.opr2;
                 if (inst == 0x81) {
-                    if (set.size == 1) {
-                        set.opr2 = MOVSXW(FETCH16(cpu));
-                    } else {
-                        set.opr2 = FETCH32(cpu);
-                    }
+                    set.opr2 = FETCHW(cpu);
                 } else {
                     set.opr2 = MOVSXB(FETCH8(cpu));
                 }
                 switch (opc) {
-                    case 0: //ADD
+                    case 0: // ADD
                         ADD(cpu, &set, 0);
                         break;
                     case 1: // OR
@@ -1748,7 +1810,7 @@ static int cpu_step(cpu_state *cpu) {
                 MODRM_W(cpu, seg, 0, &set);
                 int temp = *set.opr1b;
                 *set.opr1b = LOAD_REG8(cpu, set.opr2);
-                MOVE_TO_REG8(cpu, set.opr2, temp);
+                WRITE_REG8(cpu, set.opr2, temp);
                 return 0;
             }
 
@@ -1765,7 +1827,7 @@ static int cpu_step(cpu_state *cpu) {
             case 0x89: // MOV rm, r16
             case 0x8A: // MOV r8, rm
             case 0x8B: // MOV r16, rm
-                MODRM_W_D(cpu, seg, inst & 1, inst &2, &set);
+                MODRM_W_D(cpu, seg, inst & 1, inst & 2, &set);
                 switch (set.size) {
                 case 0:
                     *set.opr1b = set.opr2;
@@ -1807,14 +1869,19 @@ static int cpu_step(cpu_state *cpu) {
                 }
 
             case 0x90: // NOP
-                if (prefix & (PREFIX_REPZ | PREFIX_REPNZ)) {
+                if (prefix & PREFIX_REPZ) {
                     return cpu_status_pause;
                 } else {
                     return 0;
                 }
 
             case 0x91: // XCHG AX, reg16
-            case 0x92: case 0x93: case 0x94: case 0x95: case 0x96: case 0x97:
+            case 0x92:
+            case 0x93:
+            case 0x94:
+            case 0x95:
+            case 0x96:
+            case 0x97:
             {
                 uint32_t temp = cpu->gpr[inst & 7];
                 cpu->gpr[inst & 7] = cpu->EAX;
@@ -1835,7 +1902,7 @@ static int cpu_step(cpu_state *cpu) {
 
             case 0x9A: // CALL far imm32
             {
-                uint32_t new_eip = FETCH16(cpu);
+                uint32_t new_eip = FETCHW(cpu);
                 uint16_t new_sel = FETCH16(cpu);
                 return FAR_CALL(cpu, new_sel, new_eip);
             }
@@ -1849,7 +1916,7 @@ static int cpu_step(cpu_state *cpu) {
 
             case 0x9D: // POPF
                 LOAD_FLAGS(cpu, POPW(cpu));
-                return cpu_status_int;
+                return cpu_status_inta;
 
             case 0x9E: // SAHF
                 LOAD_FLAGS(cpu, (cpu->eflags & 0xFFFFFF00) | cpu->AH);
@@ -1921,18 +1988,6 @@ static int cpu_step(cpu_state *cpu) {
                 int rep = prefix & (PREFIX_REPZ | PREFIX_REPNZ);
                 size_t count = cpu->CX;
                 if (rep && count == 0) return 0;
-                // if (rep && cpu->DF == 0
-                //     && ((cpu->SI + count) <= 0x10000)
-                //     && ((cpu->DI + count) <= 0x10000)
-                // ) {
-                //     uint8_t *src = mem + _seg->base + cpu->SI;
-                //     uint8_t *dst = mem + cpu->ES.base + cpu->DI;
-                //     memcpy(dst, src, count);
-                //     cpu->SI += count;
-                //     cpu->DI += count;
-                //     cpu->CX = 0;
-                //     return 0;
-                // }
                 do {
                     WRITE_MEM8(&cpu->ES, cpu->DI, READ_MEM8(_seg, cpu->SI));
                     if (cpu->DF) {
@@ -2032,9 +2087,9 @@ static int cpu_step(cpu_state *cpu) {
                 set.size = inst & 1;
                 set.opr1 = &cpu->AX;
                 if (set.size) {
-                    set.opr2 = MOVSXW(FETCH16(cpu));
+                    set.opr2 = FETCHW(cpu);
                 } else {
-                    set.opr2 = MOVSXB(FETCH8(cpu));
+                    set.opr2 = FETCH8(cpu);
                 }
                 AND(cpu, &set, 1);
                 return 0;
@@ -2151,17 +2206,29 @@ static int cpu_step(cpu_state *cpu) {
                 return 0;
             }
 
-            case 0xB0: // MOV AL, imm8
-            case 0xB1: case 0xB2: case 0xB3: case 0xB4: case 0xB5: case 0xB6: case 0xB7:
-                MOVE_TO_REG8(cpu, inst, FETCH8(cpu));
+            case 0xB0: // MOV reg8, imm8
+            case 0xB1:
+            case 0xB2:
+            case 0xB3:
+            case 0xB4:
+            case 0xB5:
+            case 0xB6:
+            case 0xB7:
+                WRITE_REG8(cpu, inst, FETCH8(cpu));
                 return 0;
 
-            case 0xB8: // MOV AX, imm16
-            case 0xB9: case 0xBA: case 0xBB: case 0xBC: case 0xBD: case 0xBE: case 0xBF:
+            case 0xB8: // MOV reg16, imm16
+            case 0xB9:
+            case 0xBA:
+            case 0xBB:
+            case 0xBC:
+            case 0xBD:
+            case 0xBE:
+            case 0xBF:
                 if (cpu->cpu_context & CPU_CTX_DATA32) {
                     cpu->gpr[inst & 7] = FETCH32(cpu);
                 } else {
-                    cpu->gpr[inst & 7] = FETCH16(cpu);
+                    WRITE_LE16(&cpu->gpr[inst & 7], FETCH16(cpu));
                 }
                 return 0;
 
@@ -2251,7 +2318,7 @@ static int cpu_step(cpu_state *cpu) {
                 if (status) return status;
                 cpu->EIP = ret_eip;
                 LOAD_FLAGS(cpu, ret_fl);
-                return cpu_status_int;
+                return cpu_status_inta;
             }
 
             case 0xD0: // shift r/m, 1
@@ -2284,13 +2351,22 @@ static int cpu_step(cpu_state *cpu) {
             // case 0xD6: // SETALC (undocumented)
 
             case 0xD7: // XLAT
-                cpu->AL = READ_MEM8(SEGMENT(&cpu->DS), cpu->BX + cpu->AL);
+                if (cpu->cpu_context & CPU_CTX_ADDR32) {
+                    cpu->AL = READ_MEM8(SEGMENT(&cpu->DS), cpu->EBX + cpu->AL);
+                } else {
+                    cpu->AL = READ_MEM8(SEGMENT(&cpu->DS), (cpu->BX + cpu->AL) & 0xFFFF);
+                }
                 return 0;
 
-            case 0xD8: // ESC
-            case 0xD9: case 0xDA: case 0xDB: case 0xDC: case 0xDD: case 0xDE: case 0xDF:
+            case 0xD8: // ESC (IGNORED)
+            case 0xD9:
+            case 0xDA:
+            case 0xDB:
+            case 0xDC:
+            case 0xDD:
+            case 0xDE:
+            case 0xDF:
             {
-                // IGNORED
                 modrm_t modrm;
                 MODRM(cpu, seg, &modrm);
                 return cpu_status_fpu;
@@ -2299,59 +2375,78 @@ static int cpu_step(cpu_state *cpu) {
             case 0xE0: // LOOPNZ
             {
                 int disp = MOVSXB(FETCH8(cpu));
-                cpu->CX--;
-                return JUMP_IF(cpu, disp, (cpu->CX != 0 && cpu->ZF == 0));
+                if (cpu->cpu_context & CPU_CTX_ADDR32) {
+                    cpu->ECX--;
+                    return JUMP_IF(cpu, disp, (cpu->ECX != 0 && cpu->ZF == 0));
+                } else {
+                    cpu->CX--;
+                    return JUMP_IF(cpu, disp, (cpu->CX != 0 && cpu->ZF == 0));
+                }
             }
 
             case 0xE1: // LOOPZ
             {
                 int disp = MOVSXB(FETCH8(cpu));
-                cpu->CX--;
-                return JUMP_IF(cpu, disp, (cpu->CX != 0 && cpu->ZF != 0));
+                if (cpu->cpu_context & CPU_CTX_ADDR32) {
+                    cpu->ECX--;
+                    return JUMP_IF(cpu, disp, (cpu->ECX != 0 && cpu->ZF != 0));
+                } else {
+                    cpu->CX--;
+                    return JUMP_IF(cpu, disp, (cpu->CX != 0 && cpu->ZF != 0));
+                }
             }
 
             case 0xE2: // LOOP
             {
                 int disp = MOVSXB(FETCH8(cpu));
-                cpu->CX--;
-                return JUMP_IF(cpu, disp, (cpu->CX != 0));
+                if (cpu->cpu_context & CPU_CTX_ADDR32) {
+                    cpu->ECX--;
+                    return JUMP_IF(cpu, disp, (cpu->ECX != 0));
+                } else {
+                    cpu->CX--;
+                    return JUMP_IF(cpu, disp, (cpu->CX != 0));
+                }
             }
 
             case 0xE3: // JCXZ
-                return JUMP_IF(cpu, MOVSXB(FETCH8(cpu)), cpu->CX == 0);
+                if (cpu->cpu_context & CPU_CTX_ADDR32) {
+                    return JUMP_IF(cpu, MOVSXB(FETCH8(cpu)), cpu->ECX == 0);
+                } else {
+                    return JUMP_IF(cpu, MOVSXB(FETCH8(cpu)), cpu->CX == 0);
+                }
 
             case 0xE4: // IN AL, imm8
-                cpu->AL = INPORT8(cpu, FETCH8(cpu));
+                cpu->AL = vpc_inb(FETCH8(cpu));
                 return 0;
             
             case 0xE5: // IN AX, imm8
-                cpu->AX = INPORT16(cpu, FETCH8(cpu));
+                cpu->AX = vpc_inw(FETCH8(cpu));
                 return 0;
 
             case 0xE6: // OUT imm8, AL
-                OUT8(cpu, FETCH8(cpu), cpu->AL);
+                vpc_outb(FETCH8(cpu), cpu->AL);
                 return 0;
 
             case 0xE7: // OUT imm8, AX
-                OUT16(cpu, FETCH8(cpu), cpu->AX);
+                vpc_outw(FETCH8(cpu), cpu->AX);
                 return 0;
 
             case 0xE8: // call imm16
             {
-                int disp = MOVSXW(FETCH16(cpu));
+                int disp = FETCHW(cpu);
                 PUSHW(cpu, cpu->EIP);
                 return JUMP_IF(cpu, disp, 1);
             }
 
             case 0xE9: // jmp imm16
             {
-                int disp = MOVSXW(FETCH16(cpu));
+                int disp = FETCHW(cpu);
                 return JUMP_IF(cpu, disp, 1);
             }
 
             case 0xEA: // jmp far imm32
             {
-                uint32_t new_eip = FETCH16(cpu);
+                uint32_t new_eip = FETCHW(cpu);
                 uint16_t new_sel = FETCH16(cpu);
                 return FAR_JUMP(cpu, new_sel, new_eip);
             }
@@ -2359,23 +2454,33 @@ static int cpu_step(cpu_state *cpu) {
             case 0xEB: // jmp d8
             {
                 int disp = MOVSXB(FETCH8(cpu));
-                return JUMP_IF(cpu, disp, 1);
+                if (disp == -2) {
+                    // Reduce CPU power of forever loop
+                    cpu->EIP += disp;
+                    if (cpu->IF) {
+                        return cpu_status_pause;
+                    } else {
+                        return cpu_status_exit;
+                    }
+                } else {
+                    return JUMP_IF(cpu, disp, 1);
+                }
             }
 
             case 0xEC: // IN AL, DX
-                cpu->AL = INPORT8(cpu, cpu->DX);
+                cpu->AL = vpc_inb(cpu->DX);
                 return 0;
 
             case 0xED: // IN AX, DX
-                cpu->AX = INPORT16(cpu, cpu->DX);
+                cpu->AX = vpc_inw(cpu->DX);
                 return 0;
 
             case 0xEE: // OUT DX, AL
-                OUT8(cpu, cpu->DX, cpu->AL);
+                vpc_outb(cpu->DX, cpu->AL);
                 return 0;
 
             case 0xEF: // OUT DX, AX
-                OUT16(cpu, cpu->DX, cpu->AX);
+                vpc_outw(cpu->DX, cpu->AX);
                 return 0;
 
             case 0xF0: // prefix LOCK (NOP)
@@ -2414,8 +2519,8 @@ static int cpu_step(cpu_state *cpu) {
                         return 0;
                     case 3: // NEG r/m8
                     {
-                        int src = *set.opr1b;
-                        cpu->AF = (src & 15);
+                        int src = MOVSXB(*set.opr1b);
+                        cpu->AF = !!(src & 15);
                         cpu->CF = !!src;
                         *set.opr1b = SETF8(cpu, -src);
                         return 0;
@@ -2457,19 +2562,43 @@ static int cpu_step(cpu_state *cpu) {
                 switch (set.opr2) {
                     case 0: // TEST r/m16, imm16
                         cpu->CF = 0;
-                        SETF16(cpu, *set.opr1b & FETCH16(cpu));
+                        if (set.size == 1) {
+                            SETF16(cpu, READ_LE16(set.opr1) & FETCH16(cpu));
+                        } else {
+                            SETF32(cpu, READ_LE32(set.opr1) & FETCH32(cpu));
+                        }
                         return 0;
                     case 1: // TEST?
                         return cpu_status_ud;
                     case 2: // NOT r/m16
-                        WRITE_LE16(set.opr1, READ_LE16(set.opr1));
+                        if (set.size == 1) {
+                            WRITE_LE16(set.opr1, ~ READ_LE16(set.opr1));
+                        } else {
+                            WRITE_LE32(set.opr1, ~ READ_LE32(set.opr1));
+                        }
                         return 0;
                     case 3: // NEG r/m16
                     {
-                        int src = READ_LE16(set.opr1);
-                        cpu->AF = (src & 15);
-                        cpu->CF = !!src;
-                        WRITE_LE16(set.opr1, SETF16(cpu, -src));
+                        if (set.size == 1) {
+                            int src = MOVSXW(READ_LE16(set.opr1));
+                            cpu->AF = !!(src & 15);
+                            cpu->CF = !!src;
+                            WRITE_LE16(set.opr1, SETF16(cpu, -src));
+                        } else {
+                            int src = READ_LE32(set.opr1);
+                            if (src == INT32_MIN) {
+                                cpu->CF = 1;
+                                cpu->PF = 1;
+                                cpu->AF = 0;
+                                cpu->ZF = 0;
+                                cpu->SF = 1;
+                                cpu->OF = 1;
+                            } else {
+                                cpu->AF = !!(src & 15);
+                                cpu->CF = !!src;
+                                WRITE_LE32(set.opr1, SETF32(cpu, -src));
+                            }
+                        }
                         return 0;
                     }
                     case 4: // MUL ax, r/m16
@@ -2528,7 +2657,7 @@ static int cpu_step(cpu_state *cpu) {
             case 0xFB: // STI
                 if (!cpu->IF) {
                     cpu->IF = 1;
-                    return cpu_status_int;
+                    return cpu_status_inta;
                 }
                 return 0;
 
@@ -2546,12 +2675,10 @@ static int cpu_step(cpu_state *cpu) {
                 MODRM_W(cpu, seg, 0, &set);
                 switch (set.opr2) {
                     case 0: // INC r/m8
-                        *set.opr1b = value = SETF8(cpu, MOVSXB(*set.opr1b) + 1);
-                        cpu->AF = !(value & 15);
+                        INC(cpu, &set);
                         return 0;
                     case 1: // DEC r/m8
-                        *set.opr1b = value = SETF8(cpu, MOVSXB(*set.opr1b) - 1);
-                        cpu->AF = (value & 15) == 15;
+                        DEC(cpu, &set);
                         return 0;
                     default:
                         return cpu_status_ud;
@@ -2563,12 +2690,10 @@ static int cpu_step(cpu_state *cpu) {
                 int mod = MODRM_W(cpu, seg, 1, &set);
                 switch (set.opr2) {
                     case 0: // INC r/m16
-                        WRITE_LE16(set.opr1, value = SETF16(cpu, MOVSXW(READ_LE16(set.opr1)) + 1));
-                        cpu->AF = !(value & 15);
+                        INC(cpu, &set);
                         return 0;
                     case 1: // DEC r/m16
-                        WRITE_LE16(set.opr1, value = SETF16(cpu, MOVSXW(READ_LE16(set.opr1)) - 1));
-                        cpu->AF = (value & 15) == 15;
+                        DEC(cpu, &set);
                         return 0;
                     case 2: // CALL r/m16
                         PUSHW(cpu, cpu->EIP);
@@ -2641,20 +2766,35 @@ static int cpu_step(cpu_state *cpu) {
                     }
                     // case 4: // SMSW
                     // case 6: // LMSW
-                    // case 7: // INVLPG
+                    case 7: // INVLPG (NOP)
+                        return 0;
                 }
                 return cpu_status_ud;
             }
+
+            // case 0x0F02: // LAR reg, r/m
+            // case 0x0F03: // LSL reg, r/m
+            // case 0x0F05: // LOADALL / SYSCALl
 
             case 0x0F06: // CLTS
                 cpu->CR[0] &= ~8;
                 return 0;
 
+            // case 0x0F07: // LOADALL / SYSRET
+
             case 0x0F08: // INVD (NOP)
             case 0x0F09: // WBINVD (NOP)
                 return 0;
 
-            // case 0x0F0B: // UD2
+            case 0x0F0B: // UD2
+                return cpu_status_ud;
+
+            case 0x0F1F: // LONG NOP
+            {
+                modrm_t modrm;
+                MODRM(cpu, NULL, &modrm);
+                return 0;
+            }
 
             case 0x0F20: // MOV reg, Cr
             case 0x0F22: // MOV Cr, reg
@@ -2664,7 +2804,7 @@ static int cpu_step(cpu_state *cpu) {
                 if (!MODRM(cpu, NULL, &modrm)) return cpu_status_ud;
                 if ((1 << modrm.reg) & 0xFEE2) return cpu_status_gpf;
                 if (inst & 2) {
-                    cpu->CR[modrm.reg] = cpu->gpr[modrm.rm];
+                    return MOV_CR(cpu, modrm.reg, cpu->gpr[modrm.rm]);
                 } else {
                     cpu->gpr[modrm.rm] = cpu->CR[modrm.reg];
                 }
@@ -2717,7 +2857,7 @@ static int cpu_step(cpu_state *cpu) {
             case 0x0F8D: // JNL d16
             case 0x0F8E: // JLE d16
             case 0x0F8F: // JG d16
-                return JUMP_IF(cpu, MOVSXW(FETCH16(cpu)), EVAL_CC(cpu, inst));
+                return JUMP_IF(cpu, FETCHW(cpu), EVAL_CC(cpu, inst));
 
             case 0x0F90: // SETcc r/m8
             case 0x0F91:
@@ -2938,8 +3078,13 @@ void dump_regs(cpu_state *cpu, uint32_t eip) {
     }
 
     for (int i = 0; i < 8; i++) {
-        *p++ = ' ';
-        p = dump8(p, READ_MEM8(&cpu->CS, eip + i));
+        if (cpu->CS.base + eip + i < max_mem) {
+            *p++ = ' ';
+            p = dump8(p, READ_MEM8(&cpu->CS, eip + i));
+        } else {
+            p = dump_string(p, " **");
+            break;
+        }
     }
 
     if (use32) {
@@ -2993,7 +3138,7 @@ void dump_regs(cpu_state *cpu, uint32_t eip) {
     *p++ = cpu->ZF ? 'Z' : '-';
     *p++ = cpu->PF ? 'P' : '-';
     *p++ = cpu->CF ? 'C' : '-';
-    if (use32) {
+    if (cpu->cpu_gen >= cpu_gen_80286) {
         p = dump_string(p, "\nCS ");
         p = dump_segment(p, &cpu->CS);
         p = dump_string(p, " SS ");
@@ -3007,6 +3152,7 @@ void dump_regs(cpu_state *cpu, uint32_t eip) {
         p = dump_string(p, " GS ");
         p = dump_segment(p, &cpu->GS);
     }
+    *p = 0;
     println(buff);
 }
 
@@ -3041,6 +3187,21 @@ void cpu_reset(cpu_state *cpu, int gen) {
     }
     LOAD_FLAGS(cpu, 0);
 
+    cpu->cr0_valid = 0x6005003F;
+    switch (cpu->cpu_gen) {
+        case cpu_gen_8086:
+        case cpu_gen_80186:
+            cpu->cr0_valid = 0;
+        case cpu_gen_80286:
+            cpu->cr0_valid &= 0x0000FFFF;
+            break;
+        case cpu_gen_80386:
+            cpu->cr0_valid &= 0x8000FFFF;
+            break;
+        case cpu_gen_80486:
+            break;
+    }
+
     cpu->EIP = 0x0000FFF0;
     cpu->CS.sel = 0xF000;
     cpu->CS.base = 0x000F0000;
@@ -3061,39 +3222,41 @@ void cpu_reset(cpu_state *cpu, int gen) {
     cpu->EDX = cpu->cpu_gen << 8;
 }
 
-static int check_irq(cpu_state *cpu) {
-    if (!cpu->IF) return 0;
+static void check_irq(cpu_state *cpu) {
+    if (!cpu->IF) return;
     int vector = vpc_irq();
-    if (!vector) return 0;
+    if (!vector) return;
     INVOKE_INT(cpu, vector);
     cpu->IF = 0;
-    return 0;
 }
 
 #define CPU_INTERVAL    0x100000
 static int cpu_block(cpu_state *cpu) {
+    int periodic = CPU_INTERVAL;
+    if (cpu->TF) periodic = 1;
     check_irq(cpu);
-    for (int i = 0; i < CPU_INTERVAL; i++) {
+    for (int i = 0; i < periodic; i++) {
         uint32_t last_known_eip = cpu->EIP;
         if (last_known_eip > 0xFFFF) return cpu_status_gpf;
         int status = cpu_step(cpu);
+        if (status == cpu_status_periodic) continue;
         switch (status) {
-            case cpu_status_normal:
-                break;
+            // case cpu_status_periodic:
+            //     continue;
             case cpu_status_pause:
-                return cpu_status_normal;
-            case cpu_status_int:
+                return cpu_status_periodic;
+            case cpu_status_inta:
                 check_irq(cpu);
-                break;
+                continue;
             case cpu_status_icebp:
                 dump_regs(cpu, cpu->EIP);
-                break;
+                continue;
             case cpu_status_div:
                 if (cpu->cpu_gen >= cpu_gen_80286) {
                     cpu->EIP = last_known_eip;
                 }
                 INVOKE_INT(cpu, 0); // #DE
-                break;
+                continue;
             case cpu_status_halt:
                 return status;
             case cpu_status_ud:
@@ -3102,19 +3265,26 @@ static int cpu_block(cpu_state *cpu) {
                 return status;
         }
     }
-    return 0;
+    if (cpu->TF) INVOKE_INT(cpu, 1);
+    return cpu_status_periodic;
 }
 
+/**
+ * Allocate internal CPU structure.
+ */
 WASM_EXPORT cpu_state *alloc_cpu(int gen) {
     static cpu_state cpu;
     cpu_reset(&cpu, gen);
     return &cpu;
 }
 
+/**
+ * Run CPU for a while.
+ */
 WASM_EXPORT int run(cpu_state *cpu) {
     int status = cpu_block(cpu);
     switch (status) {
-        case cpu_status_normal:
+        case cpu_status_periodic:
         case cpu_status_exit:
             return status;
         case cpu_status_halt:
@@ -3140,20 +3310,111 @@ WASM_EXPORT int run(cpu_state *cpu) {
     }
 }
 
+/**
+ * Run CPU step by step.
+ * When an exception occurs during `step`, the status code is returned but no interrupt is generated.
+ * 
+ * |Status Code|Cause|Continuity|Description|
+ * |-|-|-|-|
+ * |0|Periodic|Y|Periodic return|
+ * |1|Halt|Y|CPU runs HLT instruction|
+ * |2|Pause|Y|CPU runs PAUSE instruction|
+ * |3|INTA|Y|Interrupt acknowledge cycle|
+ * |4|ICEBP|Y|CPU runs ICEBP instruction|
+ * |>0x10000|Exit|N|CPU enters to shutdown|
+ * ||#DE|conditional|Divide by zero|
+ * |0x60000|#UD|conditional|Undefined instruction|
+ * |0x70000|#FP|conditional|FPU error|
+ * |0x8XXXX|#DF|N|Double Fault|
+ * |0xCXXXX|#SS|conditional|Stack Exception|
+ * |0xDXXXX|#GP|conditional|General Protection Exception|
+ * 
+ */
 WASM_EXPORT int step(cpu_state *cpu) {
+    uint32_t last_eip = cpu->EIP;
     int status = cpu_step(cpu);
+    if (status >= cpu_status_exception) {
+        cpu->EIP = last_eip;
+    }
     return status;
 }
 
+/**
+ * Dump state of CPU.
+ */
 WASM_EXPORT void debug_dump(cpu_state *cpu) {
     dump_regs(cpu, cpu->EIP);
 }
 
+/**
+ * Reset CPU and change generation to specified value.
+ * All registers are reset to predefined values.
+ */
 WASM_EXPORT void reset(cpu_state *cpu, int gen) {
     cpu_reset(cpu, gen);
 }
 
-WASM_EXPORT uint32_t check_vram(uint32_t segment, size_t size) {
+
+/**
+ * Load Selector into specified Segment for debugging.
+ */
+WASM_EXPORT int debug_load_selector(cpu_state *cpu, int seg_index, uint16_t selector) {
+    return LOAD_SEL(cpu, &cpu->sregs[seg_index], selector);
+}
+
+/**
+ * Get JSON of register map for debugging.
+ */
+WASM_EXPORT const char *debug_get_register_map(cpu_state *cpu) {
+    static char buffer[1024];
+    char *p = buffer;
+    p = dump_string(p, "{");
+    p = dump_string(p, "\"AX\":");
+    p = dump_dec(p, (intptr_t)&cpu->AX);
+    p = dump_string(p, ",\"BX\":");
+    p = dump_dec(p, (intptr_t)&cpu->BX);
+    p = dump_string(p, ",\"CX\":");
+    p = dump_dec(p, (intptr_t)&cpu->CX);
+    p = dump_string(p, ",\"DX\":");
+    p = dump_dec(p, (intptr_t)&cpu->DX);
+    p = dump_string(p, ",\"BP\":");
+    p = dump_dec(p, (intptr_t)&cpu->BP);
+    p = dump_string(p, ",\"SP\":");
+    p = dump_dec(p, (intptr_t)&cpu->SP);
+    p = dump_string(p, ",\"SI\":");
+    p = dump_dec(p, (intptr_t)&cpu->SI);
+    p = dump_string(p, ",\"DI\":");
+    p = dump_dec(p, (intptr_t)&cpu->DI);
+    p = dump_string(p, ",\"IP\":");
+    p = dump_dec(p, (intptr_t)&cpu->EIP);
+    p = dump_string(p, ",\"flags\":");
+    p = dump_dec(p, (intptr_t)&cpu->eflags);
+    p = dump_string(p, ",\"CS\":");
+    p = dump_dec(p, (intptr_t)&cpu->CS.sel);
+    p = dump_string(p, ",\"CS.limit\":");
+    p = dump_dec(p, (intptr_t)&cpu->CS.limit);
+    p = dump_string(p, ",\"CS.base\":");
+    p = dump_dec(p, (intptr_t)&cpu->CS.base);
+    p = dump_string(p, ",\"CS.attr\":");
+    p = dump_dec(p, (intptr_t)&cpu->CS.attrs);
+    p = dump_string(p, ",\"DS\":");
+    p = dump_dec(p, (intptr_t)&cpu->DS.sel);
+    p = dump_string(p, ",\"ES\":");
+    p = dump_dec(p, (intptr_t)&cpu->ES.sel);
+    p = dump_string(p, ",\"SS\":");
+    p = dump_dec(p, (intptr_t)&cpu->SS.sel);
+    p = dump_string(p, ",\"FS\":");
+    p = dump_dec(p, (intptr_t)&cpu->FS.sel);
+    p = dump_string(p, ",\"GS\":");
+    p = dump_dec(p, (intptr_t)&cpu->GS.sel);
+    p = dump_string(p, ",\"CR0\":");
+    p = dump_dec(p, (intptr_t)&cpu->CR[0]);
+    p = dump_string(p, "}");
+    *p = 0;
+    return buffer;
+}
+
+WASM_EXPORT uint32_t get_vram_signature(uint32_t segment, size_t size) {
     int shift = 17;
     uint32_t acc = 0;
     uint32_t *vram = (uint32_t *)(mem + (segment << 4));

@@ -3,6 +3,7 @@
 # Jekyll
 Gemfile
 Gemfile.lock
+_config.yml
 _site
 .sass-cache
 .jekyll-metadata
