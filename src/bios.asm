@@ -178,6 +178,11 @@ i1000:
     pop ds
     mov si, cls_msg
     call puts
+    xor ax, ax
+    ret
+
+i100F:
+    xor al, al
     ret
 
 i1001:
@@ -192,7 +197,6 @@ i100A:
 i100B:
 i100C:
 i100D:
-i100F:
 i1010:
 i1011:
 i1012:
@@ -503,8 +507,8 @@ i1601:
     push bx
     mov ax, BDA_SEG
     mov ds, ax
-    mov ax, [BDA_KBD_BUFF_HEAD]
-    mov bx, [BDA_KBD_BUFF_TAIL]
+    mov ax, [BDA_KBD_BUFF_TAIL]
+    mov bx, [BDA_KBD_BUFF_HEAD]
     sub ax, bx
     jz .end
     mov ax, [bx]
@@ -548,35 +552,38 @@ i1A00:
 
 i1A02:
     mov al, 0
-    out 0x71, al
-    in al, 0x70
+    out 0x70, al
+    in al, 0x71
     mov dh, al
     mov al, 2
-    out 0x71, al
-    in al, 0x70
+    out 0x70, al
+    in al, 0x71
     mov cl, al
     mov al, 4
-    out 0x71, al
-    in al, 0x70
+    out 0x70, al
+    in al, 0x71
     mov ch, al
-    xor dh, dh
+    xor dl, dl
     clc
     retf 2
 
 i1A04:
     mov al, 7
-    out 0x71, al
-    in al, 0x70
+    out 0x70, al
+    in al, 0x71
     mov dl, al
     mov al, 8
-    out 0x71, al
-    in al, 0x70
+    out 0x70, al
+    in al, 0x71
     mov dh, al
     mov al, 9
-    out 0x71, al
-    in al, 0x70
+    out 0x70, al
+    in al, 0x71
     mov cl, al
-    xor ch, ch
+    mov al, 0x32
+    out 0x70, al
+    in al, 0x71
+    mov ch, al
     clc
     retf 2
 
@@ -727,6 +734,29 @@ __set_irq:
     out 0x40, al
     out 0x40, al
 
+    mov ah, 2
+    int 0x1A
+    mov al, ch
+    aam 16
+    aad 10
+    mov [ss:0x46E], al
+    mov al, cl
+    aam 16
+    aad 10
+    mov bl, 60
+    mul bl
+    mov cx, ax
+    mov al, dh
+    aam 16
+    aad 10
+    xor ah, ah
+    add ax, cx
+    mov dx, ax
+    xor ax, ax
+    mov cx, 3600
+    div cx
+    mov [ss:0x46C], ax
+
     ;; ENABLE UART
     cli
     xor ax, ax
@@ -744,6 +774,7 @@ __set_irq:
     mov al, 0x01
     out dx, al
     sti
+
 
     ;; INIT VGA PALETTE
 _init_palette:

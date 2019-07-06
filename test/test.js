@@ -2,120 +2,15 @@
 
 const expect= require('expect');
 const fs = require('fs');
+const RuntimeEnvironment = require('./env');
 
 const WASM_PATH = './lib/vcpu.wasm';
 const MAIN_CPU_GEN = 4;
-
-
-class RuntimeEnvironment {
-    constructor () {
-        this.env = {
-            memoryBase: 0,
-            memory: new WebAssembly.Memory({ initial: 1, maximum: 1024 }),
-        }
-        this.env.println = (at) => {
-            const str = this.getCString(at);
-            console.log(str);
-        }
-        this.env.vpc_outb = (port, data) => { throw new Error('UNEXPECTED CONTROL FLOW'); };
-        this.env.vpc_inb = (port) => { throw new Error('UNEXPECTED CONTROL FLOW'); };
-        this.env.vpc_outw = (port, data) => { throw new Error('UNEXPECTED CONTROL FLOW'); };
-        this.env.vpc_inw = (port) => { throw new Error('UNEXPECTED CONTROL FLOW'); };
-        this.env.vpc_irq = () => { throw new Error('UNEXPECTED CONTROL FLOW'); };
-        this.env.TRAP_NORETURN = () => { throw new Error('UNEXPECTED CONTROL FLOW'); };
-        this.env.vpc_grow = (n) => {
-            const result = this.env.memory.grow(n);
-            this._memory = new Uint8Array(this.env.memory.buffer);
-            return result;
-        }
-    }
-    strlen(at) {
-        let result = 0;
-        for (let i = at; this._memory[i]; i++) {
-            result++;
-        }
-        return result;
-    }
-    getCString(at) {
-        const len = this.strlen(at);
-        const bytes = new Uint8Array(this._memory.buffer, at, len);
-        return new TextDecoder('utf-8').decode(bytes);
-    }
-    emit(to, from) {
-        const l = from.length;
-        let p = this.vmem + to;
-        for (let i = 0; i < l; i++) {
-            const v = from[i];
-            if (typeof(v) === 'string') {
-                for (let j = 0; j < v.length; j++) {
-                    this._memory[p] = v.charCodeAt(j);
-                    p++;
-                }
-            } else if (typeof(v) === 'number') {
-                this._memory[p] = v;
-                p++;
-            } else {
-                throw `Unexpected type ${typeof(v)}`;
-            }
-        }
-    }
-    emitTest(object) {
-        this.emit(0xFFFF0, object);
-    }
-    reset(n = -1) {
-        return this.wasm.exports.reset(this.vcpu, n);
-    }
-    step() {
-        return this.wasm.exports.step(this.vcpu);
-    }
-    dump() {
-        this.wasm.exports.debug_dump(env.vcpu);
-    }
-    setReg(name, value) {
-        const reg = this.regmap[name];
-        if (!reg) throw new Error(`Unexpected Regsiter Name: ${name}`);
-        let a = new Uint32Array(this.env.memory.buffer, reg, 1);
-        a[0] = value;
-    }
-    getReg(name) {
-        const reg = this.regmap[name];
-        if (!reg) throw new Error(`Unexpected Regsiter Name: ${name}`);
-        let a = new Uint32Array(this.env.memory.buffer, reg, 1);
-        return a[0];
-    }
-    getAllRegs() {
-        let result = {};
-        Object.keys(env.regmap).forEach(name => {
-            result[name] = this.getReg(name);
-        });
-        return result;
-    }
-    saveState() {
-        this.savedState = this.getAllRegs();
-    }
-    changed() {
-        let result = [];
-        const newState = this.getAllRegs();
-        Object.keys(env.regmap).forEach(name => {
-            if (this.savedState[name] !== newState[name]) {
-                result.push(name);
-            }
-        });
-        return result.sort();
-    }
-}
 const env = new RuntimeEnvironment();
 
 const prepare = async () => {
     return new Promise(resolve => resolve(fs.readFileSync(WASM_PATH)))
-    .then(response => WebAssembly.instantiate(new Uint8Array(response), env))
-    .then(result => {
-        env.wasm = result.instance
-        env.vmem = env.wasm.exports._init(1);
-        env.vcpu = env.wasm.exports.alloc_cpu(4);
-        env.regmap = JSON.parse(env.getCString(env.wasm.exports.debug_get_register_map(env.vcpu)));
-        // console.log(env.regmap);
-    });
+    .then(response => env.instantiate(response, 1, MAIN_CPU_GEN));
 }
 
 describe('CPU', () => {
@@ -1050,31 +945,49 @@ describe('CPU', () => {
         });
 
         it ('ADD', () => {
-            env.emitTest([0x01, 0xCB, 0x01, 0xDA, 0x81, 0xC3, 0x9A, 0x78]);
+            env.emitTest([0x00, 0xCD, 0x00, 0xEE, 0x00, 0xF1, 0x02, 0xCD, 0x01, 0xD1]);
 
-            env.setReg('BX', 0x56781234);
+            env.setReg('flags', 0x0003);
             env.setReg('CX', 0x12345678);
-            env.setReg('DX', 0x5555AAAA);
+            env.setReg('DX', 0x11111111);
             env.saveState();
             expect(env.step()).toBe(0);
             expect(env.getReg('IP')).toBe(0xFFF2);
-            expect(env.getReg('BX')).toBe(0x567868AC);
-            expect(env.getReg('flags')).toBe(0x0006);
-            expect(env.changed()).toStrictEqual(['BX','IP','flags']);
+            expect(env.getReg('CX')).toBe(0x1234CE78);
+            expect(env.getReg('flags')).toBe(0x0882);
+            expect(env.changed()).toStrictEqual(['CX','IP','flags']);
 
+            env.setReg('flags', 0x0003);
             env.saveState();
             expect(env.step()).toBe(0);
             expect(env.getReg('IP')).toBe(0xFFF4);
-            expect(env.getReg('DX')).toBe(0x55551356);
-            expect(env.getReg('flags')).toBe(0x0017);
+            expect(env.getReg('DX')).toBe(0x1111DF11);
+            expect(env.getReg('flags')).toBe(0x0082);
             expect(env.changed()).toStrictEqual(['DX','IP','flags']);
 
+            env.setReg('flags', 0x0003);
+            env.saveState();
+            expect(env.step()).toBe(0);
+            expect(env.getReg('IP')).toBe(0xFFF6);
+            expect(env.getReg('CX')).toBe(0x1234CE57);
+            expect(env.getReg('flags')).toBe(0x0013);
+            expect(env.changed()).toStrictEqual(['CX','IP','flags']);
+
+            env.setReg('flags', 0x0003);
             env.saveState();
             expect(env.step()).toBe(0);
             expect(env.getReg('IP')).toBe(0xFFF8);
-            expect(env.getReg('BX')).toBe(0x5678E146);
-            expect(env.getReg('flags')).toBe(0x0892);
-            expect(env.changed()).toStrictEqual(['BX','IP','flags']);
+            expect(env.getReg('CX')).toBe(0x1234CE25);
+            expect(env.getReg('flags')).toBe(0x0013);
+            expect(env.changed()).toStrictEqual(['CX','IP','flags']);
+
+            env.saveState();
+            expect(env.step()).toBe(0);
+            expect(env.getReg('IP')).toBe(0xFFFA);
+            expect(env.getReg('CX')).toBe(0x1234AD36);
+            expect(env.getReg('flags')).toBe(0x0087);
+            expect(env.changed()).toStrictEqual(['CX','IP','flags']);
+
         });
 
         it ('OR', () => {

@@ -10,7 +10,7 @@ clean:
 run: all
 
 test: all
-	npx mocha test/test.js
+	npm test
 
 lib:
 	mkdir lib

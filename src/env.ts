@@ -164,8 +164,8 @@ export class RuntimeEnvironment {
             const expected = this.lastTick + this.period;
             if (now > expected) {
                 this.pic.raiseIRQ(0);
+                this.lastTick = now;
             }
-            this.lastTick = new Date().valueOf();
         }
         const status: number = this.instance.exports.run(this.cpu);
         if (status > 1) {

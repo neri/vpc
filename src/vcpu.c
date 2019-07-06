@@ -1564,8 +1564,13 @@ static int cpu_step(cpu_state *cpu) {
                 return 0;
             }
 
-            case 0x50: // PUSH AX
-            case 0x51: case 0x52: case 0x53: case 0x55: case 0x56: case 0x57:
+            case 0x50: // PUSH reg16
+            case 0x51:
+            case 0x52:
+            case 0x53:
+            case 0x55:
+            case 0x56:
+            case 0x57:
                 PUSHW(cpu, cpu->gpr[inst & 7]);
                 return 0;
             
@@ -1578,8 +1583,14 @@ static int cpu_step(cpu_state *cpu) {
                 }
                 return 0;
 
-            case 0x58: // POP AX
-            case 0x59: case 0x5A: case 0x5B: case 0x5C: case 0x5D: case 0x5E: case 0x5F:
+            case 0x58: // POP reg16
+            case 0x59:
+            case 0x5A:
+            case 0x5B:
+            case 0x5C:
+            case 0x5D:
+            case 0x5E:
+            case 0x5F:
                 if (cpu->cpu_context & CPU_CTX_DATA32) {
                     cpu->gpr[inst & 7] = POPW(cpu);
                 } else {
@@ -1747,10 +1758,10 @@ static int cpu_step(cpu_state *cpu) {
             case 0x7F: // JG d8
                 return JUMP_IF(cpu, MOVSXB(FETCH8(cpu)), EVAL_CC(cpu, inst));
 
-            case 0x80: // alu r/m, imm8
-            case 0x81: // alu r/m, imm16
-            case 0x82: // alu r/m, imm8 (mirror)
-            case 0x83: // alu r/m, imm8 (sign extended)
+            case 0x80: // alu r/m8, imm8
+            case 0x81: // alu r/m16, imm16
+            case 0x82: // alu r/m8, imm8 (mirror)
+            case 0x83: // alu r/m16, imm8 (sign extended)
             {
                 MODRM_W(cpu, seg, inst & 1, &set);
                 int opc = set.opr2;
@@ -1760,7 +1771,7 @@ static int cpu_step(cpu_state *cpu) {
                     set.opr2 = MOVSXB(FETCH8(cpu));
                 }
                 switch (opc) {
-                    case 0: //ADD
+                    case 0: // ADD
                         ADD(cpu, &set, 0);
                         break;
                     case 1: // OR
@@ -1865,7 +1876,12 @@ static int cpu_step(cpu_state *cpu) {
                 }
 
             case 0x91: // XCHG AX, reg16
-            case 0x92: case 0x93: case 0x94: case 0x95: case 0x96: case 0x97:
+            case 0x92:
+            case 0x93:
+            case 0x94:
+            case 0x95:
+            case 0x96:
+            case 0x97:
             {
                 uint32_t temp = cpu->gpr[inst & 7];
                 cpu->gpr[inst & 7] = cpu->EAX;
@@ -2190,13 +2206,25 @@ static int cpu_step(cpu_state *cpu) {
                 return 0;
             }
 
-            case 0xB0: // MOV AL, imm8
-            case 0xB1: case 0xB2: case 0xB3: case 0xB4: case 0xB5: case 0xB6: case 0xB7:
+            case 0xB0: // MOV reg8, imm8
+            case 0xB1:
+            case 0xB2:
+            case 0xB3:
+            case 0xB4:
+            case 0xB5:
+            case 0xB6:
+            case 0xB7:
                 WRITE_REG8(cpu, inst, FETCH8(cpu));
                 return 0;
 
-            case 0xB8: // MOV AX, imm16
-            case 0xB9: case 0xBA: case 0xBB: case 0xBC: case 0xBD: case 0xBE: case 0xBF:
+            case 0xB8: // MOV reg16, imm16
+            case 0xB9:
+            case 0xBA:
+            case 0xBB:
+            case 0xBC:
+            case 0xBD:
+            case 0xBE:
+            case 0xBF:
                 if (cpu->cpu_context & CPU_CTX_DATA32) {
                     cpu->gpr[inst & 7] = FETCH32(cpu);
                 } else {
@@ -2330,10 +2358,15 @@ static int cpu_step(cpu_state *cpu) {
                 }
                 return 0;
 
-            case 0xD8: // ESC
-            case 0xD9: case 0xDA: case 0xDB: case 0xDC: case 0xDD: case 0xDE: case 0xDF:
+            case 0xD8: // ESC (IGNORED)
+            case 0xD9:
+            case 0xDA:
+            case 0xDB:
+            case 0xDC:
+            case 0xDD:
+            case 0xDE:
+            case 0xDF:
             {
-                // IGNORED
                 modrm_t modrm;
                 MODRM(cpu, seg, &modrm);
                 return cpu_status_fpu;
@@ -2342,7 +2375,7 @@ static int cpu_step(cpu_state *cpu) {
             case 0xE0: // LOOPNZ
             {
                 int disp = MOVSXB(FETCH8(cpu));
-                if (cpu->cpu_context & CPU_CTX_DATA32) {
+                if (cpu->cpu_context & CPU_CTX_ADDR32) {
                     cpu->ECX--;
                     return JUMP_IF(cpu, disp, (cpu->ECX != 0 && cpu->ZF == 0));
                 } else {
@@ -2354,7 +2387,7 @@ static int cpu_step(cpu_state *cpu) {
             case 0xE1: // LOOPZ
             {
                 int disp = MOVSXB(FETCH8(cpu));
-                if (cpu->cpu_context & CPU_CTX_DATA32) {
+                if (cpu->cpu_context & CPU_CTX_ADDR32) {
                     cpu->ECX--;
                     return JUMP_IF(cpu, disp, (cpu->ECX != 0 && cpu->ZF != 0));
                 } else {
@@ -2366,7 +2399,7 @@ static int cpu_step(cpu_state *cpu) {
             case 0xE2: // LOOP
             {
                 int disp = MOVSXB(FETCH8(cpu));
-                if (cpu->cpu_context & CPU_CTX_DATA32) {
+                if (cpu->cpu_context & CPU_CTX_ADDR32) {
                     cpu->ECX--;
                     return JUMP_IF(cpu, disp, (cpu->ECX != 0));
                 } else {
@@ -2376,7 +2409,7 @@ static int cpu_step(cpu_state *cpu) {
             }
 
             case 0xE3: // JCXZ
-                if (cpu->cpu_context & CPU_CTX_DATA32) {
+                if (cpu->cpu_context & CPU_CTX_ADDR32) {
                     return JUMP_IF(cpu, MOVSXB(FETCH8(cpu)), cpu->ECX == 0);
                 } else {
                     return JUMP_IF(cpu, MOVSXB(FETCH8(cpu)), cpu->CX == 0);
@@ -2530,9 +2563,9 @@ static int cpu_step(cpu_state *cpu) {
                     case 0: // TEST r/m16, imm16
                         cpu->CF = 0;
                         if (set.size == 1) {
-                            SETF16(cpu, *set.opr1b & FETCH16(cpu));
+                            SETF16(cpu, READ_LE16(set.opr1) & FETCH16(cpu));
                         } else {
-                            SETF32(cpu, *set.opr1b & FETCH32(cpu));
+                            SETF32(cpu, READ_LE32(set.opr1) & FETCH32(cpu));
                         }
                         return 0;
                     case 1: // TEST?
@@ -2733,20 +2766,35 @@ static int cpu_step(cpu_state *cpu) {
                     }
                     // case 4: // SMSW
                     // case 6: // LMSW
-                    // case 7: // INVLPG
+                    case 7: // INVLPG (NOP)
+                        return 0;
                 }
                 return cpu_status_ud;
             }
+
+            // case 0x0F02: // LAR reg, r/m
+            // case 0x0F03: // LSL reg, r/m
+            // case 0x0F05: // LOADALL / SYSCALl
 
             case 0x0F06: // CLTS
                 cpu->CR[0] &= ~8;
                 return 0;
 
+            // case 0x0F07: // LOADALL / SYSRET
+
             case 0x0F08: // INVD (NOP)
             case 0x0F09: // WBINVD (NOP)
                 return 0;
 
-            // case 0x0F0B: // UD2
+            case 0x0F0B: // UD2
+                return cpu_status_ud;
+
+            case 0x0F1F: // LONG NOP
+            {
+                modrm_t modrm;
+                MODRM(cpu, NULL, &modrm);
+                return 0;
+            }
 
             case 0x0F20: // MOV reg, Cr
             case 0x0F22: // MOV Cr, reg

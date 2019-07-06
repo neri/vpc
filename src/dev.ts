@@ -242,15 +242,15 @@ export class RTC {
 
     constructor (env: RuntimeEnvironment) {
         this.ram = new Uint8Array(256);
-        env.iomgr.on(0x70, (_, data) => this.writeRTC(data), (_) => this.readRTC());
-        env.iomgr.on(0x71, (_, data) => this.index = data, (port) => this.index);
+        env.iomgr.on(0x70, (_, data) => this.index = data, (port) => this.index);
+        env.iomgr.on(0x71, (_, data) => this.writeRTC(data), (_) => this.readRTC());
     }
     public writeRTC(data: number): void {
         this.ram[this.index] = data;
     }
     public readRTC(): number {
         const result = this._readRTC();
-        console.log('read_rtc', this.index, result.toString(16));
+        console.log('read_rtc', this.index, ('00' + result.toString(16)).slice(-2));
         return result;
     }
     private _readRTC(): number {
@@ -259,29 +259,26 @@ export class RTC {
             const a2 = (n / 10) | 0;
             return a1 + (a2 << 4);
         }
-        const bitmap = 0x0C2A;
-        if (this.index > 0x0D || (bitmap & (1 << this.index))) {
+        const now = new Date();
+        switch (this.index) {
+        case 0:
+            return toBCD(now.getSeconds());
+        case 2:
+            return toBCD(now.getMinutes());
+        case 4:
+            return toBCD(now.getHours());
+        case 6:
+            return now.getDay();
+        case 7:
+            return toBCD(now.getDate());
+        case 8:
+            return toBCD(1 + now.getMonth());
+        case 9:
+            return toBCD(now.getFullYear() % 100);
+        case 0x32:
+                return toBCD((now.getFullYear() / 100) | 0);
+        default:
             return this.ram[this.index];
-        } else {
-            const now = new Date();
-            switch (this.index) {
-            case 0:
-                return toBCD(now.getSeconds());
-            case 2:
-                return toBCD(now.getMinutes());
-            case 4:
-                return toBCD(now.getHours());
-            case 6:
-                return now.getDay();
-            case 7:
-                return toBCD(now.getDate());
-            case 8:
-                return toBCD(now.getMonth());
-            case 9:
-                return toBCD(now.getFullYear() % 100);
-            default:
-                return 0;
-            }
         }
     }
 }

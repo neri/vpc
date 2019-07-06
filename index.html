@@ -166,11 +166,14 @@
             }
 
 if (true) {
+
             const term = new Terminal({convertEol: true, rendererType: 'canvas'});
             term.open($('#terminal'));
             window.term = term;
             term.onKey((e) => {
-                window.worker.postMessage({command: 'key', data: e.key.charCodeAt(0) });
+                let keyCode = e.key.charCodeAt(0);
+                if (keyCode == 127) keyCode = 8; // BS
+                window.worker.postMessage({command: 'key', data: keyCode });
             });
             term.focus();
 
@@ -438,6 +441,7 @@ if (true) {
                     <select id="selDiskImage">
                         <option value="">----</option>
                         <option value="../bin/osz.img" selected>osz</option>
+                        <option value="../bin/fdos.img">FreeDOS</option>
                     </select>
                 </label>
                 <label>

@@ -13,7 +13,7 @@ A PC Emulator implemented by WebAssembly.
 
 ## Implemented hardware
 
-- IBM PC/AT compatible
+- IBM PC compatible
 - CPU: 486SX
   - Some features are missing such as 16bit protected mode
 - Memory: 640KB ought to be enough for anybody.
@@ -29,8 +29,9 @@ A PC Emulator implemented by WebAssembly.
 
 |OS|Status|
 |-|-|
-|osz|It seems ok|
-|FreeDOS|failed|
+|osz|It seems working|
+|FreeDOS (16bit)|It seems working|
+|FreeDOS (32bit)|failed|
 |elks|failed|
 |BootChess|buggy|
 
