@@ -21,7 +21,7 @@ lib/vcpu.wasm: src/vcpu.c
 lib/bios.bin: src/bios.asm
 	nasm -f bin $? -o $@
 
-tmp/worker.js: src/worker.ts src/iomgr.ts src/env.ts src/dev.ts src/vfd.ts
+tmp/worker.js: src/worker.ts src/iomgr.ts src/env.ts src/dev.ts src/vfd.ts src/midi.ts
 	npx tsc $< -t es2017 --outDir tmp
 
 lib/worker.js: tmp/worker.js

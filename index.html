@@ -229,29 +229,14 @@ if (true) {
                     case 'write':
                         window.term.write(message.data.data);
                         break;
-                    case 'outb':
-                        window.iomgr.outb(message.data.data.port, message.data.data.data);
-                        break;
-                    case 'beep':
-                        window.beep.sound(message.data.data);
-                        break;
                     case 'alert':
                         alert(message.data.data);
                         break;
                     case 'regResult':
                         $('#inputRegister').value = message.data.data;
                         break;
-                    case 'vga':
-                        {
-                            const array = message.data.data;
-                            const ctx = $('#canvasVGA').getContext('2d');
-                            let data = ctx.createImageData(320, 200);
-                            data.data.set(array);
-                            ctx.putImageData(data, 0, 0);
-                        }
-                        break;
                     default:
-                        throw message;
+                        window.iomgr.dispatchMessage(message.data.command, message.data.data);
                 }
             };
         }
@@ -261,6 +246,10 @@ if (true) {
             constructor () {
                 this.ioMap = [];
                 this.ioRedirectMap = new Uint32Array(2048);
+                this.msgMap = {};
+                this.onWorker('outb', data => {
+                    this.outb(data.port, data.data)
+                });
             }
             on (port, callback) {
                 this.ioMap[port & 0xFFFF] = callback;
@@ -278,12 +267,23 @@ if (true) {
                     console.error('front_outb()', e);
                 }
             }
+            onWorker (command, callback) {
+                this.msgMap[command] = callback;
+            }
+            dispatchMessage(command, data) {
+                const callback = this.msgMap[command];
+                if (callback) {
+                    callback(data);
+                } else {
+                    throw new Error(`Unknown command: ${command}`);
+                }
+            }
         }
         window.iomgr = new FrontendIOManager();
         
         // i8254 Beep Sound Driver
         class i8254Sound {
-            constructor () {
+            constructor (iomgr) {
                 this.audioContext = window.AudioContext || window.webkitAudioContext;
                 if (!this.audioContext) return;
                 this.context = null;
@@ -293,6 +293,8 @@ if (true) {
                 $('#inputVolume').addEventListener('change', e => {
                     this.adjustGain();
                 });
+
+                iomgr.onWorker('beep', data => this.sound(data));
             }
             createAudioContext () {
                 this.context = new this.audioContext();
@@ -335,8 +337,111 @@ if (true) {
             }
         }
 
+        // Virtual MIDI Device
+        const PORT_NOT_SELECTED = -1;
+        class VirtualMidiDevice {
+            constructor (iomgr, div) {
+                if (!navigator.requestMIDIAccess) return;
+
+                (function() {
+                    return new Promise(async (resolve, reject) => {
+                        let midi;
+                        try {
+                            midi = await navigator.requestMIDIAccess({sysex: true});
+                        } catch(e) { };
+                        if (!midi) {
+                            midi = await navigator.requestMIDIAccess({sysex: false});
+                        }
+                        if (midi) resolve(midi);
+                        else reject();
+                    });
+                })().then((midi) => {
+                    this.midi = midi;
+
+                    iomgr.onWorker('midi', data => this.midiOut(data));
+
+                    this.selectedIndex = PORT_NOT_SELECTED;
+
+                    this.outputs = [];
+                    if (typeof midi.outputs === 'function') {
+                        const ot = midi.outputs();
+                        for(let i = 0; i < ot.length ; i++){
+                            this.outputs.push(ot[i]);
+                        }
+                    } else {
+                        const ot = midi.outputs.values();
+                        for(let o = ot.next(); !o.done; o = ot.next()){
+                            this.outputs.push(o.value);
+                        }
+                    }
+
+                    div.setAttribute('class', 'controlFrame');
+                    const label = document.createElement('label');
+                    label.appendChild(document.createTextNode('MIDI Out: '));
+                    const select = document.createElement('select');
+                    select.setAttribute('id', 'midiSelector');
+                    {
+                        const option = document.createElement('option');
+                        option.setAttribute('value', PORT_NOT_SELECTED);
+                        option.appendChild(document.createTextNode('---'));
+                        select.appendChild(option);
+                    }
+                    for(let i = 0; i < this.outputs.length; i++){
+                        const output = this.outputs[i];
+                        console.log('midi_out', `type:${output.type} id:${output.id} manufacturer:${output.manufacturer} name:${output.name} version:${output.version}`);
+                        let option = document.createElement('option');
+                        option.setAttribute('value', i);
+                        option.appendChild(document.createTextNode(output.name));
+                        select.appendChild(option);
+                    }
+                    label.appendChild(select);
+                    div.appendChild(label);
+                    div.appendChild(document.createTextNode(' '));
+                    const button = document.createElement('a');
+                    button.setAttribute('class', 'buttonFace');
+                    button.setAttribute('id', 'midiPanic');
+                    button.appendChild(document.createTextNode('MIDI Panic'));
+                    div.appendChild(button);
+
+                    $('#midiSelector').addEventListener('change', e => {
+                        this.selectedIndex = $('#midiSelector').value;
+                        this.midiOut([0x90, 69, 0x7F]); // Test Note
+                        setTimeout(() => this.midiOut([0x90, 69, 0]), 500);
+                    });
+                    $('#midiPanic').addEventListener('click', e => {
+                        this.midiPanic();
+                    });
+                })
+                .catch(reason => console.error(reason));
+            }
+            midiOut (messages) {
+                try {
+                    if (this.selectedIndex != PORT_NOT_SELECTED){
+                        this.outputs[this.selectedIndex].send(messages);
+                    }
+                } catch (e) {
+                    console.error('midi_out', e);
+                }
+            }
+            midiPanic () {
+                try {
+                    if (this.selectedIndex != PORT_NOT_SELECTED) {
+                        this.outputs[this.selectedIndex].send([
+                        0xB0, 123, 0, 0xB1, 123, 0, 0xB2, 123, 0, 0xB3, 123, 0, 
+                        0xB4, 123, 0, 0xB5, 123, 0, 0xB6, 123, 0, 0xB7, 123, 0, 
+                        0xB8, 123, 0, 0xB9, 123, 0, 0xBA, 123, 0, 0xBB, 123, 0,
+                        0xBC, 123, 0, 0xBD, 123, 0, 0xBE, 123, 0, 0xBF, 123, 0,
+                        ]);
+                    }
+                } catch (e) {
+                    console.error('midi_out', e);
+                }
+            }
+        }
+
         window.addEventListener('DOMContentLoaded', () => {
-            window.beep = new i8254Sound();
+            window.beep = new i8254Sound(window.iomgr);
+            window.midi = new VirtualMidiDevice(window.iomgr, $('#cpMidi'));
             $('#click_to_start').addEventListener('click', e => {
                 if (!window.WebAssembly) {
                     alert("We are sorry, but WebAssembly is not supported.");
@@ -495,6 +600,8 @@ if (true) {
                         </select>
                     </label>
                 </div>
+
+                <div id="cpMidi"></div>
 
                 <div class="controlFrame">
                     &#x1F41B;

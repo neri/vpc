@@ -18,12 +18,13 @@ A PC Emulator implemented by WebAssembly.
   - Some features are missing such as 16bit protected mode
 - Memory: 640KB ought to be enough for anybody.
 - I/O:
-  - i8259 PIC
-  - i8254 Timer & Sound
-  - UART
-  - RTC
-  - FDC (non standard interface)
+  - **i8259** PIC
+  - **i8254** Timer & Sound
+  - **UART**
+  - **RTC**
+  - **FDC** (non standard interface)
     - Supported: 160KB, 360KB, 640KB, 720KB, 1.2MB, 1.4MB and 512 bytes (Boot Sector Only)
+  - **MPU-401** (UART mode Only)
 
 ## Supported Software
 

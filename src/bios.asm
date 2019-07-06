@@ -185,11 +185,23 @@ i100F:
     xor al, al
     ret
 
+i1006:
+    or al, al
+    jz .cls
+    ret
+.cls:
+    push cs
+    pop ds
+    mov si, cls_nc_msg
+    call puts
+    xor ax, ax
+    ret
+
+
 i1001:
 i1003:
 i1004:
 i1005:
-i1006:
 i1007:
 i1008:
 i1009:
@@ -200,6 +212,7 @@ i100D:
 i1010:
 i1011:
 i1012:
+    db 0xF1
     ret
 
 
@@ -1013,6 +1026,28 @@ _play_sound:
     ret
 
 
+_play_midi:
+.loop:
+    lodsb
+    or al, al
+    jz .end
+    mov dx, 0x0330
+    out dx, al
+    lodsb
+    out dx, al
+    lodsb
+    out dx, al
+    lodsb
+    xor ah, ah
+    mov cl, 6
+    shl ax, cl
+    mov cx, ax
+    call _bios_wait
+    jmp .loop
+.end:
+    ret
+
+
 puts:
 .loop:
     lodsb
@@ -1023,6 +1058,9 @@ puts:
 .end:
     ret
 
+
+cls_nc_msg:
+    db 0x1b, "[2J", 0
 
 cls_msg:
     db 0x1b, "[H", 0x1b, "[J", 0

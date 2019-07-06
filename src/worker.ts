@@ -4,6 +4,7 @@
 
 import { RuntimeEnvironment, WorkerInterface } from './env';
 import { VFD } from './vfd';
+import { MPU401 } from './midi';
 
 const ctx: Worker = self as any;
 class WI implements WorkerInterface {
@@ -21,6 +22,7 @@ class WI implements WorkerInterface {
 const wi = new WI();
 const env = new RuntimeEnvironment(wi);
 const floppy = new VFD(env);
+const midi = new MPU401(env, 0x330);
 
 (async function() {
     console.log('Loading CPU...');
