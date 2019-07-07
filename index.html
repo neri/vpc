@@ -368,7 +368,7 @@ if (true) {
                         else reject();
                     });
                 })().then((midi) => {
-                    // this.midi = midi;
+                    this.midi = midi;
 
                     this.selectedIndex = PORT_NOT_SELECTED;
 
@@ -399,7 +399,7 @@ if (true) {
                     }
                     for(let i = 0; i < this.outputs.length; i++){
                         const output = this.outputs[i];
-                        console.log('midi_out', { type: output.type, id: output.id, manufacturer: output.manufacturer, name: output.name, version: output.version });
+                        console.log('midi_out', output);
                         let option = document.createElement('option');
                         option.setAttribute('value', i);
                         option.appendChild(document.createTextNode(output.name));
@@ -443,19 +443,19 @@ if (true) {
                 .catch(reason => console.error(reason));
             }
             midiOut (messages) {
-                try {
-                    if (this.selectedIndex != PORT_NOT_SELECTED){
-                        if (messages[0] == 0xF0) {
-                            setTimeout(this.parseSysEx(messages), 1);
+                if (this.selectedIndex != PORT_NOT_SELECTED){
+                    if (messages[0] == 0xF0) {
+                        if (this.parseSysEx(messages)) {
+                            this.outputs[this.selectedIndex].send(messages);
                         }
+                    } else {
                         this.outputs[this.selectedIndex].send(messages);
                     }
-                } catch (e) {
-                    console.error('midi_out', e);
                 }
             }
             parseSysEx(sysex) {
                 if (!(sysex.length > 0) || (sysex[0] != 0xF0)) throw new Error(`SysEx: Parse Error: ${sysex}`);
+                if (!this.midi.sysexEnabled) return false;
                 if (sysex.length >= 6
                 && sysex[1] == 0x7E && sysex[2] == 0x7F && sysex[3] == 0x09) {
                     switch (sysex[4]) {
@@ -490,6 +490,7 @@ if (true) {
                         $('#midiMode').innerText = 'XG';
                     }
                 }
+                return true;
             }
             midiTest () {
                 if (this.selectedIndex != PORT_NOT_SELECTED) {
@@ -499,17 +500,13 @@ if (true) {
                 }
             }
             midiPanic () {
-                try {
-                    if (this.selectedIndex != PORT_NOT_SELECTED) {
-                        this.outputs[this.selectedIndex].send([
-                        0xB0, 0x78, 0, 0xB1, 0x78, 0, 0xB2, 0x78, 0, 0xB3, 0x78, 0, 
-                        0xB4, 0x78, 0, 0xB5, 0x78, 0, 0xB6, 0x78, 0, 0xB7, 0x78, 0, 
-                        0xB8, 0x78, 0, 0xB9, 0x78, 0, 0xBA, 0x78, 0, 0xBB, 0x78, 0,
-                        0xBC, 0x78, 0, 0xBD, 0x78, 0, 0xBE, 0x78, 0, 0xBF, 0x78, 0,
-                        ]);
-                    }
-                } catch (e) {
-                    console.error('midi_out', e);
+                if (this.selectedIndex != PORT_NOT_SELECTED) {
+                    this.outputs[this.selectedIndex].send([
+                    0xB0, 0x78, 0, 0xB1, 0x78, 0, 0xB2, 0x78, 0, 0xB3, 0x78, 0, 
+                    0xB4, 0x78, 0, 0xB5, 0x78, 0, 0xB6, 0x78, 0, 0xB7, 0x78, 0, 
+                    0xB8, 0x78, 0, 0xB9, 0x78, 0, 0xBA, 0x78, 0, 0xBB, 0x78, 0,
+                    0xBC, 0x78, 0, 0xBD, 0x78, 0, 0xBE, 0x78, 0, 0xBF, 0x78, 0,
+                    ]);
                 }
             }
         }
@@ -624,11 +621,11 @@ if (true) {
                         <option value="../bin/fdos.img">FreeDOS</option>
                     </select>
                 </label>
+                <input id="fileLocal" type="file" style="position: absolute; width:0px; height:0px; z-index: -1;">
                 <label>
                     <a id="buttonLocal" class="buttonFace">file:</a>
                     <input id="labelLocal" type="text" readonly>
                 </label>
-                <input id="fileLocal" type="file" style="position: absolute; width:0px; height:0px;">
             </span>
         </div>
         <details open>
@@ -679,7 +676,7 @@ if (true) {
                 <div id="cpMidi"></div>
 
                 <div class="controlFrame">
-                    &#x1F41B;
+                    &#x1F41B; Developer Tools:
                     <a id="buttonNMI" class="buttonFace">Step</a>
                     <select id="selRegName">
                         <option value="AX">AX</option>

@@ -175,7 +175,7 @@ export class VFD {
             this.n_heads = n_heads;
             this.n_sectors = n_sectors;
             this.n_cylinders = this.maxLBA / this.n_heads / this.n_sectors;
-            console.log(`vfd_attach: ${kb}KB [C:${this.n_cylinders} H:${this.n_heads} R:${this.n_sectors}] LBA:${this.maxLBA}`)
+            console.log(`vfd_attach: ${kb}KB LBA:${this.maxLBA} [C:${this.n_cylinders} H:${this.n_heads} R:${this.n_sectors}]`)
         }
     }
 }

@@ -250,15 +250,15 @@ export class RTC {
         env.iomgr.on(0x70, (_, data) => this.index = data, (port) => this.index);
         env.iomgr.on(0x71, (_, data) => this.writeRTC(data), (_) => this.readRTC());
     }
-    public writeRTC(data: number): void {
+    writeRTC(data: number): void {
         this.ram[this.index] = data;
     }
-    public readRTC(): number {
-        const result = this._readRTC();
-        console.log('read_rtc', this.index, ('00' + result.toString(16)).slice(-2));
-        return result;
-    }
-    private _readRTC(): number {
+    // readRTC(): number {
+    //     const result = this._readRTC();
+    //     console.log('read_rtc', this.index, ('00' + result.toString(16)).slice(-2));
+    //     return result;
+    // }
+    readRTC(): number {
         const toBCD = (n: number) => {
             const a1 = n % 10;
             const a2 = (n / 10) | 0;

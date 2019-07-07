@@ -708,6 +708,7 @@ __set_irq:
     stosw
     stosw
 
+
     ;; init PIC
     mov al, 0xFF
     out 0x21, al
@@ -734,7 +735,7 @@ __set_irq:
     sti
 
 
-    ;; init PIT
+    ;; init Timer
     mov al, 0x34
     out 0x43, al
     xor al, al
@@ -765,6 +766,7 @@ __set_irq:
     mov [ss:0x46C], ax
     xor ax, ax
     mov [ss:0x46F], ax
+
 
     ;; ENABLE UART
     cli

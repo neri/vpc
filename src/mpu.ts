@@ -55,29 +55,28 @@ export class MPU401 {
                     // Running Status
                     this.outputBuffer.push(this.lastStatus);
                 } else {
-                    // Otherwise, invalid sequence
+                    // Otherwise, unexpected sequence
                     return;
                 }
-            } else {
-                this.outputBuffer.push(data);
-                const status = this.outputBuffer[0];
-                const statusType = status & 0xF0;
-                switch (statusType) {
-                    case 0xF0: // SysEx
-                        break;
-                    case 0xC0: // Proogram Change
-                    case 0xD0: // Channel Pressure
-                        if (this.outputBuffer.length == 2){
-                            this.midiOut(this.outputBuffer);
-                            this.outputBuffer = [];
-                        }
-                        break;
-                    default:
-                        if (this.outputBuffer.length == 3){
-                            this.midiOut(this.outputBuffer);
-                            this.outputBuffer = [];
-                        }
-                }
+            }
+            this.outputBuffer.push(data);
+            const status = this.outputBuffer[0];
+            const statusType = status & 0xF0;
+            switch (statusType) {
+                case 0xF0: // SysEx
+                    break;
+                case 0xC0: // Program Change
+                case 0xD0: // Channel Pressure
+                    if (this.outputBuffer.length == 2){
+                        this.midiOut(this.outputBuffer);
+                        this.outputBuffer = [];
+                    }
+                    break;
+                default:
+                    if (this.outputBuffer.length == 3){
+                        this.midiOut(this.outputBuffer);
+                        this.outputBuffer = [];
+                    }
             }
         }
     }
