@@ -3358,8 +3358,8 @@ WASM_EXPORT void reset(cpu_state *cpu, int gen) {
 /**
  * Load Selector into specified Segment for debugging.
  */
-WASM_EXPORT int debug_load_selector(cpu_state *cpu, int seg_index, uint16_t selector) {
-    return LOAD_SEL(cpu, &cpu->sregs[seg_index], selector);
+WASM_EXPORT int debug_load_selector(cpu_state *cpu, sreg_t *seg, uint16_t selector) {
+    return LOAD_SEL(cpu, seg, selector);
 }
 
 /**

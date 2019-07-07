@@ -89,8 +89,14 @@ export class VPIC {
     }
     public raiseIRQ(n: number): void {
         if (n < 8) {
-            this.IRR[0] |= (1 << n);
-            this.enqueue(0);
+            if (n == 0) {
+                this.ISR[0] |= 0x01;
+                const vector = (this.ICW[1] & 0xF8);
+                this.irq.push(vector);
+            } else {
+                this.IRR[0] |= (1 << n);
+                this.enqueue(0);
+            }
         } else if (n < 16) {
             this.ISR[1] |= (1 << (n - 8));
             this.IRR[0] |= this.ICW[2];
@@ -193,8 +199,7 @@ export class VPIT {
         this.env.setTimer(0);
     }
     public setTimer(): void {
-        const period = Math.ceil(this.getCounter(0) / 1193.181);
-        this.env.setTimer(period);
+        this.env.setTimer(this.getCounter(0) / 1193.181);
     }
 }
 

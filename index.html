@@ -56,6 +56,7 @@
             min-height: 24px;
             vertical-align: middle;
             border: transparent dashed 2px;
+            font-size: 14px;
         }
 
         .controlActive {
@@ -144,6 +145,10 @@
             background: transparent;
         }
 
+        #midiMode {
+            font-weight: bold;
+        }
+
     </style>
     <script>
 
@@ -211,7 +216,6 @@ if (true) {
                         let cmd = { command: 'start',
                             gen: parseInt($('#selCpuGen').value),
                             mem: parseInt($('#selMemory').value),
-                            ioRedirectMap: iomgr.ioRedirectMap
                         };
                         $('#selMemory').disabled = true;
                         if (window.attach) {
@@ -223,7 +227,7 @@ if (true) {
                                 cmd.imageName = image;
                             }
                         }
-                        window.worker.postMessage(cmd);
+                        window.worker.postMessage(iomgr.connect(cmd));
                         break;
                     }
                     case 'write':
@@ -247,13 +251,20 @@ if (true) {
                 this.ioMap = [];
                 this.ioRedirectMap = new Uint32Array(2048);
                 this.msgMap = {};
-                this.onWorker('outb', data => {
+                this.connectMap = {};
+                this.onCommand('outb', data => {
                     this.outb(data.port, data.data)
                 });
             }
             on (port, callback) {
                 this.ioMap[port & 0xFFFF] = callback;
                 this.ioRedirectMap[port >> 5] |= (1 << (port & 31));
+            }
+            onCommand (command, callback) {
+                this.msgMap[command] = callback;
+            }
+            onConnect (name, data) {
+                this.connectMap[name] = data;
             }
             outb (port, data) {
                 try {
@@ -267,8 +278,9 @@ if (true) {
                     console.error('front_outb()', e);
                 }
             }
-            onWorker (command, callback) {
-                this.msgMap[command] = callback;
+            connect (map) {
+                this.connectMap.ioRedirectMap = this.ioRedirectMap;
+                return Object.assign(map, this.connectMap);
             }
             dispatchMessage(command, data) {
                 const callback = this.msgMap[command];
@@ -294,7 +306,7 @@ if (true) {
                     this.adjustGain();
                 });
 
-                iomgr.onWorker('beep', data => this.sound(data));
+                iomgr.onCommand('beep', data => this.sound(data));
             }
             createAudioContext () {
                 this.context = new this.audioContext();
@@ -356,9 +368,7 @@ if (true) {
                         else reject();
                     });
                 })().then((midi) => {
-                    this.midi = midi;
-
-                    iomgr.onWorker('midi', data => this.midiOut(data));
+                    // this.midi = midi;
 
                     this.selectedIndex = PORT_NOT_SELECTED;
 
@@ -374,10 +384,11 @@ if (true) {
                             this.outputs.push(o.value);
                         }
                     }
+                    if (this.outputs.length == 0) return;
 
                     div.setAttribute('class', 'controlFrame');
                     const label = document.createElement('label');
-                    label.appendChild(document.createTextNode('MIDI Out: '));
+                    label.appendChild(document.createTextNode(`\uD83C\uDFB9 MIDI Out: `));
                     const select = document.createElement('select');
                     select.setAttribute('id', 'midiSelector');
                     {
@@ -388,49 +399,113 @@ if (true) {
                     }
                     for(let i = 0; i < this.outputs.length; i++){
                         const output = this.outputs[i];
-                        console.log('midi_out', `type:${output.type} id:${output.id} manufacturer:${output.manufacturer} name:${output.name} version:${output.version}`);
+                        console.log('midi_out', { type: output.type, id: output.id, manufacturer: output.manufacturer, name: output.name, version: output.version });
                         let option = document.createElement('option');
                         option.setAttribute('value', i);
                         option.appendChild(document.createTextNode(output.name));
                         select.appendChild(option);
                     }
                     label.appendChild(select);
-                    div.appendChild(label);
-                    div.appendChild(document.createTextNode(' '));
-                    const button = document.createElement('a');
-                    button.setAttribute('class', 'buttonFace');
-                    button.setAttribute('id', 'midiPanic');
-                    button.appendChild(document.createTextNode('MIDI Panic'));
-                    div.appendChild(button);
-
-                    $('#midiSelector').addEventListener('change', e => {
+                    select.addEventListener('change', e => {
                         this.selectedIndex = $('#midiSelector').value;
-                        this.midiOut([0x90, 69, 0x7F]); // Test Note
-                        setTimeout(() => this.midiOut([0x90, 69, 0]), 500);
+                        $('#midiMode').innerText = '';
                     });
-                    $('#midiPanic').addEventListener('click', e => {
+                    div.appendChild(label);
+
+                    div.appendChild(document.createTextNode(' '));
+                    const button1 = document.createElement('a');
+                    button1.setAttribute('class', 'buttonFace');
+                    button1.setAttribute('id', 'midiTest');
+                    button1.appendChild(document.createTextNode('Test'));
+                    div.appendChild(button1);
+                    button1.addEventListener('click', e => {
+                        this.midiTest();
+                    });
+
+                    div.appendChild(document.createTextNode(' '));
+                    const button2 = document.createElement('a');
+                    button2.setAttribute('class', 'buttonFace destructiveButton');
+                    button2.setAttribute('id', 'midiPanic');
+                    button2.appendChild(document.createTextNode('Panic'));
+                    div.appendChild(button2);
+                    button2.addEventListener('click', e => {
                         this.midiPanic();
                     });
+
+                    div.appendChild(document.createTextNode(' '));
+                    const span = document.createElement('span');
+                    span.setAttribute('id', 'midiMode');
+                    div.appendChild(span);
+
+                    iomgr.onCommand('midi', data => this.midiOut(data));
+                    iomgr.onConnect('midi', true);
                 })
                 .catch(reason => console.error(reason));
             }
             midiOut (messages) {
                 try {
                     if (this.selectedIndex != PORT_NOT_SELECTED){
+                        if (messages[0] == 0xF0) {
+                            setTimeout(this.parseSysEx(messages), 1);
+                        }
                         this.outputs[this.selectedIndex].send(messages);
                     }
                 } catch (e) {
                     console.error('midi_out', e);
                 }
             }
+            parseSysEx(sysex) {
+                if (!(sysex.length > 0) || (sysex[0] != 0xF0)) throw new Error(`SysEx: Parse Error: ${sysex}`);
+                if (sysex.length >= 6
+                && sysex[1] == 0x7E && sysex[2] == 0x7F && sysex[3] == 0x09) {
+                    switch (sysex[4]) {
+                    case 0x01: // F0 7E 7F 09 01 F7 GM System ON
+                        console.log('midi_sysex', 'GM System ON');
+                        $('#midiMode').innerText = 'GM';
+                        break;
+                    case 0x02: // F0 7E 7F 09 02 F7 GM System OFF
+                        console.log('midi_sysex', 'GM System OFF');
+                        $('#midiMode').innerText = '';
+                        break;
+                    case 0x03: // F0 7E 7F 09 03 F7 GM2 System ON
+                        console.log('midi_sysex', 'GM2 System ON');
+                        $('#midiMode').innerText = 'GM2';
+                        break;
+                    }
+                } else if (sysex.length >= 11
+                && sysex[1] == 0x41 && sysex[3] == 0x42 && sysex[4] == 0x12) {
+                    if (sysex[5] == 0x40 && sysex[6] == 0x00 && sysex[7] == 0x7F && sysex[8] == 0x00) {
+                        // F0 41 10 42 12 40 00 7F 00 41 F7 GS Reset
+                        console.log('midi_sysex', 'GS Reset');
+                        $('#midiMode').innerText = 'GS';
+                    } else if (sysex[5] == 0x00 && sysex[6] == 0x00 && sysex[7] == 0x7F && sysex[8] == 0x00) {
+                        // F0,41,10,42,12,00,00,7F,00,01,F7 System Mode Set 1
+                        console.log('midi_sysex', 'System Mode Set 1 (GS)');
+                        $('#midiMode').innerText = 'GS';
+                    }
+                } else if (sysex.length >= 9 && sysex[1] == 0x43 && sysex[3] == 0x4C) {
+                    if (sysex[4] == 0x00 && sysex[5] == 0x00 && sysex[6] == 0x7E && sysex[7] == 0x00) {
+                        // F0,43,10,4C,00,00,7E,00,F7 XG System ON
+                        console.log('midi_sysex', 'XG System ON');
+                        $('#midiMode').innerText = 'XG';
+                    }
+                }
+            }
+            midiTest () {
+                if (this.selectedIndex != PORT_NOT_SELECTED) {
+                    const testNote = 69;
+                    this.midiOut([0x90, testNote, 40 + Math.random() * 80]);
+                    setTimeout(() => this.midiOut([0x90, testNote, 0]), 500);
+                }
+            }
             midiPanic () {
                 try {
                     if (this.selectedIndex != PORT_NOT_SELECTED) {
                         this.outputs[this.selectedIndex].send([
-                        0xB0, 123, 0, 0xB1, 123, 0, 0xB2, 123, 0, 0xB3, 123, 0, 
-                        0xB4, 123, 0, 0xB5, 123, 0, 0xB6, 123, 0, 0xB7, 123, 0, 
-                        0xB8, 123, 0, 0xB9, 123, 0, 0xBA, 123, 0, 0xBB, 123, 0,
-                        0xBC, 123, 0, 0xBD, 123, 0, 0xBE, 123, 0, 0xBF, 123, 0,
+                        0xB0, 0x78, 0, 0xB1, 0x78, 0, 0xB2, 0x78, 0, 0xB3, 0x78, 0, 
+                        0xB4, 0x78, 0, 0xB5, 0x78, 0, 0xB6, 0x78, 0, 0xB7, 0x78, 0, 
+                        0xB8, 0x78, 0, 0xB9, 0x78, 0, 0xBA, 0x78, 0, 0xBB, 0x78, 0,
+                        0xBC, 0x78, 0, 0xBD, 0x78, 0, 0xBE, 0x78, 0, 0xBF, 0x78, 0,
                         ]);
                     }
                 } catch (e) {

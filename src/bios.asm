@@ -212,7 +212,7 @@ i100D:
 i1010:
 i1011:
 i1012:
-    db 0xF1
+    ; db 0xF1
     ret
 
 
@@ -537,12 +537,6 @@ _int17:
     iret
 
 
-;; boot hook
-_int18:
-    db 0xF1
-    jmp _repl
-
-
 ;; Clock BIOS
 _int1A:
     cmp ah, 0
@@ -602,13 +596,14 @@ i1A04:
 
 _INIT:
     cli
-    cld
     xor ax, ax
     mov ss, ax
     mov sp, 0x0400
     mov cx, cs
     mov ds, cx
     mov es, ax
+    push ax
+    popf
 
     xor di, di
     mov cx, 256
@@ -677,8 +672,7 @@ __set_irq:
     stosw
     mov ax, cs
     stosw
-    ; mov ax, _int19
-    mov ax, _repl
+    mov ax, _int19
     stosw
     mov ax, cs
     stosw
@@ -769,6 +763,8 @@ __set_irq:
     mov cx, 3600
     div cx
     mov [ss:0x46C], ax
+    xor ax, ax
+    mov [ss:0x46F], ax
 
     ;; ENABLE UART
     cli
@@ -849,6 +845,8 @@ _int19:
 ;    jnz .fail
     call 0:0x7C00
 .fail:
+_int18:
+    db 0xF1
 _repl:
     cli
     xor ax, ax
@@ -1023,28 +1021,6 @@ _play_sound:
 .end:
     xor cx, cx
     call _bios_beep
-    ret
-
-
-_play_midi:
-.loop:
-    lodsb
-    or al, al
-    jz .end
-    mov dx, 0x0330
-    out dx, al
-    lodsb
-    out dx, al
-    lodsb
-    out dx, al
-    lodsb
-    xor ah, ah
-    mov cl, 6
-    shl ax, cl
-    mov cx, ax
-    call _bios_wait
-    jmp .loop
-.end:
     ret
 
 

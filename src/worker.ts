@@ -1,10 +1,9 @@
 // Virtual Playground Worker
-
 'use strict';
 
 import { RuntimeEnvironment, WorkerInterface } from './env';
 import { VFD } from './vfd';
-import { MPU401 } from './midi';
+import { MPU401 } from './mpu';
 
 const ctx: Worker = self as any;
 class WI implements WorkerInterface {
@@ -22,7 +21,7 @@ class WI implements WorkerInterface {
 const wi = new WI();
 const env = new RuntimeEnvironment(wi);
 const floppy = new VFD(env);
-const midi = new MPU401(env, 0x330);
+let midi: MPU401;
 
 (async function() {
     console.log('Loading CPU...');
@@ -96,6 +95,9 @@ onmessage = e => {
         case 'start':
             env.initMemory(e.data.mem);
             env.iomgr.ioRedirectMap = e.data.ioRedirectMap;
+            if (e.data.midi) {
+                midi = new MPU401(env, 0x330);
+            }
             setTimeout(() => start(e.data.gen, e.data.imageName), 10);
             break;
         case 'reset':

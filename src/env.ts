@@ -159,12 +159,11 @@ export class RuntimeEnvironment {
         this.cont();
     }
     public cont(): void {
-        if (this.period) {
+        if (this.period > 0) {
             const now = new Date().valueOf();
-            const expected = this.lastTick + this.period;
-            if (now > expected) {
+            for (let expected = this.lastTick + this.period; now >= expected; expected += this.period) {
                 this.pic.raiseIRQ(0);
-                this.lastTick = now;
+                this.lastTick = expected;
             }
         }
         const status: number = this.instance.exports.run(this.cpu);
@@ -180,7 +179,7 @@ export class RuntimeEnvironment {
                 const now = new Date().valueOf();
                 const expected = this.lastTick + this.period;
                 timer = expected - now;
-                if (timer < 1) timer = 1;
+                if (timer < 0) timer = 0;
             } else {
                 timer = 1;
             }

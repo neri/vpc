@@ -73,7 +73,7 @@ export class VFD {
         }
         let lba = (this.SEC - 1) + (this.HEAD + (this.CYL * this.n_heads)) * this.n_sectors;
         let ptr = this.PTR[0] + (this.PTR[1] << 16);
-        console.log(`vfd_read LBA:${lba} [C:${this.CYL} H:${this.HEAD} R:${this.SEC}] MEM:${ptr.toString(16)} Count:${this.CNT}`);
+        // console.log(`vfd_read LBA:${lba} [C:${this.CYL} H:${this.HEAD} R:${this.SEC}] MEM:${ptr.toString(16)} Count:${this.CNT}`);
         let counter = this.CNT;
         for (; counter > 0; counter--, lba++) {
             if (lba >= this.maxLBA) {
@@ -98,7 +98,7 @@ export class VFD {
         }
         let lba = (this.SEC - 1) + (this.HEAD + (this.CYL * this.n_heads)) * this.n_sectors;
         let ptr = this.PTR[0] + (this.PTR[1] << 16);
-        console.log(`vfd_write LBA:${lba} [C:${this.CYL} H:${this.HEAD} R:${this.SEC}] MEM:${ptr.toString(16)} Count:${this.CNT}`);
+        // console.log(`vfd_write LBA:${lba} [C:${this.CYL} H:${this.HEAD} R:${this.SEC}] MEM:${ptr.toString(16)} Count:${this.CNT}`);
         let counter = this.CNT;
         for (; counter > 0; counter--, lba++) {
             if (lba >= this.maxLBA) {
