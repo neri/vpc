@@ -1318,6 +1318,12 @@ static int LDS(cpu_state *cpu, sreg_t *seg_ovr, sreg_t *target) {
     return 0;
 }
 
+typedef union {
+    char string[4 * 4 * 3];
+    uint32_t regs[4 * 3];
+} cpuid_brand_string_t;
+
+cpuid_brand_string_t cpuid_brand_string = { "Virtual CPU by WebAssembly" };
 
 static int CPUID(cpu_state *cpu) {
     switch (cpu->EAX) {
@@ -1327,6 +1333,27 @@ static int CPUID(cpu_state *cpu) {
             cpu->ECX = 0x80800000;
             cpu->EBX = 0;
             break;
+        case 0x80000000:
+            cpu->EAX = 0x80000004;
+            cpu->EBX = cpu->ECX = cpu->EDX = 0x4D534157;
+            break;
+        case 0x80000001:
+            cpu->EAX = 0x86 | (cpu->cpu_gen << 8);
+            cpu->EDX = 0x00000000;
+            cpu->ECX = 0;
+            cpu->EBX = 0;
+            break;
+        case 0x80000002:
+        case 0x80000003:
+        case 0x80000004:
+        {
+            int offset = (cpu->EAX - 0x80000002) * 4;
+            cpu->EAX = cpuid_brand_string.regs[offset++];
+            cpu->EBX = cpuid_brand_string.regs[offset++];
+            cpu->ECX = cpuid_brand_string.regs[offset++];
+            cpu->EDX = cpuid_brand_string.regs[offset++];
+            break;
+        }
         case 0x00000000:
         default:
             cpu->EAX = 1;
@@ -2949,6 +2976,31 @@ static int cpu_step(cpu_state *cpu) {
                 int value = __builtin_popcount(READ_LE16(set.opr1));
                 cpu->gpr[set.opr2] = SETF16(cpu, value);
                 return 0;
+            }
+
+            case 0x0FBA: // BT r/m, imm8
+            {
+                int mod = MODRM_W(cpu, seg, 1, &set);
+                int imm = FETCH8(cpu);
+                uint32_t offset;
+                uint32_t mask;
+                if (mod) {
+                    offset = 0;
+                    mask = 1 << (imm & 31);
+                } else {
+                    offset = imm >> 3;
+                    mask = 1 << (imm & 7);
+                }
+                switch (set.opr2) {
+                    case 4: // BT r/m, imm8
+                        if (mod) {
+                            cpu->CF = (READ_LE32(set.opr1) & mask) != 0;
+                        } else {
+                            cpu->CF = (set.opr1b[offset] & mask) != 0;
+                        }
+                        return 0;
+                }
+                return cpu_status_ud;
             }
 
             case 0x0FBE: // MOVSX reg, r/m8

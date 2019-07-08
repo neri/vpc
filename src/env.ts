@@ -167,6 +167,7 @@ export class RuntimeEnvironment {
             }
         }
         const status: number = this.instance.exports.run(this.cpu);
+        this.dequeueUART();
         if (status > 1) {
             this.isRunning = false;
             console.log(`CPU halted (${status})`);
@@ -186,6 +187,12 @@ export class RuntimeEnvironment {
             setTimeout(() => this.cont(), timer);
         }
     }
+    public dequeueUART(): void {
+        const cout = this.uart.dequeueTX();
+        if (cout.length > 0) {
+            this.worker.print(String.fromCharCode(...cout));
+        }
+    }
     public nmi(): void {
         if (!this.isRunning || this.isPausing) {
             this.instance.exports.step(this.cpu);
@@ -193,6 +200,7 @@ export class RuntimeEnvironment {
         } else {
             this.isDebugging = true;
         }
+        this.dequeueUART();
     }
     public setReg(regName: string, value: number) {
         const reg: number = this.regmap[regName];

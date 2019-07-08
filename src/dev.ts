@@ -82,17 +82,14 @@ export class VPIC {
             if ((this.IRR[port] & mask) && (this.IMR[port] & mask) == 0) {
                 this.IRR[port] &= ~mask;
                 this.ISR[port] |= mask;
-                const vector = (this.ICW[port * 4 + 1] & 0xF8) + i;
-                this.irq.push(vector);
+                this.irq.push(port * 8 + i);
             }
         }
     }
     public raiseIRQ(n: number): void {
         if (n < 8) {
             if (n == 0) {
-                this.ISR[0] |= 0x01;
-                const vector = (this.ICW[1] & 0xF8);
-                this.irq.push(vector);
+                this.irq.push(0);
             } else {
                 this.IRR[0] |= (1 << n);
                 this.enqueue(0);
@@ -104,8 +101,17 @@ export class VPIC {
         }
     }
     public dequeueIRQ(): number {
-        const result = this.irq.shift();
-        return result || 0;
+        if (this.irq.length > 0) {
+            const global_irq = this.irq.shift();
+            const port = global_irq >> 3;
+            const local_irq = global_irq & 7;
+            const mask = 1 << local_irq;
+            this.ISR[port] |= mask;
+            const vector = (this.ICW[port * 4 + 1] & 0xF8) | local_irq;
+            return vector;
+        } else {
+            return 0;
+        }
     }
 }
 
@@ -209,6 +215,7 @@ export class VPIT {
  */
 export class UART {
     private env: RuntimeEnvironment;
+    private fifo_o: number[];
     private fifo_i: number[];
     private irq: number;
     private IER: number;
@@ -216,18 +223,17 @@ export class UART {
     constructor (env: RuntimeEnvironment, base: number, irq: number) {
         this.env = env;
         this.irq = irq;
+        this.fifo_o = [];
         this.fifo_i = [];
-        env.iomgr.on(base, (_, data) => {
-            env.worker.print(String.fromCharCode(data));
-        }, (_) => {
-            if (this.fifo_i.length > 0) {
-                return this.fifo_i.shift();
-            } else {
-                return 0;
-            }
-        });
+        env.iomgr.on(base, (_, data) => this.fifo_o.push(data),
+            (_) => (this.fifo_i.length > 0) ? this.fifo_i.shift() : 0);
         env.iomgr.on(base + 1, (_, data) => this.IER = data, (_) => this.IER);
         env.iomgr.on(base + 5, null, (_) => 0x20 | ((this.fifo_i.length > 0) ? 1 : 0));
+    }
+    public dequeueTX(): number[] {
+        const result = this.fifo_o.slice();
+        this.fifo_o = [];
+        return result;
     }
     public onRX(data: number): void {
         this.fifo_i.push(data & 0xFF);

@@ -557,7 +557,7 @@ if (true) {
             });
             const vfdAttach = (name, blob) => {
                 $('#selDiskImage').value = "";
-                $('#labelLocal').value = name;
+                $('#labelLocal').value = name.slice(1 + name.lastIndexOf('\\'));
                 if (window.worker) {
                     worker.postMessage({command: 'attach', blob: blob});
                 } else {
@@ -570,6 +570,40 @@ if (true) {
                     vfdAttach($('#fileLocal').value, e.target.result);
                 });
                 reader.readAsArrayBuffer(e.target.files[0]);
+            });
+            $('#selDiskImage').addEventListener('change', e => {
+                if (window.worker) {
+                    const target = e.target;
+                    const imageName = target.value;
+                    target.setAttribute('disabled', true);
+                    $('#labelLocal').value = 'Loading...';
+                    console.log(`Loading image ${imageName}...`)
+                    fetch(imageName)
+                        .then(res => {
+                            if (!res.ok) { throw Error(res.statusText); }
+                            return res.blob()
+                        })
+                        .then(blob => {
+                            return new Promise((resolve, _) => {
+                                const reader = new FileReader();
+                                reader.onloadend = () => {
+                                    resolve(reader.result);
+                                };
+                                reader.readAsArrayBuffer(blob);
+                            });
+                        })
+                        .then(buffer => {
+                            $('#labelLocal').value = imageName.slice(1 + imageName.lastIndexOf('/'));
+                            target.removeAttribute('disabled');
+                            worker.postMessage({command: 'attach', blob: buffer});
+                            // floppy.attachImage(buffer);
+                        })
+                        .catch(reason => {
+                            $('#labelLocal').value = '#ERROR';
+                            target.removeAttribute('disabled');
+                            throw reason;
+                        })
+                }
             });
 
             $('html').addEventListener('dragover', e => {

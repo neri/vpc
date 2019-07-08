@@ -44,6 +44,8 @@
 %define BDA_KBD_BUFF_TAIL   0x001C
 %define BDA_KBD_BUFF_BEGIN  0x001E
 %define BDA_KBD_BUFF_MASK   0x001F
+%define BDA_VGA_CURRENT_MODE    0x0049
+%define BDA_VGA_CURSOR      0x0050
 
 %define ARGV 0x0080
 
@@ -182,10 +184,13 @@ i1000:
     ret
 
 i100F:
-    xor al, al
+    mov ax, BDA_SEG
+    mov ds, ax
+    mov al, [BDA_VGA_CURRENT_MODE]
     ret
 
 i1006:
+i1007:
     or al, al
     jz .cls
     ret
@@ -202,9 +207,7 @@ i1001:
 i1003:
 i1004:
 i1005:
-i1007:
 i1008:
-i1009:
 i100A:
 i100B:
 i100C:
@@ -212,7 +215,7 @@ i100D:
 i1010:
 i1011:
 i1012:
-    ; db 0xF1
+;    db 0xF1
     ret
 
 
@@ -286,7 +289,13 @@ i1013:
 .end:
     ret
 
-
+i1009:
+    cmp al, ' '
+    ja .ascii_ok
+    cmp al, 0x7F
+    jb .ascii_ok
+    mov al, '?'
+.ascii_ok:
 i100E:
     xor dx, dx
     mov ds, dx
@@ -357,6 +366,11 @@ _int13:
     call _int13_write
     jmp .end
 .no_03:
+    cmp ah, 0x04
+    jnz .no_04
+    xor ah, ah
+    jmp .end
+.no_04:
 
 .err:
     mov ax, 0x8000
@@ -558,6 +572,7 @@ i1A00:
     iret
 
 i1A02:
+.loop:
     mov al, 0
     out 0x70, al
     in al, 0x71
@@ -570,11 +585,17 @@ i1A02:
     out 0x70, al
     in al, 0x71
     mov ch, al
+    mov al, 0
+    out 0x70, al
+    in al, 0x71
+    cmp dh, al
+    jnz .loop
     xor dl, dl
     clc
     retf 2
 
 i1A04:
+.loop:
     mov al, 7
     out 0x70, al
     in al, 0x71
@@ -591,6 +612,11 @@ i1A04:
     out 0x70, al
     in al, 0x71
     mov ch, al
+    mov al, 7
+    out 0x70, al
+    in al, 0x71
+    cmp al, dl
+    jnz .loop
     clc
     retf 2
 
@@ -706,6 +732,12 @@ __set_irq:
     mov di, 0x400 + BDA_KBD_BUFF_HEAD
     mov ax, BDA_KBD_BUFF_BEGIN
     stosw
+    stosw
+
+    mov di, 0x400 + BDA_VGA_CURRENT_MODE
+    mov al, 0x03
+    stosb
+    mov ax, 80
     stosw
 
 
