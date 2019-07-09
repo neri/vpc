@@ -191,6 +191,7 @@ typedef struct cpu_state {
     int cpu_gen;
     uint32_t cpu_context, default_context;
     uint32_t cr0_valid;
+    uint32_t cpuid_model_id;
 
 } cpu_state;
 
@@ -1326,19 +1327,20 @@ typedef union {
 cpuid_brand_string_t cpuid_brand_string = { "Virtual CPU by WebAssembly" };
 
 static int CPUID(cpu_state *cpu) {
+    const uint32_t cpuid_manufacturer_id = 0x4D534157;
     switch (cpu->EAX) {
         case 0x00000001:
-            cpu->EAX = 0x86 | (cpu->cpu_gen << 8);
+            cpu->EAX = cpu->cpuid_model_id;
             cpu->EDX = 0x00008000;
             cpu->ECX = 0x80800000;
             cpu->EBX = 0;
             break;
         case 0x80000000:
             cpu->EAX = 0x80000004;
-            cpu->EBX = cpu->ECX = cpu->EDX = 0x4D534157;
+            cpu->EBX = cpu->ECX = cpu->EDX = cpuid_manufacturer_id;
             break;
         case 0x80000001:
-            cpu->EAX = 0x86 | (cpu->cpu_gen << 8);
+            cpu->EAX = cpu->cpuid_model_id;
             cpu->EDX = 0x00000000;
             cpu->ECX = 0;
             cpu->EBX = 0;
@@ -1357,7 +1359,7 @@ static int CPUID(cpu_state *cpu) {
         case 0x00000000:
         default:
             cpu->EAX = 1;
-            cpu->EBX = cpu->ECX = cpu->EDX = 0x4D534157;
+            cpu->EBX = cpu->ECX = cpu->EDX = cpuid_manufacturer_id;
     }
     return 0;
 }
@@ -2861,6 +2863,9 @@ static int cpu_step(cpu_state *cpu) {
                     case 1:
                         WRITE_LE16(set.opr1, set.opr2);
                         break;
+                    case 2:
+                        WRITE_LE32(set.opr1, set.opr2);
+                        break;
                     }
                 }
                 return 0;
@@ -3219,6 +3224,7 @@ void cpu_reset(cpu_state *cpu, int gen) {
     memset(cpu, 0, sizeof(cpu_state));
 
     cpu->cpu_gen = new_gen;
+    cpu->cpuid_model_id = 0x86 | (new_gen << 8);
 
     cpu->flags_mask = 0x003F7FD5;
     cpu->flags_mask1 = 0x00000002;
@@ -3271,7 +3277,7 @@ void cpu_reset(cpu_state *cpu, int gen) {
     cpu->IDT.limit = 0xFFFF;
     cpu->LDT.limit = 0xFFFF;
     cpu->TSS.limit = 0xFFFF;
-    cpu->EDX = cpu->cpu_gen << 8;
+    cpu->EDX = cpu->cpuid_model_id;
 }
 
 static void check_irq(cpu_state *cpu) {
