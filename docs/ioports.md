@@ -10,6 +10,7 @@
 |0061|BYTE|R/W|YES|System Port (Beep)|
 |0070-0071|BYTE|R/W|YES|RTC/CMOS RAM|
 |00A0-00A1|BYTE|R/W|YES|i8259 PIC #2|
+|01CE-01CF|WORD|R/W|BOCHS|Bochs Video|
 |0330-0331|BYTE|R/W|YES|MPU-401|
 |03C8-03C9|BYTE|WO|YES|VGA DAC|
 |03F8-03FF|BYTE|R/W|YES|UART COM1|
@@ -17,6 +18,7 @@
 |FDxx|MIXED|R/W|NO|Floppy|
 
 ## Original devices
+
 ### 0000: Random Number Generator
 
 |Address|Size|Read/Write|Description|

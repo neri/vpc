@@ -148,6 +148,8 @@ _int10:
     push ax
     mov bp, sp
     cld
+    push cs
+    pop ds
 
     cmp ah, (_int10_etbl - _int10_ftbl) / 2
     ja .not_supported
@@ -169,19 +171,58 @@ i10_caller:
     mov bl, ah
     xor bh, bh
     add bx, bx
-    mov bx, [cs:_int10_ftbl + bx]
+    mov bx, [_int10_ftbl + bx]
     push bx
     mov bx, [bp + STK_BX]
     ret
 
 
-i1000:
-    push cs
-    pop ds
+i1000: ;; SET VIDEO MODE
+    cmp al, 0x03
+    jbe .mode_03
+    cmp al, 0x13
+    ; jz .mode_13
+    xor al, al
+    ret
+
+.mode_03:
+    mov dx, 0x3C0
+    mov al, 0x10
+    out dx, al
+    inc dx
+    xor al, al
+    out dx, al
+    mov ax, 0xB800
+    mov es, ax
+    xor di, di
+    mov ax, 0x0720
+    mov cx, 80 * 25
+    rep stosw
+    mov al, 3
+.set_mode:
+    mov cx, BDA_SEG
+    mov ds, cx
+    mov [BDA_VGA_CURRENT_MODE], al
+    xor dx, dx
+    mov [BDA_VGA_CURSOR], dx
+    ret
+
+.mode_13:
+    mov dx, 0x3C0
+    mov al, 0x10
+    out dx, al
+    inc dx
+    mov al, 0x41
+    out dx, al
+    mov al, 0x13
+    jmp .set_mode
+
+.set_uart:
     mov si, cls_msg
     call puts
     xor ax, ax
-    ret
+    jmp .set_mode
+
 
 i100F:
     mov ax, BDA_SEG
@@ -195,16 +236,23 @@ i1007:
     jz .cls
     ret
 .cls:
-    push cs
-    pop ds
-    mov si, cls_nc_msg
-    call puts
-    xor ax, ax
+    ; push cs
+    ; pop ds
+    ; mov si, cls_nc_msg
+    ; call puts
+    ; xor ax, ax
+    ; ret
+    mov dx, 0xB800
+    mov es, dx
+    mov ah, bh
+    mov al, 0x20
+    xor di, di
+    mov cx, 80 * 25
+    rep stosw
     ret
 
 
 i1001:
-i1003:
 i1004:
 i1005:
 i1008:
@@ -220,53 +268,66 @@ i1012:
 
 
 i1002:
-    sub sp, byte 16
-    mov di, sp
-    mov ax, 0x5B1B
-    ss stosw
-
-    mov al, dh
-    aam
-    xchg al, ah
-    or al, al
-    jz .comp1
-    add al, '0'
-    ss stosb
-.comp1:
-    xchg al, ah
-    add al, '0'
-    ss stosb
-    mov al, ';'
-    ss stosb
-
-    mov al, dl
-    aam
-    xchg al, ah
-    or al, al
-    jz .comp2
-    add al, '0'
-    ss stosb
-.comp2:
-    xchg al, ah
-    add al, '0'
-    ss stosb
-    mov ax, 'H'
-    ss stosw
-
-    xor dx, dx
-    mov es, dx
-    mov dx, [es:0x400]
-    mov si, sp
-.loop:
-    ss lodsb
-    or al, al
-    jz .end
-    out dx, al
-    jmp .loop
-.end:
-
-    add sp, byte 16
+    mov ax, BDA_SEG
+    mov ds, ax
+    mov [BDA_VGA_CURSOR], dx
     ret
+
+i1003:
+    mov ax, BDA_SEG
+    mov ds, ax
+    mov ax, [BDA_VGA_CURSOR]
+    mov [bp+STK_DX], ax
+    xor ax, ax
+    ret
+
+;     sub sp, byte 16
+;     mov di, sp
+;     mov ax, 0x5B1B
+;     ss stosw
+
+;     mov al, dh
+;     aam
+;     xchg al, ah
+;     or al, al
+;     jz .comp1
+;     add al, '0'
+;     ss stosb
+; .comp1:
+;     xchg al, ah
+;     add al, '0'
+;     ss stosb
+;     mov al, ';'
+;     ss stosb
+
+;     mov al, dl
+;     aam
+;     xchg al, ah
+;     or al, al
+;     jz .comp2
+;     add al, '0'
+;     ss stosb
+; .comp2:
+;     xchg al, ah
+;     add al, '0'
+;     ss stosb
+;     mov ax, 'H'
+;     ss stosw
+
+;     xor dx, dx
+;     mov es, dx
+;     mov dx, [es:0x400]
+;     mov si, sp
+; .loop:
+;     ss lodsb
+;     or al, al
+;     jz .end
+;     out dx, al
+;     jmp .loop
+; .end:
+
+;     add sp, byte 16
+;     ret
 
 
 i1013:
@@ -283,8 +344,7 @@ i1013:
     ; mov cx, [bp + STK_CX]
 .loop:
     lodsb
-    and al, 0x7F
-    out dx, al
+    call _bios_write_char
     loop .loop
 .end:
     ret
@@ -297,14 +357,103 @@ i1009:
     mov al, '?'
 .ascii_ok:
 i100E:
-    xor dx, dx
-    mov ds, dx
-    mov dx, [ds:0x400]
-    and al, 0x7F
-    out dx, al
+    mov cx, BDA_SEG
+    mov ds, cx
+    cmp al, 8
+    jz .bs
+    cmp al, 10
+    jz .lf
+    cmp al, 13
+    jz .cr
+    call _chk_scroll
+    mov dx, [BDA_VGA_CURSOR]
+    call _bios_write_char
+    mov [BDA_VGA_CURSOR], dx
+    call _chk_scroll
+    ret
+.bs:
+    mov cl, [BDA_VGA_CURSOR]
+    or cl, cl
+    jz .nobs
+    dec cx
+.nobs:
+    mov [BDA_VGA_CURSOR], cl
+    ret
+.lf:
+    mov cx, [BDA_VGA_CURSOR]
+    xor cl, cl
+    inc ch
+    mov [BDA_VGA_CURSOR], cx
+    ret
+.cr:
+    xor cl, cl
+    mov [BDA_VGA_CURSOR], cl
     ret
 
 
+_bios_write_char:
+    push ds
+    push bx
+    push cx
+    push ax
+    mov cx, BDA_SEG
+    mov ds, cx
+    mov bx, dx
+    mov al, bh
+    mov cl, 80
+    mul cl
+    add al, bl
+    adc ah, 0
+    mov bx, ax
+    add bx, bx
+    pop ax
+    mov cx, 0xB800
+    mov ds, cx
+    mov [bx], al
+    pop cx
+    pop bx
+    pop ds
+    inc dx
+    ret
+
+_chk_scroll:
+    push ds
+    push es
+    push ax
+    push cx
+    push si
+    push di
+    mov cx, BDA_SEG
+    mov ds, cx
+    mov cx, [BDA_VGA_CURSOR]
+    cmp cl, 80
+    jnz .no80
+    xor cl, cl
+    inc ch
+.no80:
+    mov al, 24
+    cmp ch, al
+    jbe .end
+    mov ch, al
+    mov [BDA_VGA_CURSOR], cx
+    mov cx, 0xB800
+    mov ds, cx
+    mov es, cx
+    xor di, di
+    mov si, 80 * 2
+    mov cx, 80 * 24
+    rep movsw
+    mov cx, 80
+    mov ax, 0x0720
+    rep stosw
+.end:
+    pop di
+    pop si
+    pop cx
+    pop ax
+    pop es
+    pop ds
+    ret
 
 
 ;; Get Equipment List
@@ -323,11 +472,6 @@ _int12:
     mov dx, VPC_MEM_PORT
     in ax, dx
     pop dx
-    ; push ds
-    ; xor ax, ax
-    ; mov ds, ax
-    ; mov ax, [ds: 0x413]
-    ; pop ds
     iret
 
 
@@ -819,11 +963,14 @@ __set_irq:
     sti
 
 
-    ;; INIT VGA PALETTE
+    ;; INIT VIDEO
+    mov ax, 0x0003
+    int 0x10
+
 _init_palette:
     mov dx, 0x03C8
     xor ax, ax
-    out dx, ax
+    out dx, al
     inc dx
     mov bx, 16
 .loop1:
@@ -831,10 +978,16 @@ _init_palette:
     mov cx, 16
 .loop0:
     lodsb
+    shr al, 1
+    shr al, 1
     out dx, al
     lodsb
+    shr al, 1
+    shr al, 1
     out dx, al
     lodsb
+    shr al, 1
+    shr al, 1
     out dx, al
     inc si
     loop .loop0
@@ -842,23 +995,32 @@ _init_palette:
     jnz .loop1
 
 __set_vram:
-    mov ax, 0xA000
+    mov ax, 0xB800
     mov es, ax
     xor di, di
-    mov cx, 320 * 200
-.loop:
-    in ax, 0
-    stosw
-    loop .loop
-
-    mov si, cls_msg
-    call puts
+    mov cx, 80 * 25
+    mov ax, 0x0720
+    rep stosw
 
     mov si, banner
     call puts
 
     mov si, _boot_sound_data
     call _play_sound
+
+
+; _vga_test:
+;     mov ax, 0xA000
+;     mov es, ax
+;     xor di, di
+;     mov cx, 320 * 200 / 2
+; .loop:
+;     in ax, 0
+;     stosw
+;     loop .loop
+;     mov cx, 100
+;     call _bios_wait
+;     jmp _vga_test
 
 
     mov dl, 0
@@ -953,14 +1115,8 @@ _repl:
 
 
 _aux_out:
-    push ds
-    push dx
-    xor dx, dx
-    mov ds, dx
-    mov dx, [ds:0x400]
-    out dx, al
-    pop dx
-    pop ds
+    mov ah, 0x0E
+    int 0x10
     ret
 
 _bios_beep:
@@ -1069,6 +1225,22 @@ puts:
     ret
 
 
+_vga_command:
+    mov dx, 0x01CE
+.loop:
+    lodsw
+    cmp ax, -1
+    jz .end
+    out dx, ax
+    inc dx
+    lodsw
+    out dx, ax
+    dec dx
+    jmp .loop
+.end:
+    ret
+
+
 cls_nc_msg:
     db 0x1b, "[2J", 0
 
@@ -1085,6 +1257,11 @@ bad_cmd_msg:
 _boot_sound_data:
     dw 2000, 100, 1000, 100
     dw 0xFFFF
+
+_vga_mode13_cmd:
+    ; dw 4, 0, 1, 640, 2, 400, 3, 8, 4, 1, -1
+    dw 4, 0, 1, 320, 2, 200, 3, 8, 4, 1, -1
+
 
 _palette_data:
     dd 0x000000, 0x000099, 0x009900, 0x009999

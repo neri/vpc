@@ -3472,10 +3472,10 @@ WASM_EXPORT const char *debug_get_register_map(cpu_state *cpu) {
     return buffer;
 }
 
-WASM_EXPORT uint32_t get_vram_signature(uint32_t segment, size_t size) {
+WASM_EXPORT uint32_t get_vram_signature(uint32_t base, size_t size) {
     int shift = 17;
     uint32_t acc = 0;
-    uint32_t *vram = (uint32_t *)(mem + (segment << 4));
+    uint32_t *vram = (uint32_t *)(mem + base);
     const uint32_t max_vram = size / 4;
     for (int i = 0; i < max_vram; i++) {
         uint32_t v = vram[i];

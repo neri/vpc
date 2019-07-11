@@ -2,6 +2,7 @@
 'use strict';
 
 import { RuntimeEnvironment, WorkerInterface } from './env';
+import { VGA } from './vga';
 import { VFD } from './vfd';
 import { MPU401 } from './mpu';
 
@@ -21,6 +22,7 @@ class WI implements WorkerInterface {
 const wi = new WI();
 const env = new RuntimeEnvironment(wi);
 const floppy = new VFD(env);
+const vga = new VGA(env);
 let midi: MPU401;
 
 (async function() {

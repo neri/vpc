@@ -236,14 +236,7 @@ export class RuntimeEnvironment {
         }
         console.log(lines.join('\n'));
     }
-    // public vga_render(): void {
-    //     const newValue = this.instance.exports.vram_check();
-    //     if (this.vgaCheck != newValue) {
-    //         this.vgaCheck = newValue;
-    //         const v: number = this.instance.exports.qvga_render();
-    //         // const a = this._memory.slice(v, v + 320 * 200 * 4);
-    //         const a = new Uint8Array(this._memory.buffer, v, 320 * 200 * 4);
-    //         this.worker.postCommand('vga', a);
-    //     }
-    // }
+    public get_vram_signature(base: number, size: number): number {
+        return this.instance.exports.get_vram_signature(base, size);
+    }
 }
