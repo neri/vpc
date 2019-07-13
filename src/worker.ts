@@ -26,7 +26,7 @@ const vga = new VGA(env);
 let midi: MPU401;
 
 (async function() {
-    wi.print('Loading CPU...\n');
+    // wi.print('Loading CPU...\n');
     console.log('Loading CPU...');
     await fetch('./vcpu.wasm')
         .then(res => {
@@ -36,7 +36,7 @@ let midi: MPU401;
         .then(buffer => WebAssembly.instantiate(buffer, env))
         .then(wasm => env.loadCPU(wasm.instance))
     
-    wi.print('Loading BIOS...\n');
+    // wi.print('Loading BIOS...\n');
     console.log('Loading BIOS...');
     await fetch('./bios.bin')
         .then(res => {
@@ -61,7 +61,7 @@ let midi: MPU401;
 })();
 
 const loadImage = async (imageName: string) => {
-    wi.print('Loading image...\n');
+    // wi.print('Loading image...\n');
     console.log(`Loading image ${imageName}`);
     return fetch(imageName)
         .then(res => {

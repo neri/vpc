@@ -337,7 +337,6 @@ static void WRITE_LE32(void *la, uint32_t value) {
 }
 
 #define OFFSET offset
-// #define OFFSET (offset & 0xFFFF)
 static uint8_t READ_MEM8(sreg_t *sreg, uint32_t offset) {
     return mem[sreg->base + OFFSET];
 }
@@ -468,7 +467,7 @@ static int LOAD_SEL(cpu_state *cpu, sreg_t *sreg, uint16_t value) {
         sreg->base = new_seg.base_1 + (new_seg.base_2 << 16) + (new_seg.base_3 << 24);
         uint32_t limit = new_seg.limit_1 + (new_seg.attr_2 << 16);
         if (attrs & SEG_ATTR_G) {
-            limit = (limit << 12) | 0xFFFFF;
+            limit = (limit << 12) | 0x00000FFF;
         }
         sreg->limit = limit;
         sreg->sel = value;
@@ -590,8 +589,6 @@ typedef struct {
 
 static int MODRM(cpu_state *cpu, sreg_t *seg_ovr, modrm_t *result) {
 
-    int addr32 = cpu->cpu_context & CPU_CTX_ADDR32;
-
     result->modrm = FETCH8(cpu);
 
     if (result->mod == 3) return 3;
@@ -599,7 +596,7 @@ static int MODRM(cpu_state *cpu, sreg_t *seg_ovr, modrm_t *result) {
     sreg_t *seg = NULL;
     uint32_t base = 0;
     int disp = 0;
-    if (addr32) {
+    if (cpu->cpu_context & CPU_CTX_ADDR32) {
         if (result->rm != 4) {
             if (result->mod == 0 && result->rm == 5) {
                 result->offset = FETCH32(cpu);
@@ -626,12 +623,17 @@ static int MODRM(cpu_state *cpu, sreg_t *seg_ovr, modrm_t *result) {
             int32_t base = result->base;
             uint32_t index = result->index;
             uint32_t scale = 1 << result->scale;
-            if (result->index == 4) scale = 0;
+            if (index == 4) scale = 0;
 
+            if (base == 4 || (base == 5 && result->mod != 0)) {
+                seg = &cpu->SS;
+            }
+
+            const int BASE_DISABLED = -1;
             switch (result->mod) {
             case 0: // [base]
                 if (base == 5) {
-                    base = -1;
+                    base = BASE_DISABLED;
                     disp = FETCH32(cpu);
                 }
                 break;
@@ -642,7 +644,7 @@ static int MODRM(cpu_state *cpu, sreg_t *seg_ovr, modrm_t *result) {
                 disp = FETCH32(cpu);
                 break;
             }
-            if (base < 0) {
+            if (base == BASE_DISABLED) {
                 base = 0;
             } else {
                 base = cpu->gpr[base];
@@ -1324,7 +1326,7 @@ typedef union {
     uint32_t regs[4 * 3];
 } cpuid_brand_string_t;
 
-cpuid_brand_string_t cpuid_brand_string = { "Virtual CPU by WebAssembly" };
+cpuid_brand_string_t cpuid_brand_string = { "Virtual CPU by WebAssembly @ 1.0MHz" };
 
 static int CPUID(cpu_state *cpu) {
     const uint32_t cpuid_manufacturer_id = 0x4D534157;
@@ -2793,7 +2795,11 @@ static int cpu_step(cpu_state *cpu) {
                         cpu->IDT = new_dt;
                         return 0;
                     }
-                    // case 4: // SMSW
+                    case 4: // SMSW
+                    {
+                        WRITE_LE16(set.opr1, cpu->CR[0]);
+                        return 0;
+                    }
                     // case 6: // LMSW
                     case 7: // INVLPG (NOP)
                         return 0;

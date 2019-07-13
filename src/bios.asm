@@ -35,6 +35,8 @@
 %define	STK_CS              20
 %define	STK_FLAGS           22
 
+%define CRTC_PORT           0x3B4
+
 %define VPC_MEM_PORT        0xFC00
 %define VPC_FD_PORT         0xFD00
 
@@ -203,7 +205,7 @@ i1000: ;; SET VIDEO MODE
     mov cx, BDA_SEG
     mov ds, cx
     mov [BDA_VGA_CURRENT_MODE], al
-    xor dx, dx
+    xor ax, ax
     mov [BDA_VGA_CURSOR], dx
     ret
 
@@ -228,7 +230,9 @@ i100F:
     mov ax, BDA_SEG
     mov ds, ax
     mov al, [BDA_VGA_CURRENT_MODE]
+    mov [bp+STK_AX], al
     ret
+
 
 i1006:
 i1007:
@@ -242,17 +246,37 @@ i1007:
     ; call puts
     ; xor ax, ax
     ; ret
+    add dx, 0x0001
+    call _bios_cursor_addr
+    mov dx, cx
+    xchg ax, cx
+    call _bios_cursor_addr
+    mov di, ax
+    sub cx, di
+    shr cx, 1
     mov dx, 0xB800
     mov es, dx
     mov ah, bh
     mov al, 0x20
-    xor di, di
-    mov cx, 80 * 25
     rep stosw
     ret
 
 
 i1001:
+    mov dx, CRTC_PORT
+    mov al, 0x0A
+    out dx, al
+    inc dx
+    mov al, ch
+    out dx, al
+    dec dx
+    mov al, 0x0B
+    out dx, al
+    inc dx
+    mov al, cl
+    out dx, al
+    ret
+
 i1004:
 i1005:
 i1008:
@@ -271,6 +295,7 @@ i1002:
     mov ax, BDA_SEG
     mov ds, ax
     mov [BDA_VGA_CURSOR], dx
+    call _bios_set_cursor
     ret
 
 i1003:
@@ -278,7 +303,6 @@ i1003:
     mov ds, ax
     mov ax, [BDA_VGA_CURSOR]
     mov [bp+STK_DX], ax
-    xor ax, ax
     ret
 
 ;     sub sp, byte 16
@@ -349,11 +373,10 @@ i1013:
 .end:
     ret
 
+
 i1009:
     cmp al, ' '
     ja .ascii_ok
-    cmp al, 0x7F
-    jb .ascii_ok
     mov al, '?'
 .ascii_ok:
 i100E:
@@ -369,7 +392,10 @@ i100E:
     mov dx, [BDA_VGA_CURSOR]
     call _bios_write_char
     mov [BDA_VGA_CURSOR], dx
+.end:
     call _chk_scroll
+    mov dx, [BDA_VGA_CURSOR]
+    call _bios_set_cursor
     ret
 .bs:
     mov cl, [BDA_VGA_CURSOR]
@@ -378,16 +404,55 @@ i100E:
     dec cx
 .nobs:
     mov [BDA_VGA_CURSOR], cl
-    ret
+    jmp .end
 .lf:
     mov cx, [BDA_VGA_CURSOR]
     xor cl, cl
     inc ch
     mov [BDA_VGA_CURSOR], cx
-    ret
+    jmp .end
 .cr:
     xor cl, cl
     mov [BDA_VGA_CURSOR], cl
+    jmp .end
+
+
+_bios_set_cursor:
+    push ax
+    push cx
+    push dx
+    call _bios_cursor_addr
+    mov cx, ax
+    mov dx, CRTC_PORT
+    mov al, 0x0E
+    out dx, al
+    inc dx
+    mov al, ch
+    out dx, al
+    dec dx
+    mov al, 0x0F
+    out dx, al
+    inc dx
+    mov al, cl
+    out dx, al
+    pop dx
+    pop cx
+    pop ax
+    ret
+
+
+_bios_cursor_addr:
+    push bx
+    push cx
+    mov bx, dx
+    mov al, bh
+    mov cl, 80
+    mul cl
+    add al, bl
+    adc ah, 0
+    add ax, ax
+    pop cx
+    pop bx
     ret
 
 
@@ -396,16 +461,8 @@ _bios_write_char:
     push bx
     push cx
     push ax
-    mov cx, BDA_SEG
-    mov ds, cx
-    mov bx, dx
-    mov al, bh
-    mov cl, 80
-    mul cl
-    add al, bl
-    adc ah, 0
-    mov bx, ax
-    add bx, bx
+    call _bios_cursor_addr
+    xchg ax, bx
     pop ax
     mov cx, 0xB800
     mov ds, cx
@@ -883,7 +940,10 @@ __set_irq:
     stosb
     mov ax, 80
     stosw
-
+    mov ax, 80 * 50
+    stosw
+    xor ax, ax
+    stosw
 
     ;; init PIC
     mov al, 0xFF
@@ -965,6 +1025,9 @@ __set_irq:
 
     ;; INIT VIDEO
     mov ax, 0x0003
+    int 0x10
+    mov ax, 0x0100
+    mov cx, 0x0607
     int 0x10
 
 _init_palette:

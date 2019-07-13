@@ -4,8 +4,6 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=720">
     <title>Virtual Playground</title>
-    <script src="lib/xterm.js"></script>
-    <link rel="stylesheet" href="lib/xterm.css">
     <link rel="stylesheet" href="styles/style.css">
     <style>
         :root {
@@ -19,10 +17,13 @@
             -webkit-user-select: none;
         }
         #screen_container {
+            margin: 0;
+            padding: 0;
             display: none;
             cursor: text;
             width: var(--main-screen-width);
             min-height: var(--main-screen-height);
+            background: rgba(0, 0, 0, 0.9);
         }
         
         #click_to_start {
@@ -105,7 +106,7 @@
             clear: both;
         }
 
-        #terminal2 {
+        #terminal {
             position: absolute;
             margin: 0;
             padding: 0;
@@ -159,27 +160,11 @@
             $('#screen_container').style.display = 'block';
             $('#click_to_start').style.display = 'none';
             
-            const canvasVGA = $('#canvasVGA');
-            
             if (window.beep) {
                 window.beep.createAudioContext();
             }
 
-if (false) {
-
-            const term = new Terminal({convertEol: true, rendererType: 'canvas'});
-            term.open($('#terminal'));
-            window.term = term;
-            term.onKey((e) => {
-                let keyCode = e.key.charCodeAt(0);
-                if (keyCode == 127) keyCode = 8; // BS
-                window.worker.postMessage({command: 'key', data: keyCode });
-            });
-            term.focus();
-
-} else {
-
-            const term = $('#terminal2');
+            const term = $('#terminal');
             term.write = function (message) {
                 this.value += message;
                 this.scrollTop = this.scrollHeight;
@@ -197,8 +182,6 @@ if (false) {
                 term.focus();
             });
             setTimeout(() => term.focus(), 100);
-
-}
 
             setTimeout(startSecond, 100);
         }
@@ -512,10 +495,37 @@ if (false) {
 
         // Virtual Video Device
         class VideoDevice {
-            constructor (devmgr, dom) {
+            constructor (devmgr, dom, scale) {
+                this.scale = scale;
+                this.fontWidth = 8;
+                this.fontHeight = 16;
+                this.pal16 = [
+                        '#000', '#009', '#090', '#099', '#900', '#909', '#990', '#999',
+                        '#666', '#00F', '#0F0', '#0FF', '#F00', '#F0F', '#FF0', '#FFF', ];
+
                 this.pal = new Uint32Array(256);
                 this.canvas = dom;
-                this.res = [0, 0, 0];
+                this.ctx = this.canvas.getContext('2d');
+                this.ctx.scale(scale, scale);
+                this.res = [0, 0, 0, 0];
+                this.font = "16px/16px 'TerminalWebFont', 'Monaco', 'Courier New', 'Courier', monospace";
+                this.cursor = 0xFFFF;
+
+                this.updateFont();
+                document.fonts.ready.then(() => this.updateFont());
+
+                this.canvasBG = document.createElement('canvas');
+                do {
+                    const { fontWidth, fontHeight } = this;
+                    this.canvasBG.width = fontWidth * 16 * scale;
+                    this.canvasBG.height = fontHeight * scale;
+                    const ctx = this.canvasBG.getContext('2d');
+                    ctx.scale(scale, scale);
+                    for (let i = 0; i < 16; i++) {
+                        ctx.fillStyle = this.pal16[i];
+                        ctx.fillRect(i * fontWidth, 0, fontWidth, fontHeight);
+                    }
+                } while (false);
 
                 devmgr.onCommand('pal', e => {
                     this.pal[e[0]] = 0xFF000000 | e[1];
@@ -523,52 +533,97 @@ if (false) {
                 });
                 devmgr.onCommand('vga_mode', e => {
                     console.log('vga_mode', e);
-                    this.res = e;
-                    const width = this.res[0];
-                    const height = this.res[1];
-                    this.canvas.width = width;
-                    this.canvas.height = height;
-                })
+                    this.setMode(e);
+                });
                 devmgr.onCommand('vga', e => {
-                    const width = this.res[0];
-                    const height = this.res[1];
-                    const ctx = this.canvas.getContext('2d');
-                    const image = ctx.createImageData(width, height);
-                    switch (this.res[3]) {
-                        case 0:
-                            this.renderMode03(ctx, image, e, width, height);
-                            break;
-                        case 1:
-                            this.renderMode13(ctx, image, e, width, height);
-                            break;
+                    if (this.res[3]) {
+                        this.renderMode13(this.ctx, null, e, 0, 0);
+                    } else {
+                        this.renderMode03(e);
                     }
                 });
+                devmgr.onCommand('vga_cursor', e => {
+                    this.updateCursor(e / 2);
+                });
+            }
+            setMode(e) {
+                const { fontWidth, fontHeight } = this;
+                this.res = e;
+                const width = this.res[0];
+                const height = this.res[1];
+                this.cols = width / fontWidth;
+                this.rows = height / fontHeight;
+                this.canvas.width = width * this.scale;
+                this.canvas.height = height * this.scale;
+                this.canvas.style.width = `${width}px`;
+                this.canvas.style.height = `${height}px`;
+                this.tvram = new Uint32Array(80 * 50);
+            }
+            updateCursor(newCursor) {
+                this.drawText(this.cursor, 0);
+                this.cursor = newCursor;
+                this.drawText(this.cursor, 1);
+            }
+            updateFont() {
+                const { fontWidth, fontHeight, scale } = this;
+                this.canvasFont = document.createElement('canvas');
+                this.canvasFont.width = fontWidth * 128 * scale;
+                this.canvasFont.height = fontHeight * 16 * scale;
+                const ctx = this.canvasFont.getContext('2d');
+                ctx.font = this.font;
+                ctx.textBaseline = 'bottom';
+                ctx.scale(scale, scale);
+                for (let i = 0; i < 16; i++) {
+                    const cy = i * fontHeight + fontHeight;
+                    ctx.fillStyle = this.pal16[i];
+                    for (let j = 32; j < 127; j++) {
+                        const cx = j * fontWidth;
+                        ctx.fillText(String.fromCharCode(j), cx, cy, fontWidth);
+                    }
+                }
             }
             setNeedsRedraw() {
                 this.needs_redraw = 1;
             }
-            renderMode03(ctx, image, src, width, height) {
-                const fontWidth = 8;
-                const fontHeight = 16;
-                const cols = (width / fontWidth) | 0;
-                const rows = (height / fontHeight) | 0;
-                const delta = cols * 2;
-                ctx.font = "16px/16px 'TerminalWebFont', 'Monaco', 'Courier New', 'Courier', monospace";
-                const text = new Uint16Array(src.buffer);
-                let p = 0;
+            drawText(at, cursor) {
+                const wchar = this.tvram[at];
+                const char = wchar & 0xFFFFFF;
+                const attr = wchar >> 24;
+                const { ctx, fontWidth, fontHeight, scale, cols, rows } = this;
+                const x = at % cols;
+                const y = (at / cols) | 0;
+                const cx = x * fontWidth;
+                const cy = y * fontHeight;
+                const bgColor = attr >> 4;
+                const fgColor = attr & 0xF;
+                if (cursor) {
+                    ctx.drawImage(this.canvasBG, fgColor * fontWidth * scale, 0, fontWidth * scale, fontHeight * scale, cx * scale, cy * scale, fontWidth * scale, fontHeight * scale);
+                } else {
+                    ctx.drawImage(this.canvasBG, bgColor * fontWidth * scale, 0, fontWidth * scale, fontHeight * scale, cx * scale, cy * scale, fontWidth * scale, fontHeight * scale);
+                    ctx.drawImage(this.canvasFont, char * fontWidth * scale, fgColor * fontHeight * scale, fontWidth * scale, fontHeight * scale, cx * scale, cy * scale, fontWidth * scale, fontHeight * scale);
+                }
+            }
+            renderMode03(src) {
+                const { ctx, fontWidth, fontHeight, scale, cols, rows } = this;
+                let p = 0, q = 0;
                 for (let i = 0; i < rows; i++) {
-                    for (let j = 0; j < cols; j++, p++) {
-                        const wchar = text[p];
-                        const cx = j * fontWidth;
-                        const cy = i * fontHeight;
-                        const char = wchar & 0xFF;
-                        const bgColor = wchar >> 12;
-                        const fgColor = (wchar >> 8) & 0xF;
-                        const str = String.fromCharCode(char);
-                        ctx.fillStyle = `#${ this.pal[bgColor].toString(16).slice(-6) }`;
-                        ctx.fillRect(cx, cy, fontWidth, fontHeight);
-                        ctx.fillStyle = `#${ this.pal[fgColor].toString(16).slice(-6) }`;
-                        ctx.fillText(str, cx, cy + fontHeight - 2, fontWidth);
+                    for (let j = 0; j < cols; j++, q++, p += 2) {
+                        const char = src[p];
+                        const attr = src[p + 1];
+                        const wchar = char | (attr << 24);
+                        if (this.tvram[q] != wchar) {
+                            this.tvram[q] = wchar;
+                            const cx = j * fontWidth;
+                            const cy = i * fontHeight;
+                            const bgColor = attr >> 4;
+                            const fgColor = attr & 0xF;
+                            if (q === this.cursor) {
+                                ctx.drawImage(this.canvasBG, fgColor * fontWidth * scale, 0, fontWidth * scale, fontHeight * scale, cx * scale, cy * scale, fontWidth * scale, fontHeight * scale);
+                            } else {
+                                ctx.drawImage(this.canvasBG, bgColor * fontWidth * scale, 0, fontWidth * scale, fontHeight * scale, cx * scale, cy * scale, fontWidth * scale, fontHeight * scale);
+                                ctx.drawImage(this.canvasFont, char * fontWidth * scale, fgColor * fontHeight * scale, fontWidth * scale, fontHeight * scale, cx * scale, cy * scale, fontWidth * scale, fontHeight * scale);
+                            }
+                        }
                     }
                 }
             }
@@ -585,7 +640,7 @@ if (false) {
         window.addEventListener('DOMContentLoaded', () => {
             window.beep = new i8254Sound(window.devmgr);
             window.midi = new VirtualMidiDevice(window.devmgr, $('#cpMidi'));
-            window.vga = new VideoDevice(window.devmgr, $('#canvasVGA'));
+            window.vga = new VideoDevice(window.devmgr, $('#canvasVGA'), window.devicePixelRatio | 1);
             $('#click_to_start').addEventListener('click', e => {
                 if (!window.WebAssembly) {
                     alert("We are sorry, but WebAssembly is not supported.");
@@ -705,12 +760,8 @@ if (false) {
 </head>
 <body>
     <div id="emulatorFrame">
-        <div id="screen_container">
-            <textarea id="terminal2"></textarea>
-            <canvas id="canvasVGA" width="320" height="200" style="min-width: 640px; min-height: 400px;"></canvas>
-            <div id="terminal"></div>
-        </div>
-        <div id="click_to_start"><p>CLICK TO START</p></div>
+        <div id="screen_container"><textarea id="terminal"></textarea><canvas id="canvasVGA"></canvas></div>
+        <div id="click_to_start"><p>はじめるときはここをクリック...</p></div>
     </div>
 
     <div id="controlPanel">
@@ -782,12 +833,9 @@ if (false) {
                 <fieldset>
                     <legend>Screen Option</legend>
                     <label>
-                        <input type="checkbox"> VGA
+                        Performance:
+                        <input type="range" min="1" max="1" value="1">
                     </label>
-                    <label>
-                        <input type="checkbox" disabled> VESA
-                    </label>
-                    <a class="buttonFace">Load Font</a>
                 </fieldset>
     
                 <div id="cpMidi"></div>

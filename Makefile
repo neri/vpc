@@ -1,6 +1,6 @@
 .PHONY: all clean run test
 
-TARGETS := lib/vcpu.wasm lib/bios.bin lib/worker.js lib/xterm.js lib/xterm.js.map lib/xterm.css
+TARGETS := lib/vcpu.wasm lib/bios.bin lib/worker.js
 
 all: lib $(TARGETS)
 
@@ -26,12 +26,3 @@ tmp/worker.js: src/worker.ts src/iomgr.ts src/env.ts src/dev.ts src/vfd.ts src/v
 
 lib/worker.js: tmp/worker.js
 	npx webpack $? -o $@ --mode production
-
-lib/xterm.js: node_modules/xterm/dist/xterm.js
-	cp $? $@
-
-lib/xterm.js.map: node_modules/xterm/dist/xterm.js.map
-	cp $? $@
-
-lib/xterm.css: node_modules/xterm/dist/xterm.css
-	cp $? $@
