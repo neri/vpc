@@ -170,7 +170,7 @@ export class RuntimeEnvironment {
         this.dequeueUART();
         if (status > 1) {
             this.isRunning = false;
-            console.log(`CPU halted (${status})`);
+            console.log(`CPU halted (${status.toString(16)})`);
         } else if (this.isDebugging) {
             this.instance.exports.debug_dump(this.cpu);
             this.isPausing = true;

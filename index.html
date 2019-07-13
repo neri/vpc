@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=720">
+    <meta name="viewport" content="width=640">
     <title>Virtual Playground</title>
     <!-- <link rel="stylesheet" href="styles/style.css"> -->
     <style>
@@ -166,16 +166,25 @@
 
             const term = $('#terminal');
             term.write = function (message) {
-                this.value += message;
-                this.scrollTop = this.scrollHeight;
+                // TODO:
             }
             term.addEventListener('keydown', e => {
+                if (e.metaKey) return;
                 e.preventDefault();
-                if (e.key.length > 1) {
-                    window.worker.postMessage({command: 'key', data: e.keyCode });
-                } else {
-                    window.worker.postMessage({command: 'key', data: e.key.charCodeAt(0) });
+                let data = [e.keyCode];
+                if (e.key.length == 1) {
+                    let ascii = e.key.charCodeAt(0);
+                    if (e.ctrlKey && ascii >= 0x40 && ascii < 0x7F) {
+                        ascii &= 0x1F;
+                    }
+                    data.push(ascii);
                 }
+                window.worker.postMessage({command: 'key', data: data });
+            });
+            term.addEventListener('keyup', e => {
+                if (e.metaKey) return;
+                e.preventDefault();
+                window.worker.postMessage({command: 'key', data: [-e.keyCode] });
             });
             window.term = term;
             $('#canvasVGA').addEventListener('click', e => {
@@ -500,8 +509,8 @@
                 this.fontWidth = 8;
                 this.fontHeight = 16;
                 this.pal16 = [
-                        '#000', '#009', '#090', '#099', '#900', '#909', '#990', '#999',
-                        '#666', '#00F', '#0F0', '#0FF', '#F00', '#F0F', '#FF0', '#FFF', ];
+                        '#000', '#009', '#090', '#099', '#900', '#909', '#990', '#CCC',
+                        '#999', '#00F', '#0F0', '#0FF', '#F00', '#F0F', '#FF0', '#FFF', ];
 
                 this.pal = new Uint32Array(256);
                 this.canvas = dom;
@@ -539,7 +548,7 @@
                 });
                 devmgr.onCommand('vga', e => {
                     if (this.res[3]) {
-                        this.renderMode13(this.ctx, null, e, 0, 0);
+                        this.renderMode13(e);
                     } else {
                         this.renderMode03(e);
                     }
@@ -549,22 +558,34 @@
                 });
             }
             setMode(e) {
-                const { fontWidth, fontHeight } = this;
+                const { ctx, fontWidth, fontHeight } = this;
                 this.res = e;
                 const width = this.res[0];
                 const height = this.res[1];
-                this.cols = width / fontWidth;
-                this.rows = height / fontHeight;
-                this.canvas.width = width * this.scale;
-                this.canvas.height = height * this.scale;
-                this.canvas.style.width = `${width}px`;
-                this.canvas.style.height = `${height}px`;
-                this.tvram = new Uint32Array(80 * 50);
+                let scale;
+                if (this.res[3] & 1) {
+                    this.gvram = ctx.createImageData(width, height);
+                    this.canvas.width = width;
+                    this.canvas.height = height;
+                    this.canvas.style.width = `${640}px`;
+                    this.canvas.style.height = `${400}px`;
+                } else {
+                    scale = this.scale;
+                    this.cols = width / fontWidth;
+                    this.rows = height / fontHeight;
+                    this.tvram = new Uint32Array(this.cols * this.rows * 2);
+                    this.canvas.width = width * scale;
+                    this.canvas.height = height * scale;
+                    this.canvas.style.width = `${width}px`;
+                    this.canvas.style.height = `${height}px`;
+                }
             }
             updateCursor(newCursor) {
-                this.drawText(this.cursor, 0);
-                this.cursor = newCursor;
-                this.drawText(this.cursor, 1);
+                if ((this.res[3] & 1) == 0) {
+                    this.drawText(this.cursor, 0);
+                    this.cursor = newCursor;
+                    this.drawText(this.cursor, 1);
+                }
             }
             updateFont() {
                 const { fontWidth, fontHeight, scale } = this;
@@ -600,6 +621,7 @@
                 const fgColor = attr & 0xF;
                 if (cursor) {
                     ctx.drawImage(this.canvasBG, fgColor * fontWidth * scale, 0, fontWidth * scale, fontHeight * scale, cx * scale, cy * scale, fontWidth * scale, fontHeight * scale);
+                    ctx.drawImage(this.canvasFont, char * fontWidth * scale, bgColor * fontHeight * scale, fontWidth * scale, fontHeight * scale, cx * scale, cy * scale, fontWidth * scale, fontHeight * scale);
                 } else {
                     ctx.drawImage(this.canvasBG, bgColor * fontWidth * scale, 0, fontWidth * scale, fontHeight * scale, cx * scale, cy * scale, fontWidth * scale, fontHeight * scale);
                     ctx.drawImage(this.canvasFont, char * fontWidth * scale, fgColor * fontHeight * scale, fontWidth * scale, fontHeight * scale, cx * scale, cy * scale, fontWidth * scale, fontHeight * scale);
@@ -621,6 +643,7 @@
                             const fgColor = attr & 0xF;
                             if (q === this.cursor) {
                                 ctx.drawImage(this.canvasBG, fgColor * fontWidth * scale, 0, fontWidth * scale, fontHeight * scale, cx * scale, cy * scale, fontWidth * scale, fontHeight * scale);
+                                ctx.drawImage(this.canvasFont, char * fontWidth * scale, bgColor * fontHeight * scale, fontWidth * scale, fontHeight * scale, cx * scale, cy * scale, fontWidth * scale, fontHeight * scale);
                             } else {
                                 ctx.drawImage(this.canvasBG, bgColor * fontWidth * scale, 0, fontWidth * scale, fontHeight * scale, cx * scale, cy * scale, fontWidth * scale, fontHeight * scale);
                                 ctx.drawImage(this.canvasFont, char * fontWidth * scale, fgColor * fontHeight * scale, fontWidth * scale, fontHeight * scale, cx * scale, cy * scale, fontWidth * scale, fontHeight * scale);
@@ -629,7 +652,10 @@
                     }
                 }
             }
-            renderMode13(ctx, image, src, width, height) {
+            renderMode13(src) {
+                const { ctx, scale } = this;
+                const { width, height } = this.canvas;
+                const image = this.gvram;
                 let dst = new Uint32Array(image.data.buffer);
                 const size = width * height;
                 for (let i = 0; i < size; i++) {
@@ -778,6 +804,7 @@
                         <option value="">----</option>
                         <option value="../bin/osz.img" selected>osz</option>
                         <option value="../bin/fdos.img">FreeDOS</option>
+                        <option value="../bin/floppybird.img">Floppy Bird</option>
                     </select>
                 </label>
                 <input id="fileLocal" type="file" style="position: absolute; width:0px; height:0px; z-index: -1;">

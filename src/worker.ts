@@ -2,6 +2,7 @@
 'use strict';
 
 import { RuntimeEnvironment, WorkerInterface } from './env';
+import { PS2 } from './ps2';
 import { VGA } from './vga';
 import { VFD } from './vfd';
 import { MPU401 } from './mpu';
@@ -21,9 +22,12 @@ class WI implements WorkerInterface {
 
 const wi = new WI();
 const env = new RuntimeEnvironment(wi);
+const ps2 = new PS2(env);
 const floppy = new VFD(env);
 const vga = new VGA(env);
 let midi: MPU401;
+(self as any).env = env;
+(self as any).ps2 = ps2;
 
 (async function() {
     // wi.print('Loading CPU...\n');
@@ -109,7 +113,7 @@ onmessage = e => {
             env.reset(e.data.gen);
             break;
         case 'key':
-            env.uart.onRX(e.data.data);
+            ps2.onKey(e.data.data);
             break
         case 'nmi':
             env.nmi();

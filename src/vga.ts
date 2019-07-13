@@ -36,15 +36,20 @@ export class VGA {
     private vram_base: number;
     private vram_size: number;
     private vram_sign: number;
+    private _vtrace: number;
 
     constructor (env: RuntimeEnvironment) {
         this.env = env;
         this.pal_u32 = new Uint32Array(256);
         this.pal_u8 = new Uint8Array(this.pal_u32.buffer);
+        for (let i = 0; i < 256; i++) {
+            this.pal_u32[i] = 0xFF000000;
+        }
         this.crtcData = new Uint8Array(24);
         this.attrData = new Uint8Array(32);
         this.bgaData = new Uint16Array(5);
         this.bgaData[0] = VBE_DISPI_ID0;
+        this._vtrace = 0;
 
         // CRTC
         env.iomgr.on(0x3B4, (_, data) => this.crtcIndex = data, (_) => this.crtcIndex);
@@ -53,6 +58,10 @@ export class VGA {
         env.iomgr.on(0x3D4, (_, data) => this.crtcIndex = data, (_) => this.crtcIndex);
         env.iomgr.on(0x3D5, (_, data) => this.crtcDataWrite(this.crtcIndex, data),
             (_) => this.crtcData[this.crtcIndex]);
+
+        // Vtrace
+        env.iomgr.on(0x3BA, null, (_) => this.vtrace());
+        env.iomgr.on(0x3DA, null, (_) => this.vtrace());
 
         // Attribute Controller Registers
         env.iomgr.on(0x3C0, (_, data) => this.attrIndex = data, (_) => this.attrIndex);
@@ -109,6 +118,10 @@ export class VGA {
                     return 0xFFFF;
             }
         });
+    }
+    vtrace(): number {
+        this._vtrace ^= 0x08;
+        return this._vtrace;
     }
     crtcDataWrite(index: number, data: number): void {
         this.crtcData[this.crtcIndex] = data;

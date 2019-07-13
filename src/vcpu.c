@@ -1705,6 +1705,15 @@ static int cpu_step(cpu_state *cpu) {
                 return 0;
 
             // case 0x6B: // IMUL reg, r/m, imm8
+            // {
+            //     MODRM_W(cpu, seg, 1, &set);
+            //     int src1 = MOVSXW(READ_LE16(set.opr1));
+            //     int src2 = MOVSXB(FETCH8(cpu));
+            //     int dst = src1 * src2;
+            //     WRITE_LE16(&cpu->gpr[set.opr2], dst);
+            //     cpu->OF = cpu->CF = (dst != MOVSXW(dst));
+            //     return 0;
+            // }
 
             case 0x6C: // INSB
             {
