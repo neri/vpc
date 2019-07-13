@@ -136,7 +136,7 @@ export class RuntimeEnvironment {
         if (this.worker.hasClass('TextDecoder')) {
             return new TextDecoder('utf-8').decode(bytes);
         } else {
-            return String.fromCharCode.call(String, bytes);
+            return String.fromCharCode(...bytes);
         }
     }
     public reset(gen: number): void {

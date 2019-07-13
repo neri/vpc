@@ -206,7 +206,7 @@ i1000: ;; SET VIDEO MODE
     mov ds, cx
     mov [BDA_VGA_CURRENT_MODE], al
     xor ax, ax
-    mov [BDA_VGA_CURSOR], dx
+    mov [BDA_VGA_CURSOR], ax
     ret
 
 .mode_13:

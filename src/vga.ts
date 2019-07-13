@@ -112,14 +112,6 @@ export class VGA {
     }
     crtcDataWrite(index: number, data: number): void {
         this.crtcData[this.crtcIndex] = data;
-        // console.log('crtc', this.crtcIndex, data);
-        switch (this.crtcIndex) {
-            case 0x0A:
-            case 0x0B:
-            case 0x0F:
-                this.updateCursor();
-                break;
-        }
     }
     packedMode(xres: number, yres: number, bpp: number): number {
         return (xres & 0xFFF) | ((yres & 0xFFF) << 12) | (bpp << 24);
@@ -197,6 +189,7 @@ export class VGA {
         }
     }
     transferVGA() {
+        this.updateCursor();
         const sign = this.env.get_vram_signature(this.vram_base, this.vram_size);
         if (this.vram_sign != sign) {
             this.vram_sign = sign;

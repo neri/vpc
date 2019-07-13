@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=720">
     <title>Virtual Playground</title>
-    <link rel="stylesheet" href="styles/style.css">
+    <!-- <link rel="stylesheet" href="styles/style.css"> -->
     <style>
         :root {
             --main-screen-width: 640px;
@@ -508,11 +508,13 @@
                 this.ctx = this.canvas.getContext('2d');
                 this.ctx.scale(scale, scale);
                 this.res = [0, 0, 0, 0];
-                this.font = "16px/16px 'TerminalWebFont', 'Monaco', 'Courier New', 'Courier', monospace";
+                this.font = "15px/16px 'TerminalWebFont', 'Monaco', 'Consolas', 'Courier New', 'Courier', monospace";
                 this.cursor = 0xFFFF;
 
                 this.updateFont();
-                document.fonts.ready.then(() => this.updateFont());
+                if (document.fonts) {
+                    document.fonts.ready.then(() => this.updateFont());
+                }
 
                 this.canvasBG = document.createElement('canvas');
                 do {
@@ -567,7 +569,7 @@
             updateFont() {
                 const { fontWidth, fontHeight, scale } = this;
                 this.canvasFont = document.createElement('canvas');
-                this.canvasFont.width = fontWidth * 128 * scale;
+                this.canvasFont.width = fontWidth * 256 * scale;
                 this.canvasFont.height = fontHeight * 16 * scale;
                 const ctx = this.canvasFont.getContext('2d');
                 ctx.font = this.font;
@@ -576,7 +578,7 @@
                 for (let i = 0; i < 16; i++) {
                     const cy = i * fontHeight + fontHeight;
                     ctx.fillStyle = this.pal16[i];
-                    for (let j = 32; j < 127; j++) {
+                    for (let j = 32; j < 256; j++) {
                         const cx = j * fontWidth;
                         ctx.fillText(String.fromCharCode(j), cx, cy, fontWidth);
                     }
@@ -640,7 +642,7 @@
         window.addEventListener('DOMContentLoaded', () => {
             window.beep = new i8254Sound(window.devmgr);
             window.midi = new VirtualMidiDevice(window.devmgr, $('#cpMidi'));
-            window.vga = new VideoDevice(window.devmgr, $('#canvasVGA'), window.devicePixelRatio | 1);
+            window.vga = new VideoDevice(window.devmgr, $('#canvasVGA'), Math.ceil(window.devicePixelRatio) | 1);
             $('#click_to_start').addEventListener('click', e => {
                 if (!window.WebAssembly) {
                     alert("We are sorry, but WebAssembly is not supported.");

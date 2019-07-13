@@ -103,7 +103,7 @@ onmessage = e => {
             if (e.data.midi) {
                 midi = new MPU401(env, 0x330);
             }
-            setTimeout(() => start(e.data.gen, e.data.imageName), 10);
+            setTimeout(() => start(e.data.gen, e.data.imageName), 100);
             break;
         case 'reset':
             env.reset(e.data.gen);
