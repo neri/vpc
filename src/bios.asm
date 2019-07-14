@@ -911,6 +911,8 @@ i1A00:
     mov ds, cx
     mov dx, [0x046C]
     mov cx, [0x046E]
+    xor al, al
+    xchg al, [0x0470]
     pop ds
     iret
 

@@ -207,7 +207,7 @@ export class VGA {
         }
     }
     updateCursor(): void {
-        let cursor = -1;
+        let cursor = 0xFFFF;
         const cursor_sl = this.crtcData[0x0A];
         // const cursor_sh = this.crtcData[0x0B];
         if ((cursor_sl & 0x20) == 0) {
