@@ -5,7 +5,42 @@ import { WorkerInterface, RuntimeEnvironment } from './env';
 
 const SCAN_DUMMY = 0x6F;
 
-const scan_table: number[] = [
+const codeTable = {
+    'AltLeft': 0x38,
+    'AltRight': 0xE038,
+    'ControlLeft': 0x1D,
+    'ControlRight': 0xE01D,
+    'ShiftLeft': 0x2A,
+    'ShiftRight': 0x36,
+    'KeyA': 0x1E,
+    'KeyB': 0x30,
+    'KeyC': 0x2E,
+    'KeyD': 0x20,
+    'KeyE': 0x12,
+    'KeyF': 0x21,
+    'KeyG': 0x22,
+    'KeyH': 0x23,
+    'KeyI': 0x17,
+    'KeyJ': 0x24,
+    'KeyK': 0x25,
+    'KeyL': 0x26,
+    'KeyM': 0x32,
+    'KeyN': 0x31, 
+    'KeyO': 0x18,
+    'KeyP': 0x19,
+    'KeyQ': 0x10,
+    'KeyR': 0x13,
+    'KeyS': 0x1f,
+    'KeyT': 0x14,
+    'KeyU': 0x16,
+    'KeyV': 0x2f,
+    'KeyW': 0x11,
+    'KeyX': 0x2d,
+    'KeyY': 0x15,
+    'KeyZ': 0x2c,
+};
+
+const scanTable: number[] = [
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0e, 0x0f, 0x00, 0x00, 0x00, 0x1c, 0x00, 0x00,
     0x2a, 0x1d, 0x38, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
     0x39, 0x00, 0x00, 0x00, 0x00, 0x4b, 0x48, 0x4d, 0x50, 0x00, 0x00, 0x00, 0x00, 0x52, 0x53, 0x00,
@@ -36,53 +71,64 @@ export class PS2 {
 
         env.iomgr.on(0x0060, (_, data) => {
             // TODO:
-        }, (_) => {
-            if (this.o_fifo.length > 0) {
-                return this.o_fifo.shift();
-            } else {
-                return 0xFF;
-            }
-        });
+        }, (_) => this.o_fifo.shift() || 0);
         env.iomgr.on(0x0064, (_, data) => this.command(data), (_) => {
             return 0
             | ((this.o_fifo.length > 0) ? 1 : 0)
             | ((this.i_fifo.length > 0) ? 2 : 0)
         });
-        env.iomgr.onw(0x64, null, (_) => this.o_fifo.shift() | 0);
+        env.iomgr.onw(0x64, undefined, (_) => this.o_fifo.shift() || 0);
     }
     private command(data: number): void {
         switch (data) {
             // TODO:
         }
     }
-    onKey(fifo: number[]): void {
-        let data: number;
-        const code = fifo.shift();
-        if (code > 0) {
-            const asc = fifo.shift();
-            data = scan_table[code];
-            if (asc) {
-                data |= (asc << 8);
-            } else {
-                switch (code) {
-                    case 0x08:
-                    case 0x09:
-                    case 0x0D:
-                    case 0x1B:
-                        data |= (code << 8);
-                        break;
-                }
-            }
-            if (data) {
-                this.o_fifo.push(data);
-                this.env.pic.raiseIRQ(1);    
-            }
+    onKey(e: any): void {
+        const { type, key, code, keyCode, ctrlKey, altKey } = e;
+        let prefix: number = 0;
+        let scancode: number = codeTable[code];
+        if (!scancode) {
+            scancode = scanTable[keyCode];
+        }
+        if (scancode > 0xE000 && scancode < 0xE07F) {
+            scancode &= 0x7F;
+            prefix = 0xE0;
+        }
+        let ascii: number = (key.length == 1) ? key.charCodeAt(0) : 0;
+        if (ctrlKey && ascii >= 0x40 && ascii <= 0x80) {
+            ascii &= 0x1F;
+        }
+        if (ascii) {
+            scancode |= (ascii << 8);
         } else {
-            data = scan_table[-code];
-            if (data) {
-                this.o_fifo.push(0x80 | data);
-                this.env.pic.raiseIRQ(1);
+            switch (keyCode) {
+            case 0x08:
+            case 0x09:
+            case 0x0D:
+            case 0x1B:
+                    scancode |= (keyCode << 8);
+                break;
             }
+        }
+
+        if (scancode == 0 && ascii != 0) {
+            scancode = SCAN_DUMMY;
+        }
+
+        switch (type) {
+        case 'keydown':
+            break;
+        case 'keyup':
+            scancode |= 0x80;
+            break;
+        }
+        if (scancode & 0x7F) {
+            if (prefix) {
+                this.o_fifo.push(prefix);
+            }
+            this.o_fifo.push(scancode);
+            this.env.pic.raiseIRQ(1);
         }
     }
 }

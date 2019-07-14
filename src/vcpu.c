@@ -498,6 +498,7 @@ static int FAR_JUMP(cpu_state *cpu, uint16_t new_sel, uint32_t new_eip) {
     int status = LOAD_SEL(cpu, &cpu->CS, new_sel);
     if (status) return status;
     cpu->EIP = new_eip;
+    if (new_sel == 0 && new_eip == 0) return cpu_status_gpf;
     return 0;
 }
 
@@ -508,6 +509,7 @@ static int RETF(cpu_state *cpu, uint16_t n) {
     int status = LOAD_SEL(cpu, &cpu->CS, new_sel);
     if (status) return status;
     cpu->EIP = new_eip;
+    if (new_sel == 0 && new_eip == 0) return cpu_status_gpf;
     return 0;
 }
 
@@ -526,6 +528,22 @@ static int INVOKE_INT(cpu_state *cpu, int n) {
     PUSHW(cpu, old_eip);
     cpu->TF = 0;
     return 0;
+}
+
+static void LOAD_FLAGS(cpu_state *cpu, int value) {
+    cpu->eflags = (value & cpu->flags_mask) | cpu->flags_mask1;
+}
+
+static int IRET(cpu_state *cpu) {
+    uint32_t new_eip = POPW(cpu);
+    uint32_t new_sel = POPW(cpu);
+    uint32_t new_fl = POPW(cpu);
+    int status = LOAD_SEL(cpu, &cpu->CS, new_sel);
+    if (status) return status;
+    cpu->EIP = new_eip;
+    LOAD_FLAGS(cpu, new_fl);
+    if (new_sel == 0 && new_eip == 0) return cpu_status_gpf;
+    return cpu_status_inta;
 }
 
 static int SETF8(cpu_state *cpu, int value) {
@@ -555,22 +573,22 @@ static int SETF32(cpu_state *cpu, int value) {
     return value;
 }
 
-static void LOAD_FLAGS(cpu_state *cpu, int value) {
-    cpu->eflags = (value & cpu->flags_mask) | cpu->flags_mask1;
-}
 
 
 typedef struct {
     uint32_t linear;
     uint32_t offset;
     union {
-        struct {
-            uint8_t modrm, sib;
-        };
+        uint8_t modrm;
         struct {
             uint8_t rm:3;
             uint8_t reg:3;
             uint8_t mod:2;
+        };
+    };
+    union {
+        uint8_t sib;
+        struct {
             uint8_t base:3;
             uint8_t index:3;
             uint8_t scale:2;
@@ -2338,7 +2356,10 @@ static int cpu_step(cpu_state *cpu) {
                 return RETF(cpu, 0);
 
             case 0xCC: // INT 3
-                return INVOKE_INT(cpu, 3);
+            {
+                int result = INVOKE_INT(cpu, 3);
+                return result ? result : cpu_status_pause;
+            }
 
             case 0xCD: // INT
                 return INVOKE_INT(cpu, FETCH8(cpu));
@@ -2350,16 +2371,7 @@ static int cpu_step(cpu_state *cpu) {
                 return 0;
 
             case 0xCF: // IRET
-            {
-                uint32_t ret_eip = POPW(cpu);
-                uint32_t ret_cs = POPW(cpu);
-                uint32_t ret_fl = POPW(cpu);
-                int status = LOAD_SEL(cpu, &cpu->CS, ret_cs);
-                if (status) return status;
-                cpu->EIP = ret_eip;
-                LOAD_FLAGS(cpu, ret_fl);
-                return cpu_status_inta;
-            }
+                return IRET(cpu);
 
             case 0xD0: // shift r/m, 1
             case 0xD1: // shift r/m, 1

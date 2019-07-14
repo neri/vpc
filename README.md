@@ -33,13 +33,14 @@ A PC Emulator implemented by WebAssembly.
 
 ## Supported Software
 
-|OS|Status|
+|System|Status|
 |-|-|
 |osz|It seems working|
 |FreeDOS (16bit)|It seems working|
 |FreeDOS (32bit)|failed|
 |elks|failed|
 |BootChess|buggy|
+|[Floppy Bird](https://github.com/icebreaker/floppybird)|Needs a patch|
 
 ## License
 

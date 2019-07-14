@@ -67,9 +67,9 @@ export class RuntimeEnvironment {
         this.rtc = new RTC(this);
         this.uart = new UART(this, 0x3F8, 4);
 
-        this.iomgr.onw(0, null, (_) => Math.random() * 65535);
-        this.iomgr.onw(0xFC00, null, (_) => this.memoryConfig[0]);
-        this.iomgr.onw(0xFC02, null, (_) => this.memoryConfig[1]);
+        this.iomgr.onw(0, undefined, (_) => Math.random() * 65535);
+        this.iomgr.onw(0xFC00, undefined, (_) => this.memoryConfig[0]);
+        this.iomgr.onw(0xFC02, undefined, (_) => this.memoryConfig[1]);
     }
     public loadCPU(wasm: WebAssembly.Instance): void {
         this.instance = wasm;
@@ -217,11 +217,11 @@ export class RuntimeEnvironment {
     public dump(base: number): void {
         const addrToHex = (n: number) => ('000000' + n.toString(16)).substr(-6);
         const toHex = (n: number) => ('00' + n.toString(16)).substr(-2);
-        let lines = [];
+        let lines: string[] = [];
         for (let i = 0; i < 16; i++) {
             const offset = base + i * 16;
             let line = [addrToHex(offset)];
-            let chars = [];
+            let chars: string[] = [];
             for (let j = 0; j < 16; j++) {
                 const c = this._memory[this.vmem + offset + j];
                 line.push(toHex(c));

@@ -101,8 +101,8 @@ export class VPIC {
         }
     }
     public dequeueIRQ(): number {
-        if (this.irq.length > 0) {
-            const global_irq = this.irq.shift();
+        const global_irq = this.irq.shift();
+        if (global_irq != null) {
             const port = global_irq >> 3;
             const local_irq = global_irq & 7;
             const mask = 1 << local_irq;
@@ -226,9 +226,9 @@ export class UART {
         this.fifo_o = [];
         this.fifo_i = [];
         env.iomgr.on(base, (_, data) => this.fifo_o.push(data),
-            (_) => (this.fifo_i.length > 0) ? this.fifo_i.shift() : 0);
+            (_) => this.fifo_i.shift() || 0);
         env.iomgr.on(base + 1, (_, data) => this.IER = data, (_) => this.IER);
-        env.iomgr.on(base + 5, null, (_) => 0x20 | ((this.fifo_i.length > 0) ? 1 : 0));
+        env.iomgr.on(base + 5, undefined, (_) => 0x20 | ((this.fifo_i.length > 0) ? 1 : 0));
     }
     public dequeueTX(): number[] {
         const result = this.fifo_o.slice();

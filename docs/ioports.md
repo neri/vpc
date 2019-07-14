@@ -28,6 +28,11 @@
 |-|-|-|-|
 |0000|WORD|RO|Read Random Number|
 
+### 0064: PS/2 Native Data
+
+* Lower byte is scan code same as standard port, Higher byte is ascii code reported by web browser.
+* For technical reasons, scan codes of some keys are different from standards.
+
 ### FCxx: System Port
 
 |Address|Size|Read/Write|Description|

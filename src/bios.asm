@@ -49,6 +49,12 @@
 %define BDA_KBD_BUFF_MASK   0x001F
 %define BDA_VGA_CURRENT_MODE    0x0049
 %define BDA_VGA_CURSOR      0x0050
+%define BDA_KBD_MODE_TYPE   0x0096
+
+%define KBD_MODE_CLEAR_MASK 0xFC
+%define KBD_MODE_LAST_E1    0x02
+%define KBD_MODE_LAST_E0    0x02
+%define KBD_TYPE_ENHANCED   0x10
 
 %define ARGV 0x0080
 
@@ -63,7 +69,8 @@ banner:
 _int10_ftbl:
     dw i1000, i1001, i1002, i1003, i1004, i1005, i1006, i1007
     dw i1008, i1009, i100A, i100B, i100C, i100D, i100E, i100F
-    dw i1010, i1011, i1012, i1013
+    dw i1010, i1011, i1012, i1013, i1014, i1015, i1016, i1017
+    dw i1018, i1019, i101A, i101B, i101C, i101D, i101E, i101F
 _int10_etbl:
 
 
@@ -110,22 +117,25 @@ _irq1:
     mov bx, ax
     mov ah, 0x4F
     int 0x15
+    cmp al, 0xE1
+    jz .E1
+    cmp al, 0xE0
+    jz .E0
+    mov bl, al
+    and al, 0x7F
     cmp al, 0x1D
     jz .ctrl1
-    cmp al, 0x9D
-    jz .ctrl0
     cmp al, 0x2A
+    jz .shift2
+    cmp al, 0x36
     jz .shift1
-    cmp al, 0xAA
-    jz .shift0
     cmp al, 0x38
     jz .alt1
-    cmp al, 0xB8
-    jz .alt0
-    or al, al
+    or bl, bl
     js .loop
-    mov ah, al
-    mov al, bh
+    mov ax, bx
+    xchg al, ah
+    and byte [BDA_KBD_MODE_TYPE], KBD_MODE_CLEAR_MASK
     mov bx, [BDA_KBD_BUFF_HEAD]
     mov di, [BDA_KBD_BUFF_TAIL]
     lea cx, [di + 2 - BDA_KBD_BUFF_BEGIN]
@@ -136,25 +146,29 @@ _irq1:
     mov [di], ax
     mov [BDA_KBD_BUFF_TAIL], cx
     jmp .loop
+.E1:
+    or byte [BDA_KBD_MODE_TYPE], KBD_MODE_LAST_E1
+    jmp .loop
+.E0:
+    or byte [BDA_KBD_MODE_TYPE], KBD_MODE_LAST_E0
+    jmp .loop
 .ctrl1:
     mov al, 0x08
-    jmp .shift_down
+    jmp .shift_mask
 .shift1:
-    mov al, 0x03
-    jmp .shift_down
+    mov al, 0x01
+    jmp .shift_mask
+.shift2:
+    mov al, 0x02
+    jmp .shift_mask
 .alt1:
     mov al, 0x04
-.shift_down:
+    jmp .shift_mask
+.shift_mask:
+    or bl, bl
+    js .shift_up
     or [BDA_KBD_SHIFT], al
     jmp .loop
-.ctrl0:
-    mov al, 0x08
-    jmp .shift_up
-.shift0:
-    mov al, 0x03
-    jmp .shift_up
-.alt0:
-    mov al, 0x04
 .shift_up:
     not al
     and [BDA_KBD_SHIFT], al
@@ -258,6 +272,36 @@ i10_caller:
     mov bx, [_int10_ftbl + bx]
     push bx
     mov bx, [bp + STK_BX]
+    ret
+
+
+i1004:
+i1005:
+i100A:
+i100B:
+i100C:
+i100D:
+i1010:
+i1011:
+i1012:
+i1014:
+i1015:
+i1016:
+i1017:
+i1018:
+i1019:
+i101B:
+i101C:
+i101D:
+i101E:
+i101F:
+    ; db 0xF1
+    ret
+
+i101A:
+    ; mov bx, 0x0808
+    ; mov [bp+STK_BX], bx
+    ; mov [bp+STK_AX], ah
     ret
 
 
@@ -365,19 +409,6 @@ i1001:
     out dx, al
     ret
 
-i1004:
-i1005:
-i1008:
-i100A:
-i100B:
-i100C:
-i100D:
-i1010:
-i1011:
-i1012:
-;   db 0xF1
-    ret
-
 
 i1002:
     mov ax, BDA_SEG
@@ -447,7 +478,6 @@ i1013:
     jae .end
     cmp dl, 80
     jae .end
-    call i1002
     xor bx, bx
     mov es, bx
     mov ds, [bp + STK_ES]
@@ -458,6 +488,17 @@ i1013:
     loop .loop
     call i1002
 .end:
+    ret
+
+
+i1008:
+    mov dx, [BDA_VGA_CURSOR]
+    call _bios_cursor_addr
+    mov bx, ax
+    mov cx, 0xB800
+    mov es, cx
+    mov ax, [es:bx]
+    mov [bp+STK_AX], ax
     ret
 
 
@@ -637,6 +678,9 @@ _int13:
 
     cmp ah, 0
     jnz .no_00
+    mov dx, VPC_FD_PORT
+    xor ax, ax
+    out dx, ax
     jmp .end
 .no_00:
     cmp ah, 0x01
@@ -687,9 +731,10 @@ _int13_get_drive_param:
     mov dx, VPC_FD_PORT
     xor ax, ax
     out dx, ax
-    in ax, dx
+    add dl, 6
+    in al, dx
     mov [bp + STK_BX], al
-    add dl, 7
+    inc dx
     in al, dx
     mov [bp + STK_DX + 1], al
     inc dx
@@ -759,9 +804,9 @@ _int13_io:
     out dx, ax
     pause
     in ax, dx
-    or ax, ax
+    or al, al
     jz .skip
-    mov ah, 0x80
+    mov ah, al
 .skip:
     mov dx, VPC_FD_PORT + 6
     in al, dx
@@ -1168,23 +1213,11 @@ __set_vram:
     call _play_sound
 
 
-; _vga_test:
-;     mov ax, 0xA000
-;     mov es, ax
-;     xor di, di
-;     mov cx, 320 * 200 / 2
-; .loop:
-;     in ax, 0
-;     stosw
-;     loop .loop
-;     mov cx, 100
-;     call _bios_wait
-;     jmp _vga_test
-
-
     mov dl, 0
     ;; read MBR from disk
 _int19:
+    xor ax, ax
+    int 0x13
     xor ax, ax
     mov ds, ax
     mov es, ax
@@ -1194,6 +1227,8 @@ _int19:
     mov cx, 0x0001
     mov dh, 0x00
     mov bx, sp
+    xor si, si
+    xor di, di
     int 0x13
     jc .fail
 ;    cmp word [es:bx+0x01FE], 0xAA55

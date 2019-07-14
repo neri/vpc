@@ -3,7 +3,7 @@
 import { RuntimeEnvironment } from './env';
 
 export class MPU401 {
-    private lastStatus: number;
+    private lastStatus: number | null;
     private outputBuffer: number[];
     private inputBuffer: number[];
     private env: RuntimeEnvironment;
@@ -51,7 +51,7 @@ export class MPU401 {
             }
         } else {
             if (this.outputBuffer.length == 0) {
-                if (this.lastStatus) {
+                if (this.lastStatus != null) {
                     // Running Status
                     this.outputBuffer.push(this.lastStatus);
                 } else {
