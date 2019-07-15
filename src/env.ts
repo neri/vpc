@@ -67,9 +67,9 @@ export class RuntimeEnvironment {
         this.rtc = new RTC(this);
         this.uart = new UART(this, 0x3F8, 4);
 
-        this.iomgr.onw(0, null, (_) => Math.random() * 65535);
-        this.iomgr.onw(0xFC00, null, (_) => this.memoryConfig[0]);
-        this.iomgr.onw(0xFC02, null, (_) => this.memoryConfig[1]);
+        this.iomgr.onw(0, undefined, (_) => Math.random() * 65535);
+        this.iomgr.onw(0xFC00, undefined, (_) => this.memoryConfig[0]);
+        this.iomgr.onw(0xFC02, undefined, (_) => this.memoryConfig[1]);
     }
     public loadCPU(wasm: WebAssembly.Instance): void {
         this.instance = wasm;
@@ -136,7 +136,7 @@ export class RuntimeEnvironment {
         if (this.worker.hasClass('TextDecoder')) {
             return new TextDecoder('utf-8').decode(bytes);
         } else {
-            return String.fromCharCode.call(String, bytes);
+            return String.fromCharCode(...bytes);
         }
     }
     public reset(gen: number): void {
@@ -159,18 +159,18 @@ export class RuntimeEnvironment {
         this.cont();
     }
     public cont(): void {
-        if (this.period) {
+        if (this.period > 0) {
             const now = new Date().valueOf();
-            const expected = this.lastTick + this.period;
-            if (now > expected) {
+            for (let expected = this.lastTick + this.period; now >= expected; expected += this.period) {
                 this.pic.raiseIRQ(0);
-                this.lastTick = now;
+                this.lastTick = expected;
             }
         }
         const status: number = this.instance.exports.run(this.cpu);
+        this.dequeueUART();
         if (status > 1) {
             this.isRunning = false;
-            console.log(`CPU halted (${status})`);
+            console.log(`CPU halted (${status.toString(16)})`);
         } else if (this.isDebugging) {
             this.instance.exports.debug_dump(this.cpu);
             this.isPausing = true;
@@ -180,11 +180,17 @@ export class RuntimeEnvironment {
                 const now = new Date().valueOf();
                 const expected = this.lastTick + this.period;
                 timer = expected - now;
-                if (timer < 1) timer = 1;
+                if (timer < 0) timer = 0;
             } else {
                 timer = 1;
             }
             setTimeout(() => this.cont(), timer);
+        }
+    }
+    public dequeueUART(): void {
+        const cout = this.uart.dequeueTX();
+        if (cout.length > 0) {
+            this.worker.print(String.fromCharCode(...cout));
         }
     }
     public nmi(): void {
@@ -194,6 +200,7 @@ export class RuntimeEnvironment {
         } else {
             this.isDebugging = true;
         }
+        this.dequeueUART();
     }
     public setReg(regName: string, value: number) {
         const reg: number = this.regmap[regName];
@@ -210,11 +217,11 @@ export class RuntimeEnvironment {
     public dump(base: number): void {
         const addrToHex = (n: number) => ('000000' + n.toString(16)).substr(-6);
         const toHex = (n: number) => ('00' + n.toString(16)).substr(-2);
-        let lines = [];
+        let lines: string[] = [];
         for (let i = 0; i < 16; i++) {
             const offset = base + i * 16;
             let line = [addrToHex(offset)];
-            let chars = [];
+            let chars: string[] = [];
             for (let j = 0; j < 16; j++) {
                 const c = this._memory[this.vmem + offset + j];
                 line.push(toHex(c));
@@ -229,14 +236,7 @@ export class RuntimeEnvironment {
         }
         console.log(lines.join('\n'));
     }
-    // public vga_render(): void {
-    //     const newValue = this.instance.exports.vram_check();
-    //     if (this.vgaCheck != newValue) {
-    //         this.vgaCheck = newValue;
-    //         const v: number = this.instance.exports.qvga_render();
-    //         // const a = this._memory.slice(v, v + 320 * 200 * 4);
-    //         const a = new Uint8Array(this._memory.buffer, v, 320 * 200 * 4);
-    //         this.worker.postCommand('vga', a);
-    //     }
-    // }
+    public get_vram_signature(base: number, size: number): number {
+        return this.instance.exports.get_vram_signature(base, size);
+    }
 }

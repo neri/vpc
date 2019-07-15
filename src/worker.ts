@@ -1,9 +1,11 @@
 // Virtual Playground Worker
-
 'use strict';
 
 import { RuntimeEnvironment, WorkerInterface } from './env';
+import { PS2 } from './ps2';
+import { VGA } from './vga';
 import { VFD } from './vfd';
+import { MPU401 } from './mpu';
 
 const ctx: Worker = self as any;
 class WI implements WorkerInterface {
@@ -20,9 +22,15 @@ class WI implements WorkerInterface {
 
 const wi = new WI();
 const env = new RuntimeEnvironment(wi);
+const ps2 = new PS2(env);
 const floppy = new VFD(env);
+const vga = new VGA(env);
+let midi: MPU401;
+(self as any).env = env;
+(self as any).ps2 = ps2;
 
 (async function() {
+    // wi.print('Loading CPU...\n');
     console.log('Loading CPU...');
     await fetch('./vcpu.wasm')
         .then(res => {
@@ -32,6 +40,7 @@ const floppy = new VFD(env);
         .then(buffer => WebAssembly.instantiate(buffer, env))
         .then(wasm => env.loadCPU(wasm.instance))
     
+    // wi.print('Loading BIOS...\n');
     console.log('Loading BIOS...');
     await fetch('./bios.bin')
         .then(res => {
@@ -56,7 +65,8 @@ const floppy = new VFD(env);
 })();
 
 const loadImage = async (imageName: string) => {
-    console.log(`Loading image (${imageName})...`);
+    // wi.print('Loading image...\n');
+    console.log(`Loading image ${imageName}`);
     return fetch(imageName)
         .then(res => {
             if (!res.ok) { throw Error(res.statusText); }
@@ -94,13 +104,16 @@ onmessage = e => {
         case 'start':
             env.initMemory(e.data.mem);
             env.iomgr.ioRedirectMap = e.data.ioRedirectMap;
-            setTimeout(() => start(e.data.gen, e.data.imageName), 10);
+            if (e.data.midi) {
+                midi = new MPU401(env, 0x330);
+            }
+            setTimeout(() => start(e.data.gen, e.data.imageName), 100);
             break;
         case 'reset':
             env.reset(e.data.gen);
             break;
         case 'key':
-            env.uart.onRX(e.data.data);
+            ps2.onKey(e.data.data);
             break
         case 'nmi':
             env.nmi();

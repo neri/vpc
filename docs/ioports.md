@@ -7,20 +7,31 @@
 |0000|WORD|RO|NO|Random Number Generator|
 |0020-0021|BYTE|R/W|YES|i8259 PIC #1|
 |0040-0043|BYTE|R/W|YES|i8254 Timer|
+|0060|BYTE|R/W|YES|PS/2 Data (Dummy)|
 |0061|BYTE|R/W|YES|System Port (Beep)|
+|0064|BYTE|R/W|YES|PS/2 Command/Status|
+|0064|WORD|RO|NO|PS/2 Data (Native)|
 |0070-0071|BYTE|R/W|YES|RTC/CMOS RAM|
 |00A0-00A1|BYTE|R/W|YES|i8259 PIC #2|
-|03C8-03C9|BYTE|WO|YES|VGA DAC|
+|01CE-01CF|WORD|R/W|BOCHS|Bochs Graphics|
+|0330-0331|BYTE|R/W|MPU|MPU-401|
+|03B0-03DF|BYTE|VARY|VGA|VGA|
 |03F8-03FF|BYTE|R/W|YES|UART COM1|
 |FCxx|WORD|R/W|NO|System Port|
-|FDxx|MIXED|R/W|NO|Floppy|
+|FDxx|VARY|R/W|NO|Floppy|
 
 ## Original devices
+
 ### 0000: Random Number Generator
 
 |Address|Size|Read/Write|Description|
 |-|-|-|-|
 |0000|WORD|RO|Read Random Number|
+
+### 0064: PS/2 Native Data
+
+* Lower byte is scan code same as standard port, Higher byte is ascii code reported by web browser.
+* For technical reasons, scan codes of some keys are different from standards.
 
 ### FCxx: System Port
 

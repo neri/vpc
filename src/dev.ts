@@ -82,15 +82,18 @@ export class VPIC {
             if ((this.IRR[port] & mask) && (this.IMR[port] & mask) == 0) {
                 this.IRR[port] &= ~mask;
                 this.ISR[port] |= mask;
-                const vector = (this.ICW[port * 4 + 1] & 0xF8) + i;
-                this.irq.push(vector);
+                this.irq.push(port * 8 + i);
             }
         }
     }
     public raiseIRQ(n: number): void {
         if (n < 8) {
-            this.IRR[0] |= (1 << n);
-            this.enqueue(0);
+            if (n == 0) {
+                this.irq.push(0);
+            } else {
+                this.IRR[0] |= (1 << n);
+                this.enqueue(0);
+            }
         } else if (n < 16) {
             this.ISR[1] |= (1 << (n - 8));
             this.IRR[0] |= this.ICW[2];
@@ -98,8 +101,17 @@ export class VPIC {
         }
     }
     public dequeueIRQ(): number {
-        const result = this.irq.shift();
-        return result || 0;
+        const global_irq = this.irq.shift();
+        if (global_irq != null) {
+            const port = global_irq >> 3;
+            const local_irq = global_irq & 7;
+            const mask = 1 << local_irq;
+            this.ISR[port] |= mask;
+            const vector = (this.ICW[port * 4 + 1] & 0xF8) | local_irq;
+            return vector;
+        } else {
+            return 0;
+        }
     }
 }
 
@@ -193,8 +205,7 @@ export class VPIT {
         this.env.setTimer(0);
     }
     public setTimer(): void {
-        const period = Math.ceil(this.getCounter(0) / 1193.181);
-        this.env.setTimer(period);
+        this.env.setTimer(this.getCounter(0) / 1193.181);
     }
 }
 
@@ -204,6 +215,7 @@ export class VPIT {
  */
 export class UART {
     private env: RuntimeEnvironment;
+    private fifo_o: number[];
     private fifo_i: number[];
     private irq: number;
     private IER: number;
@@ -211,18 +223,17 @@ export class UART {
     constructor (env: RuntimeEnvironment, base: number, irq: number) {
         this.env = env;
         this.irq = irq;
+        this.fifo_o = [];
         this.fifo_i = [];
-        env.iomgr.on(base, (_, data) => {
-            env.worker.print(String.fromCharCode(data));
-        }, (_) => {
-            if (this.fifo_i.length > 0) {
-                return this.fifo_i.shift();
-            } else {
-                return 0;
-            }
-        });
+        env.iomgr.on(base, (_, data) => this.fifo_o.push(data),
+            (_) => this.fifo_i.shift() || 0);
         env.iomgr.on(base + 1, (_, data) => this.IER = data, (_) => this.IER);
-        env.iomgr.on(base + 5, null, (_) => 0x20 | ((this.fifo_i.length > 0) ? 1 : 0));
+        env.iomgr.on(base + 5, undefined, (_) => 0x20 | ((this.fifo_i.length > 0) ? 1 : 0));
+    }
+    public dequeueTX(): number[] {
+        const result = this.fifo_o.slice();
+        this.fifo_o = [];
+        return result;
     }
     public onRX(data: number): void {
         this.fifo_i.push(data & 0xFF);
@@ -245,15 +256,15 @@ export class RTC {
         env.iomgr.on(0x70, (_, data) => this.index = data, (port) => this.index);
         env.iomgr.on(0x71, (_, data) => this.writeRTC(data), (_) => this.readRTC());
     }
-    public writeRTC(data: number): void {
+    writeRTC(data: number): void {
         this.ram[this.index] = data;
     }
-    public readRTC(): number {
-        const result = this._readRTC();
-        console.log('read_rtc', this.index, ('00' + result.toString(16)).slice(-2));
-        return result;
-    }
-    private _readRTC(): number {
+    // readRTC(): number {
+    //     const result = this._readRTC();
+    //     console.log('read_rtc', this.index, ('00' + result.toString(16)).slice(-2));
+    //     return result;
+    // }
+    readRTC(): number {
         const toBCD = (n: number) => {
             const a1 = n % 10;
             const a2 = (n / 10) | 0;

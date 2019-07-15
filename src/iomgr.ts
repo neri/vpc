@@ -24,13 +24,13 @@ export class IOManager {
         this.iwHandlers = [];
         this.ioRedirectMap = new Uint32Array(2048);
     }
-    public on(port: number, callback1: outputHandler, callback2: inputHandler = null) {
-        this.obHandlers[port & 0xFFFF] = callback1;
-        this.ibHandlers[port & 0xFFFF] = callback2;
+    public on(port: number, callback1?: outputHandler, callback2?: inputHandler) {
+        if (callback1 != null) this.obHandlers[port & 0xFFFF] = callback1;
+        if (callback2 != null) this.ibHandlers[port & 0xFFFF] = callback2;
     }
-    public onw(port: number, callback1: outputHandler, callback2: inputHandler = null) {
-        this.owHandlers[port & 0xFFFF] = callback1;
-        this.iwHandlers[port & 0xFFFF] = callback2;
+    public onw(port: number, callback1?: outputHandler, callback2?: inputHandler) {
+        if (callback1 != null) this.owHandlers[port & 0xFFFF] = callback1;
+        if (callback2 != null) this.iwHandlers[port & 0xFFFF] = callback2;
     }
     public isRedirectRequired(port: number): boolean {
         return (this.ioRedirectMap[port >> 5] & (1 << (port & 31))) != 0;
