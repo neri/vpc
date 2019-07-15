@@ -42,7 +42,7 @@
 
 %define BDA_SEG             0x0040
 %define BDA_COMPORT         0x0000
-%define BDA_KBD_SHIFT       0x0019
+%define BDA_KBD_SHIFT       0x0017
 %define BDA_KBD_BUFF_HEAD   0x001A
 %define BDA_KBD_BUFF_TAIL   0x001C
 %define BDA_KBD_BUFF_BEGIN  0x001E
@@ -116,7 +116,9 @@ _irq1:
     in ax, 0x64
     mov bx, ax
     mov ah, 0x4F
+    stc
     int 0x15
+    jnc .loop
     cmp al, 0xE1
     jz .E1
     cmp al, 0xE0
@@ -153,7 +155,7 @@ _irq1:
     or byte [BDA_KBD_MODE_TYPE], KBD_MODE_LAST_E0
     jmp .loop
 .ctrl1:
-    mov al, 0x08
+    mov al, 0x04
     jmp .shift_mask
 .shift1:
     mov al, 0x01
@@ -162,12 +164,13 @@ _irq1:
     mov al, 0x02
     jmp .shift_mask
 .alt1:
-    mov al, 0x04
-    jmp .shift_mask
+    mov al, 0x08
+    ; jmp .shift_mask
 .shift_mask:
     or bl, bl
     js .shift_up
     or [BDA_KBD_SHIFT], al
+    mov ah, [BDA_KBD_SHIFT]
     jmp .loop
 .shift_up:
     not al
