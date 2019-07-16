@@ -1,8 +1,8 @@
 # Virtual Playground
 
-[![screen shot](images/ss1.png)](https://nerry.jp/vpc/)
-
 A PC Emulator implemented by WebAssembly.
+
+[![screen shot](images/ss1.png)](https://nerry.jp/vpc/)
 
 - [Preview website](https://nerry.jp/vpc/)
 - [Repository](https://github.com/neri/vpc)
@@ -10,6 +10,10 @@ A PC Emulator implemented by WebAssembly.
 ## THIS VERSION
 
 - THIS IS JUNK
+
+## Requirements
+
+- [WebAssembly](https://caniuse.com/#feat=wasm)
 
 ## Implemented hardware
 
