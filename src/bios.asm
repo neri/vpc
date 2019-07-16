@@ -170,7 +170,6 @@ _irq1:
     or bl, bl
     js .shift_up
     or [BDA_KBD_SHIFT], al
-    mov ah, [BDA_KBD_SHIFT]
     jmp .loop
 .shift_up:
     not al
@@ -1297,19 +1296,7 @@ _repl:
     cli
     hlt
 .no_cmd_u:
-    cmp al, 'b'
-    jnz .no_cmd_b
-    mov cx, 1000
-    call _bios_beep
-    mov cx, 200
-    call _bios_wait
-    xor cx,cx 
-    call _bios_beep
-    jmp .prompt
-.no_cmd_b:
 .bad_cmd:
-    mov si, bad_cmd_msg
-    call puts
     jmp .prompt
 
 
@@ -1447,10 +1434,7 @@ cls_msg:
     db 0x1b, "[H", 0x1b, "[J", 0
 
 boot_fail_msg:
-    db 10, "Boot failure", 10, 0
-
-bad_cmd_msg:
-    db "Bad command or file name", 10, 0
+    db 10, "Operating System not found", 10, 0
 
     alignb 2
 _boot_sound_data:

@@ -32,8 +32,6 @@ export class RuntimeEnvironment {
     isPausing: boolean;
     isRunning: boolean;
 
-    private vgaCheck: number;
-
     constructor(worker: WorkerInterface) {
         this.worker = worker;
         this.period = 0;
@@ -67,7 +65,8 @@ export class RuntimeEnvironment {
         this.rtc = new RTC(this);
         this.uart = new UART(this, 0x3F8, 4);
 
-        this.iomgr.onw(0, undefined, (_) => Math.random() * 65535);
+        this.iomgr.onw(0x0000, undefined, (_) => Math.random() * 65535);
+        this.iomgr.on(0x0CF9, (_port, _data) => this.reset(-1));
         this.iomgr.onw(0xFC00, undefined, (_) => this.memoryConfig[0]);
         this.iomgr.onw(0xFC02, undefined, (_) => this.memoryConfig[1]);
     }
