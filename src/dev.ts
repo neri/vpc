@@ -1,12 +1,7 @@
 // System devices
 
-import { WorkerInterface, RuntimeEnvironment } from './env';
+import { RuntimeEnvironment } from './env';
 import { IOManager } from './iomgr';
-
-interface IntervalTimerFunction {
-    setTimer(value: number): void;
-    setSound(freq: number): void;
-}
 
 /**
  * Programmable Interrupt Controller

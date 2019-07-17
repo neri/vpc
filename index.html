@@ -551,6 +551,7 @@
                 this.scale = scale;
                 this.fontWidth = 8;
                 this.fontHeight = 16;
+                this.lineHeight = this.fontHeight + 4;
                 this.pal16 = [
                         '#000', '#009', '#090', '#099', '#900', '#909', '#990', '#CCC',
                         '#999', '#00F', '#0F0', '#0FF', '#F00', '#F0F', '#FF0', '#FFF', ];
@@ -664,7 +665,7 @@ const unicodeMap = [
 0x03B1, 0x00DF, 0x0393, 0x03C0, 0x03A3, 0x03C3, 0x00B5, 0x03C4, 0x03A6, 0x0398, 0x03A9, 0x03B4, 0x221E, 0x03C6, 0x03B5, 0x2229,
 0x2261, 0x00B1, 0x2265, 0x2264, 0x2320, 0x2321, 0x00F7, 0x2248, 0x00B0, 0x2219, 0x00B7, 0x221A, 0x207F, 0x00B2, 0x25A0, 0x00A0,
 ];
-                const { fontWidth, fontHeight, scale } = this;
+                const { fontWidth, fontHeight, lineHeight, scale } = this;
 
                 this.canvasBG = document.createElement('canvas');
                 do {
@@ -681,16 +682,17 @@ const unicodeMap = [
                 do {
                     this.canvasFont = document.createElement('canvas');
                     this.canvasFont.width = fontWidth * 256 * scale;
-                    this.canvasFont.height = fontHeight * 16 * scale;
+                    this.canvasFont.height = lineHeight * 16 * scale;
                     const ctx = this.canvasFont.getContext('2d');
                     ctx.font = this.font;
                     ctx.textBaseline = 'bottom';
                     ctx.scale(scale, scale);
                     for (let i = 0; i < 16; i++) {
-                        const cy = i * fontHeight + fontHeight;
+                        const cy = i * lineHeight + fontHeight;
                         ctx.fillStyle = this.pal16[i];
                         for (let j = 0; j < 256; j++) {
                             const cx = j * fontWidth;
+                            ctx.clearRect(cx, i * lineHeight, fontWidth, fontHeight);
                             const uchar = String.fromCharCode(unicodeMap[j]);
                             ctx.fillText(uchar, cx, cy, fontWidth);
                         }
@@ -704,7 +706,7 @@ const unicodeMap = [
                 const wchar = this.tvram[at];
                 const char = wchar & 0xFF;
                 const attr = wchar >> 8;
-                const { ctx, fontWidth, fontHeight, scale, cols, rows } = this;
+                const { ctx, fontWidth, fontHeight, lineHeight, scale, cols, rows } = this;
                 const x = at % cols;
                 const y = (at / cols) | 0;
                 const cx = x * fontWidth;
@@ -713,16 +715,17 @@ const unicodeMap = [
                 const fgColor = attr & 0xF;
                 if (cursor) {
                     ctx.drawImage(this.canvasBG, fgColor * fontWidth * scale, 0, fontWidth * scale, fontHeight * scale, cx * scale, cy * scale, fontWidth * scale, fontHeight * scale);
-                    ctx.drawImage(this.canvasFont, char * fontWidth * scale, bgColor * fontHeight * scale, fontWidth * scale, fontHeight * scale, cx * scale, cy * scale, fontWidth * scale, fontHeight * scale);
+                    ctx.drawImage(this.canvasFont, char * fontWidth * scale, bgColor * lineHeight * scale, fontWidth * scale, fontHeight * scale, cx * scale, cy * scale, fontWidth * scale, fontHeight * scale);
                 } else {
                     ctx.drawImage(this.canvasBG, bgColor * fontWidth * scale, 0, fontWidth * scale, fontHeight * scale, cx * scale, cy * scale, fontWidth * scale, fontHeight * scale);
-                    ctx.drawImage(this.canvasFont, char * fontWidth * scale, fgColor * fontHeight * scale, fontWidth * scale, fontHeight * scale, cx * scale, cy * scale, fontWidth * scale, fontHeight * scale);
+                    ctx.drawImage(this.canvasFont, char * fontWidth * scale, fgColor * lineHeight * scale, fontWidth * scale, fontHeight * scale, cx * scale, cy * scale, fontWidth * scale, fontHeight * scale);
                 }
             }
             renderMode03(src) {
-                const { ctx, fontWidth, fontHeight, scale, cols, rows } = this;
+                const { ctx, fontWidth, fontHeight, lineHeight, scale, cols, rows } = this;
                 const fontWS = fontWidth * scale;
                 const fontHS = fontHeight * scale;
+                const lineHS = lineHeight * scale;
                 let p = 0, q = 0;
                 for (let i = 0; i < rows; i++) {
                     for (let j = 0; j < cols; j++, q++, p += 2) {
@@ -737,10 +740,10 @@ const unicodeMap = [
                             const fgColor = attr & 0xF;
                             if (q === this.cursor) {
                                 ctx.drawImage(this.canvasBG, fgColor * fontWS, 0, fontWS, fontHS, cx, cy, fontWS, fontHS);
-                                ctx.drawImage(this.canvasFont, char * fontWS, bgColor * fontHS, fontWS, fontHS, cx, cy, fontWS, fontHS);
+                                ctx.drawImage(this.canvasFont, char * fontWS, bgColor * lineHS, fontWS, fontHS, cx, cy, fontWS, fontHS);
                             } else {
                                 ctx.drawImage(this.canvasBG, bgColor * fontWS, 0, fontWS, fontHS, cx, cy , fontWS, fontHS);
-                                ctx.drawImage(this.canvasFont, char * fontWS, fgColor * fontHS, fontWS, fontHS, cx, cy, fontWS, fontHS);
+                                ctx.drawImage(this.canvasFont, char * fontWS, fgColor * lineHS, fontWS, fontHS, cx, cy, fontWS, fontHS);
                             }
                         }
                     }
@@ -822,6 +825,7 @@ const unicodeMap = [
             });
             $('#selDiskImage').addEventListener('change', e => {
                 if (window.worker) {
+                    $('#labelLocal').value = '';
                     loadDiskImage((blob) => {
                         worker.postMessage({command: 'attach', blob: blob});
                     })

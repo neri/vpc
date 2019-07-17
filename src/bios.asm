@@ -370,6 +370,7 @@ i100F:
 
 i1006:
 i1007:
+    db 0xF1
     or al, al
     jz .cls
     ret
@@ -1120,7 +1121,6 @@ __set_irq:
     out 0x21, al
     mov al, 0xFF
     out 0xA1, al
-    sti
 
 
     ;; init Timer
@@ -1154,7 +1154,8 @@ __set_irq:
     mov [ss:0x46C], ax
     xor ax, ax
     mov [ss:0x46F], ax
-
+    sti
+    hlt
 
     ;; ENABLE UART
     cli
