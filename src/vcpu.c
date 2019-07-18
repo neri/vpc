@@ -229,6 +229,7 @@ uint8_t *mem = NULL;
 
 /**
  * Initialize internal structures.
+ * 
  * THIS FUNCTION MUST BE CALLED BEFORE ALL OTHER FUNCTIONS.
  */
 WASM_EXPORT void *_init(uint32_t mb) {
@@ -312,7 +313,7 @@ static void WRITE_REG8(cpu_state *cpu, int index, uint8_t value) {
     *LEA_REG8(cpu, index) = value;
 }
 
-static uint8_t LOAD_REG8(cpu_state *cpu, int index) {
+static uint8_t READ_REG8(cpu_state *cpu, int index) {
     return *LEA_REG8(cpu, index);
 }
 
@@ -362,29 +363,28 @@ static void WRITE_LE32(void *la, uint32_t value) {
     }
 }
 
-#define OFFSET offset
 static uint8_t READ_MEM8(sreg_t *sreg, uint32_t offset) {
-    return mem[sreg->base + OFFSET];
+    return mem[sreg->base + offset];
 }
 
 static uint16_t READ_MEM16(sreg_t *sreg, uint32_t offset) {
-    return READ_LE16(mem + sreg->base + OFFSET);
+    return READ_LE16(mem + sreg->base + offset);
 }
 
 static uint32_t READ_MEM32(sreg_t *sreg, uint32_t offset) {
-    return READ_LE32(mem + sreg->base + OFFSET);
+    return READ_LE32(mem + sreg->base + offset);
 }
 
 static void WRITE_MEM8(sreg_t *sreg, uint32_t offset, int value) {
-    mem[sreg->base + OFFSET] = value;
+    mem[sreg->base + offset] = value;
 }
 
 static void WRITE_MEM16(sreg_t *sreg, uint32_t offset, uint16_t value) {
-    WRITE_LE16(mem + sreg->base + OFFSET, value);
+    WRITE_LE16(mem + sreg->base + offset, value);
 }
 
 static void WRITE_MEM32(sreg_t *sreg, uint32_t offset, uint32_t value) {
-    WRITE_LE32(mem + sreg->base + OFFSET, value);
+    WRITE_LE32(mem + sreg->base + offset, value);
 }
 
 static int MOVSXB(uint8_t b) {
@@ -1641,11 +1641,11 @@ static int cpu_step(cpu_state *cpu) {
                 return 0;
             
             case 0x54: // PUSH SP
-                if (cpu->cpu_gen >= cpu_gen_80286) {
-                    PUSHW(cpu, cpu->ESP);
+                if (cpu->cpu_gen < cpu_gen_80286) {
+                    cpu->SP -= 2;
+                    WRITE_MEM16(&cpu->SS, cpu->SP, cpu->SP);
                 } else {
-                    cpu->ESP -= 2;
-                    WRITE_MEM16(&cpu->SS, cpu->ESP, cpu->ESP);
+                    PUSHW(cpu, cpu->ESP);
                 }
                 return 0;
 
@@ -1695,6 +1695,7 @@ static int cpu_step(cpu_state *cpu) {
             }
 
             // case 0x62: // BOUND or EVEX
+
             // case 0x63: // ARPL or MOVSXD
 
             case 0x64: // prefix FS:
@@ -1884,7 +1885,7 @@ static int cpu_step(cpu_state *cpu) {
                 switch (set.size) {
                     case 0:
                         temp = *set.opr1b;
-                        *set.opr1b = LOAD_REG8(cpu, set.opr2);
+                        *set.opr1b = READ_REG8(cpu, set.opr2);
                         WRITE_REG8(cpu, set.opr2, temp);
                         return 0;
                     case 1:
@@ -3159,7 +3160,10 @@ static int cpu_step(cpu_state *cpu) {
                     case 0xCD:
                     case 0xCE:
                     case 0xCF:
-                        break;
+                        cpu->gpr[inst & 7] = __builtin_bswap32(cpu->gpr[inst & 7]);
+                        return 0;
+
+                        
                 }
             }
 

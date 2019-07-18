@@ -686,11 +686,6 @@ _int13:
     out dx, ax
     jmp .end
 .no_00:
-    cmp ah, 0x01
-    jnz .no_01
-    call _int13_get_drive_param
-    jmp .end
-.no_01:
     cmp ah, 0x02
     jnz .no_02
     call _int13_read
@@ -706,17 +701,26 @@ _int13:
     xor ah, ah
     jmp .end
 .no_04:
+    cmp ah, 0x08
+    jnz .no_08
+    call _int13_get_drive_param
+    jmp .end
+.no_08:
+    cmp ah, 0x15
+    jnz .no_15
+    mov ah, 0x02
+    jmp .end
+.no_15:
 
 .err:
-    mov ax, 0x8000
+    mov ah, 0x01
+    stc
 .end:
 
+    sbb dx, dx
     mov cx, [bp + STK_FLAGS]
     and cx, 0xFFFE
-    or ah, ah
-    jz .ok
-    inc cx
-.ok:
+    sub cx, dx
     mov [bp + STK_FLAGS], cx
 
     add sp, byte 2
@@ -729,6 +733,7 @@ _int13:
     pop ds
     pop es
     iret
+
 
 _int13_get_drive_param:
     mov dx, VPC_FD_PORT
@@ -746,9 +751,13 @@ _int13_get_drive_param:
     inc dx
     in al, dx
     mov [bp + STK_CX + 1], al
-    xor ax, ax
+    mov al, 1
     mov [bp + STK_DX], al
+    xor ax, ax
+    mov [bp + STK_DI], ax
+    mov [bp + STK_ES], ax
     ret
+
 
 _int13_set_chr:
     mov dx, VPC_FD_PORT + 6
@@ -789,16 +798,6 @@ _int13_read:
 _int13_write:
     mov si, 2
 _int13_io:
-;     mov dx, VPC_FD_PORT
-;     xor ax, ax
-;     out dx, ax
-;     in ax, dx
-;     or ax, ax
-;     jnz .dev_ok
-;     mov ax, 0x8000
-;     ret
-; .dev_ok:
-
     call _int13_set_chr
     call _int13_set_dma
 
@@ -816,6 +815,10 @@ _int13_io:
     mov cl, [bp + STK_AX]
     sub cl, al
     mov al, cl
+    or ah, ah
+    jz .noerror
+    stc
+.noerror:
     ret
 
 
