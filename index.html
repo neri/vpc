@@ -4,7 +4,6 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=640">
     <title>Virtual Playground</title>
-    <!-- <link rel="stylesheet" href="styles/style.css"> -->
     <style>
         :root {
             --main-screen-width: 640px;
@@ -23,7 +22,6 @@
             cursor: text;
             width: var(--main-screen-width);
             min-height: var(--main-screen-height);
-            background: rgba(0, 0, 0, 0.9);
         }
         
         #click_to_start {
@@ -156,10 +154,49 @@
 
         const $ = x => document.querySelector(x);
 
+        const loadDiskImage = async (callback) => {
+            const target = $('#selDiskImage');
+            const imageName = target.value;
+            if (!imageName.length) {
+                target.removeAttribute('disabled');
+                callback(null);
+                return;
+            }
+            target.setAttribute('disabled', true);
+            $('#labelLocal').value = 'Loading...';
+            console.log(`Loading image ${imageName}...`)
+            return fetch(imageName)
+                .then(res => {
+                    if (!res.ok) { throw Error(res.statusText); }
+                    return res.blob()
+                })
+                .then(blob => {
+                    return new Promise((resolve, _) => {
+                        const reader = new FileReader();
+                        reader.onloadend = () => {
+                            resolve(reader.result);
+                        };
+                        reader.readAsArrayBuffer(blob);
+                    });
+                })
+                .then(buffer => {
+                    $('#labelLocal').value = imageName.slice(1 + imageName.lastIndexOf('/'));
+                    target.removeAttribute('disabled');
+                    callback(buffer);
+                })
+                .catch(reason => {
+                    $('#labelLocal').value = '#ERROR';
+                    target.removeAttribute('disabled');
+                    throw reason;
+                })
+        }
+
         const startEmu = () => {
             $('#screen_container').style.display = 'block';
             $('#click_to_start').style.display = 'none';
-            
+            $('#selMemory').disabled = true;
+            $('#selDiskImage').disabled = true;
+
             if (window.beep) {
                 window.beep.createAudioContext();
             }
@@ -186,6 +223,10 @@
                 e.preventDefault();
                 keyEvent(e);
             });
+            term.addEventListener('textInput', e => {
+                e.preventDefault();
+                // window.worker.postMessage({command: 'key', data: e.data});
+            });
             window.term = term;
             $('#screen_container').addEventListener('click', e => {
                 term.focus();
@@ -199,26 +240,28 @@
 
             const worker = new Worker('lib/worker.js');
             window.worker = worker;
+            window.vga.showProgress(0.25);
             
             worker.onmessage = message => {
                 switch (message.data.command) {
                     case 'loaded':
                     {
-                        let cmd = { command: 'start',
-                            gen: parseInt($('#selCpuGen').value),
-                            mem: parseInt($('#selMemory').value),
-                        };
-                        $('#selMemory').disabled = true;
-                        if (window.attach) {
-                            window.worker.postMessage({command: 'attach', blob: window.attach});
-                            window.attach = undefined;
-                        } else {
-                            const image = $('#selDiskImage').value;
-                            if (image) {
-                                cmd.imageName = image;
+                        window.vga.showProgress(0.5);
+                        loadDiskImage((blob) => {
+                            $('#frameFD').removeAttribute('disabled');
+                            window.vga.showProgress(1);
+                            let cmd = { command: 'start',
+                                gen: parseInt($('#selCpuGen').value),
+                                mem: parseInt($('#selMemory').value),
+                            };
+                            if (window.attach) {
+                                window.worker.postMessage({command: 'attach', blob: window.attach});
+                                window.attach = undefined;
+                            } else if (blob != null) {
+                                window.worker.postMessage({command: 'attach', blob: blob});
                             }
-                        }
-                        window.worker.postMessage(devmgr.connect(cmd));
+                            window.worker.postMessage(devmgr.connect(cmd));
+                        })
                         break;
                     }
                     case 'write':
@@ -508,6 +551,7 @@
                 this.scale = scale;
                 this.fontWidth = 8;
                 this.fontHeight = 16;
+                this.lineHeight = this.fontHeight + 4;
                 this.pal16 = [
                         '#000', '#009', '#090', '#099', '#900', '#909', '#990', '#CCC',
                         '#999', '#00F', '#0F0', '#0FF', '#F00', '#F0F', '#FF0', '#FFF', ];
@@ -517,7 +561,7 @@
                 this.ctx = this.canvas.getContext('2d');
                 this.ctx.scale(scale, scale);
                 this.res = [0, 0, 0, 0];
-                this.font = "15px/16px 'TerminalWebFont', 'Monaco', 'Consolas', 'Courier New', 'Courier', monospace";
+                this.font = "15px/16px 'TerminalWebFont', 'Menlo', 'Monaco', 'Consolas', 'Courier New', 'Courier', monospace";
                 this.cursor = 0xFFFF;
                 this.mode = 0;
 
@@ -525,19 +569,6 @@
                 if (document.fonts) {
                     document.fonts.ready.then(() => this.updateFont());
                 }
-
-                this.canvasBG = document.createElement('canvas');
-                do {
-                    const { fontWidth, fontHeight } = this;
-                    this.canvasBG.width = fontWidth * 16 * scale;
-                    this.canvasBG.height = fontHeight * scale;
-                    const ctx = this.canvasBG.getContext('2d');
-                    ctx.scale(scale, scale);
-                    for (let i = 0; i < 16; i++) {
-                        ctx.fillStyle = this.pal16[i];
-                        ctx.fillRect(i * fontWidth, 0, fontWidth, fontHeight);
-                    }
-                } while (false);
 
                 devmgr.onCommand('pal', e => {
                     this.pal[e[0]] = 0xFF000000 | e[1];
@@ -557,6 +588,9 @@
                 devmgr.onCommand('vga_cursor', e => {
                     this.updateCursor(e / 2);
                 });
+
+                this.setMode({ dim:[640, 400], vdim: [640, 400], bpp: 8, mode: 1 });
+                this.showProgress(0);
             }
             setMode(e) {
                 const { ctx, fontWidth, fontHeight, scale } = this;
@@ -580,6 +614,29 @@
                     this.canvas.style.width = `${this.vdim.width}px`;
                     this.canvas.style.height = `${this.vdim.height}px`;
                 }
+                this.ctx.fillStyle = '#000';
+                this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+            }
+            showProgress (value) {
+                const { ctx, scale } = this;
+                const { width, height } = this.canvas;
+                const pw = 100, ph = 12;
+                const px = Math.floor((width - pw) / 2);
+                const py = Math.floor((height - ph) * 0.75);
+                if (value <= 0) {
+                    ctx.fillStyle = '#000';
+                    ctx.fillRect(px, py, pw, ph);
+                } else if (value < 1.0) {
+                    ctx.fillStyle = '#000';
+                    ctx.fillRect(px, py, pw, ph);
+                    ctx.fillStyle = '#999';
+                    ctx.fillRect(px, py, pw * value, ph);
+                } else {
+                    ctx.fillStyle = '#CCC';
+                    ctx.fillRect(px, py, pw, ph);
+                }
+                ctx.strokeStyle = '#FFF';
+                ctx.strokeRect(px, py, pw, ph);
             }
             updateCursor(newCursor) {
                 if (this.grapihicsMode == 0) {
@@ -608,23 +665,39 @@ const unicodeMap = [
 0x03B1, 0x00DF, 0x0393, 0x03C0, 0x03A3, 0x03C3, 0x00B5, 0x03C4, 0x03A6, 0x0398, 0x03A9, 0x03B4, 0x221E, 0x03C6, 0x03B5, 0x2229,
 0x2261, 0x00B1, 0x2265, 0x2264, 0x2320, 0x2321, 0x00F7, 0x2248, 0x00B0, 0x2219, 0x00B7, 0x221A, 0x207F, 0x00B2, 0x25A0, 0x00A0,
 ];
-                const { fontWidth, fontHeight, scale } = this;
-                this.canvasFont = document.createElement('canvas');
-                this.canvasFont.width = fontWidth * 256 * scale;
-                this.canvasFont.height = fontHeight * 16 * scale;
-                const ctx = this.canvasFont.getContext('2d');
-                ctx.font = this.font;
-                ctx.textBaseline = 'bottom';
-                ctx.scale(scale, scale);
-                for (let i = 0; i < 16; i++) {
-                    const cy = i * fontHeight + fontHeight;
-                    ctx.fillStyle = this.pal16[i];
-                    for (let j = 0; j < 256; j++) {
-                        const cx = j * fontWidth;
-                        const uchar = String.fromCharCode(unicodeMap[j]);
-                        ctx.fillText(uchar, cx, cy, fontWidth);
+                const { fontWidth, fontHeight, lineHeight, scale } = this;
+
+                this.canvasBG = document.createElement('canvas');
+                do {
+                    this.canvasBG.width = fontWidth * 16 * scale;
+                    this.canvasBG.height = fontHeight * scale;
+                    const ctx = this.canvasBG.getContext('2d');
+                    ctx.scale(scale, scale);
+                    for (let i = 0; i < 16; i++) {
+                        ctx.fillStyle = this.pal16[i];
+                        ctx.fillRect(i * fontWidth, 0, fontWidth, fontHeight);
                     }
-                }
+                } while (false);
+
+                do {
+                    this.canvasFont = document.createElement('canvas');
+                    this.canvasFont.width = fontWidth * 256 * scale;
+                    this.canvasFont.height = lineHeight * 16 * scale;
+                    const ctx = this.canvasFont.getContext('2d');
+                    ctx.font = this.font;
+                    ctx.textBaseline = 'bottom';
+                    ctx.scale(scale, scale);
+                    for (let i = 0; i < 16; i++) {
+                        const cy = i * lineHeight + fontHeight;
+                        ctx.fillStyle = this.pal16[i];
+                        for (let j = 0; j < 256; j++) {
+                            const cx = j * fontWidth;
+                            ctx.clearRect(cx, i * lineHeight, fontWidth, fontHeight);
+                            const uchar = String.fromCharCode(unicodeMap[j]);
+                            ctx.fillText(uchar, cx, cy, fontWidth);
+                        }
+                    }
+                } while (false);
             }
             setNeedsRedraw() {
                 this.needs_redraw = 1;
@@ -633,7 +706,7 @@ const unicodeMap = [
                 const wchar = this.tvram[at];
                 const char = wchar & 0xFF;
                 const attr = wchar >> 8;
-                const { ctx, fontWidth, fontHeight, scale, cols, rows } = this;
+                const { ctx, fontWidth, fontHeight, lineHeight, scale, cols, rows } = this;
                 const x = at % cols;
                 const y = (at / cols) | 0;
                 const cx = x * fontWidth;
@@ -642,14 +715,17 @@ const unicodeMap = [
                 const fgColor = attr & 0xF;
                 if (cursor) {
                     ctx.drawImage(this.canvasBG, fgColor * fontWidth * scale, 0, fontWidth * scale, fontHeight * scale, cx * scale, cy * scale, fontWidth * scale, fontHeight * scale);
-                    ctx.drawImage(this.canvasFont, char * fontWidth * scale, bgColor * fontHeight * scale, fontWidth * scale, fontHeight * scale, cx * scale, cy * scale, fontWidth * scale, fontHeight * scale);
+                    ctx.drawImage(this.canvasFont, char * fontWidth * scale, bgColor * lineHeight * scale, fontWidth * scale, fontHeight * scale, cx * scale, cy * scale, fontWidth * scale, fontHeight * scale);
                 } else {
                     ctx.drawImage(this.canvasBG, bgColor * fontWidth * scale, 0, fontWidth * scale, fontHeight * scale, cx * scale, cy * scale, fontWidth * scale, fontHeight * scale);
-                    ctx.drawImage(this.canvasFont, char * fontWidth * scale, fgColor * fontHeight * scale, fontWidth * scale, fontHeight * scale, cx * scale, cy * scale, fontWidth * scale, fontHeight * scale);
+                    ctx.drawImage(this.canvasFont, char * fontWidth * scale, fgColor * lineHeight * scale, fontWidth * scale, fontHeight * scale, cx * scale, cy * scale, fontWidth * scale, fontHeight * scale);
                 }
             }
             renderMode03(src) {
-                const { ctx, fontWidth, fontHeight, scale, cols, rows } = this;
+                const { ctx, fontWidth, fontHeight, lineHeight, scale, cols, rows } = this;
+                const fontWS = fontWidth * scale;
+                const fontHS = fontHeight * scale;
+                const lineHS = lineHeight * scale;
                 let p = 0, q = 0;
                 for (let i = 0; i < rows; i++) {
                     for (let j = 0; j < cols; j++, q++, p += 2) {
@@ -658,16 +734,16 @@ const unicodeMap = [
                         const wchar = char | (attr << 8);
                         if (this.tvram[q] != wchar) {
                             this.tvram[q] = wchar;
-                            const cx = j * fontWidth;
-                            const cy = i * fontHeight;
+                            const cx = j * fontWS;
+                            const cy = i * fontHS;
                             const bgColor = attr >> 4;
                             const fgColor = attr & 0xF;
                             if (q === this.cursor) {
-                                ctx.drawImage(this.canvasBG, fgColor * fontWidth * scale, 0, fontWidth * scale, fontHeight * scale, cx * scale, cy * scale, fontWidth * scale, fontHeight * scale);
-                                ctx.drawImage(this.canvasFont, char * fontWidth * scale, bgColor * fontHeight * scale, fontWidth * scale, fontHeight * scale, cx * scale, cy * scale, fontWidth * scale, fontHeight * scale);
+                                ctx.drawImage(this.canvasBG, fgColor * fontWS, 0, fontWS, fontHS, cx, cy, fontWS, fontHS);
+                                ctx.drawImage(this.canvasFont, char * fontWS, bgColor * lineHS, fontWS, fontHS, cx, cy, fontWS, fontHS);
                             } else {
-                                ctx.drawImage(this.canvasBG, bgColor * fontWidth * scale, 0, fontWidth * scale, fontHeight * scale, cx * scale, cy * scale, fontWidth * scale, fontHeight * scale);
-                                ctx.drawImage(this.canvasFont, char * fontWidth * scale, fgColor * fontHeight * scale, fontWidth * scale, fontHeight * scale, cx * scale, cy * scale, fontWidth * scale, fontHeight * scale);
+                                ctx.drawImage(this.canvasBG, bgColor * fontWS, 0, fontWS, fontHS, cx, cy , fontWS, fontHS);
+                                ctx.drawImage(this.canvasFont, char * fontWS, fgColor * lineHS, fontWS, fontHS, cx, cy, fontWS, fontHS);
                             }
                         }
                     }
@@ -675,10 +751,9 @@ const unicodeMap = [
             }
             renderMode13(src) {
                 const { ctx, scale } = this;
-                const { width, height } = this.canvas;
+                const size = this.canvas.width * this.canvas.height;
                 const image = this.gvram;
                 let dst = new Uint32Array(image.data.buffer);
-                const size = width * height;
                 for (let i = 0; i < size; i++) {
                     dst[i] = this.pal[src[i]];
                 }
@@ -690,6 +765,7 @@ const unicodeMap = [
             window.beep = new i8254Sound(window.devmgr);
             window.midi = new VirtualMidiDevice(window.devmgr, $('#cpMidi'));
             window.vga = new VideoDevice(window.devmgr, $('#canvasVGA'), Math.ceil(window.devicePixelRatio) | 1);
+
             $('#click_to_start').addEventListener('click', e => {
                 if (!window.WebAssembly) {
                     alert("We are sorry, but WebAssembly is not supported.");
@@ -749,40 +825,10 @@ const unicodeMap = [
             });
             $('#selDiskImage').addEventListener('change', e => {
                 if (window.worker) {
-                    const target = e.target;
-                    const imageName = target.value;
-                    if (!imageName.length) {
-                        worker.postMessage({command: 'attach', blob: null});
-                        return;
-                    }
-                    target.setAttribute('disabled', true);
-                    $('#labelLocal').value = 'Loading...';
-                    console.log(`Loading image ${imageName}...`)
-                    fetch(imageName)
-                        .then(res => {
-                            if (!res.ok) { throw Error(res.statusText); }
-                            return res.blob()
-                        })
-                        .then(blob => {
-                            return new Promise((resolve, _) => {
-                                const reader = new FileReader();
-                                reader.onloadend = () => {
-                                    resolve(reader.result);
-                                };
-                                reader.readAsArrayBuffer(blob);
-                            });
-                        })
-                        .then(buffer => {
-                            $('#labelLocal').value = imageName.slice(1 + imageName.lastIndexOf('/'));
-                            target.removeAttribute('disabled');
-                            worker.postMessage({command: 'attach', blob: buffer});
-                            // floppy.attachImage(buffer);
-                        })
-                        .catch(reason => {
-                            $('#labelLocal').value = '#ERROR';
-                            target.removeAttribute('disabled');
-                            throw reason;
-                        })
+                    $('#labelLocal').value = '';
+                    loadDiskImage((blob) => {
+                        worker.postMessage({command: 'attach', blob: blob});
+                    })
                 }
             });
 
@@ -809,6 +855,7 @@ const unicodeMap = [
             }, false);
         });
 
+
 </script>
 </head>
 <body>
@@ -830,15 +877,15 @@ const unicodeMap = [
                     &#x1f4be;
                     <select id="selDiskImage">
                         <option value="">----</option>
-                        <option value="../bin/osz.img" selected>osz</option>
-                        <option value="../bin/fdos.img">FreeDOS</option>
-                        <option value="../bin/floppybird.img">Floppy Bird</option>
+                        <option value="./bin/osz.img">osz</option>
+                        <option value="./bin/fdos.img" selected>FreeDOS</option>
+                        <option value="./bin/floppybird.img">Floppy Bird</option>
                     </select>
                 </label>
                 <input id="fileLocal" type="file" style="position: absolute; width:0px; height:0px; z-index: -1;">
                 <label>
                     <a id="buttonLocal" class="buttonFace">file:</a>
-                    <input id="labelLocal" type="text" readonly>
+                    <input id="labelLocal" type="text" size="12" readonly>
                 </label>
             </span>
         </div>
@@ -868,7 +915,7 @@ const unicodeMap = [
                             <option value="256">256KB</option>
                             <option value="384">384KB</option>
                             <option value="512">512KB</option>
-                            <option value="640" selected>640KB</option>
+                            <option value="640">640KB</option>
                             <!-- <option value="768">768KB *</option>
                             <option value="896">896KB *</option>
                             <option value="960">960KB *</option> -->
@@ -879,18 +926,18 @@ const unicodeMap = [
                             <option value="8192">8MB</option>
                             <option value="10240">10MB</option>
                             <option value="12288">12MB</option>
-                            <option value="16384">16MB</option>
+                            <option value="16384" selected>16MB</option>
                         </select>
                     </label>
                 </fieldset>
 
-                <fieldset>
+                <!-- <fieldset>
                     <legend>Screen Option</legend>
                     <label>
                         Performance:
                         <input type="range" min="1" max="1" value="1">
                     </label>
-                </fieldset>
+                </fieldset> -->
     
                 <div id="cpMidi"></div>
 
@@ -919,8 +966,6 @@ const unicodeMap = [
                         <option value="CR0">CR0</option>
                     </select>
                     <input id="inputRegister" value="" placeholder="00000000" size="12">
-                    <a id="buttonRegR" class="buttonFace">Read</a>
-                    <a id="buttonRegW" class="buttonFace">Write</a>
                     <input id="inputAddress" value="" placeholder="0000:0000" size="12">
                     <a id="buttonDump" class="buttonFace">Dump</a>
                 </fieldset>

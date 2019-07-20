@@ -48,8 +48,8 @@ export class VFD {
                 case 0:
                     this.status = 0;
                     this.CNT = this.driveType;
-                    this.CYL = this.n_cylinders;
-                    this.HEAD = this.n_heads;
+                    this.CYL = this.n_cylinders - 1;
+                    this.HEAD = this.n_heads - 1;
                     this.SEC = this.n_sectors;
                     break;
                 case 1:

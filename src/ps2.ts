@@ -91,9 +91,9 @@ export class PS2 {
         if (!scancode) {
             scancode = scanTable[keyCode];
         }
-        if (scancode > 0xE000 && scancode < 0xE07F) {
+        if (scancode > 0x100) {
+            prefix = scancode >> 8;
             scancode &= 0x7F;
-            prefix = 0xE0;
         }
         let ascii: number = (key.length == 1) ? key.charCodeAt(0) : 0;
         if (ctrlKey && ascii >= 0x40 && ascii <= 0x80) {
@@ -111,6 +111,9 @@ export class PS2 {
                 break;
             }
         }
+        if (altKey) {
+            scancode &= 0x7F;
+        }
 
         if (scancode == 0 && ascii != 0) {
             scancode = SCAN_DUMMY;
@@ -123,9 +126,11 @@ export class PS2 {
             scancode |= 0x80;
             break;
         }
+
         if (scancode & 0x7F) {
             if (prefix) {
                 this.o_fifo.push(prefix);
+                this.env.pic.raiseIRQ(1);
             }
             this.o_fifo.push(scancode);
             this.env.pic.raiseIRQ(1);

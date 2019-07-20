@@ -53,6 +53,12 @@ export class IOManager {
             const handler = this.owHandlers[port & 0xFFFF];
             if (handler) {
                 handler(port, data & 0xFFFF);
+            } else {
+                // fall back
+                if (port < 1024) {
+                    this.outb(port, data & 0xFF);
+                    this.outb(port + 1, data >> 8);
+                }
             }
         } catch (e) {
             console.error('worker_outw()', e);

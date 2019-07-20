@@ -42,7 +42,7 @@
 
 %define BDA_SEG             0x0040
 %define BDA_COMPORT         0x0000
-%define BDA_KBD_SHIFT       0x0019
+%define BDA_KBD_SHIFT       0x0017
 %define BDA_KBD_BUFF_HEAD   0x001A
 %define BDA_KBD_BUFF_TAIL   0x001C
 %define BDA_KBD_BUFF_BEGIN  0x001E
@@ -61,9 +61,6 @@
 _HEAD:
     dw SEG_BIOS, SIZE_BIOS
 
-banner:
-    db "BIOS v0.1", 10, 0
-
     alignb 2
 
 _int10_ftbl:
@@ -72,7 +69,6 @@ _int10_ftbl:
     dw i1010, i1011, i1012, i1013, i1014, i1015, i1016, i1017
     dw i1018, i1019, i101A, i101B, i101C, i101D, i101E, i101F
 _int10_etbl:
-
 
 
 
@@ -116,7 +112,9 @@ _irq1:
     in ax, 0x64
     mov bx, ax
     mov ah, 0x4F
+    stc
     int 0x15
+    jnc .loop
     cmp al, 0xE1
     jz .E1
     cmp al, 0xE0
@@ -153,7 +151,7 @@ _irq1:
     or byte [BDA_KBD_MODE_TYPE], KBD_MODE_LAST_E0
     jmp .loop
 .ctrl1:
-    mov al, 0x08
+    mov al, 0x04
     jmp .shift_mask
 .shift1:
     mov al, 0x01
@@ -162,8 +160,8 @@ _irq1:
     mov al, 0x02
     jmp .shift_mask
 .alt1:
-    mov al, 0x04
-    jmp .shift_mask
+    mov al, 0x08
+    ; jmp .shift_mask
 .shift_mask:
     or bl, bl
     js .shift_up
@@ -503,10 +501,9 @@ i1008:
 
 
 i1009:
-    cmp al, ' '
-    ja .ascii_ok
-    mov al, '?'
-.ascii_ok:
+    mov cx, BDA_SEG
+    mov ds, cx
+    jmp i100E.cont
 i100E:
     mov cx, BDA_SEG
     mov ds, cx
@@ -516,6 +513,7 @@ i100E:
     jz .lf
     cmp al, 13
     jz .cr
+.cont:
     call _chk_scroll
     mov dx, [BDA_VGA_CURSOR]
     call _bios_write_char
@@ -683,11 +681,6 @@ _int13:
     out dx, ax
     jmp .end
 .no_00:
-    cmp ah, 0x01
-    jnz .no_01
-    call _int13_get_drive_param
-    jmp .end
-.no_01:
     cmp ah, 0x02
     jnz .no_02
     call _int13_read
@@ -703,17 +696,26 @@ _int13:
     xor ah, ah
     jmp .end
 .no_04:
+    cmp ah, 0x08
+    jnz .no_08
+    call _int13_get_drive_param
+    jmp .end
+.no_08:
+    cmp ah, 0x15
+    jnz .no_15
+    mov ah, 0x02
+    jmp .end
+.no_15:
 
 .err:
-    mov ax, 0x8000
+    mov ah, 0x01
+    stc
 .end:
 
+    sbb dx, dx
     mov cx, [bp + STK_FLAGS]
     and cx, 0xFFFE
-    or ah, ah
-    jz .ok
-    inc cx
-.ok:
+    sub cx, dx
     mov [bp + STK_FLAGS], cx
 
     add sp, byte 2
@@ -726,6 +728,7 @@ _int13:
     pop ds
     pop es
     iret
+
 
 _int13_get_drive_param:
     mov dx, VPC_FD_PORT
@@ -743,9 +746,13 @@ _int13_get_drive_param:
     inc dx
     in al, dx
     mov [bp + STK_CX + 1], al
-    xor ax, ax
+    mov al, 1
     mov [bp + STK_DX], al
+    xor ax, ax
+    mov [bp + STK_DI], ax
+    mov [bp + STK_ES], ax
     ret
+
 
 _int13_set_chr:
     mov dx, VPC_FD_PORT + 6
@@ -786,16 +793,6 @@ _int13_read:
 _int13_write:
     mov si, 2
 _int13_io:
-;     mov dx, VPC_FD_PORT
-;     xor ax, ax
-;     out dx, ax
-;     in ax, dx
-;     or ax, ax
-;     jnz .dev_ok
-;     mov ax, 0x8000
-;     ret
-; .dev_ok:
-
     call _int13_set_chr
     call _int13_set_dma
 
@@ -813,6 +810,10 @@ _int13_io:
     mov cl, [bp + STK_AX]
     sub cl, al
     mov al, cl
+    or ah, ah
+    jz .noerror
+    stc
+.noerror:
     ret
 
 
@@ -1118,7 +1119,6 @@ __set_irq:
     out 0x21, al
     mov al, 0xFF
     out 0xA1, al
-    sti
 
 
     ;; init Timer
@@ -1152,7 +1152,8 @@ __set_irq:
     mov [ss:0x46C], ax
     xor ax, ax
     mov [ss:0x46F], ax
-
+    sti
+    hlt
 
     ;; ENABLE UART
     cli
@@ -1172,6 +1173,28 @@ __set_irq:
     out dx, al
     sti
 
+
+    ;; CLEAR MEMORY
+_clear_memory:
+    mov dx, VPC_MEM_PORT
+    in ax, dx
+    mov cl, 6
+    shl ax, cl
+    mov bp, ax
+    xor dx, dx
+    mov di, 0x500
+.loop:
+    mov es, dx
+    xor ax, ax
+    mov cx, di
+    not cx
+    shr cx, 1
+    inc cx
+    rep stosw
+    mov bx, 0x1000
+    add dx, bx
+    sub bp, bx
+    ja .loop
 
     ;; INIT VIDEO
     mov ax, 0x0003
@@ -1208,8 +1231,8 @@ __set_vram:
     mov ax, 0x0720
     rep stosw
 
-    mov si, banner
-    call puts
+    ; mov si, banner
+    ; call puts
 
     mov si, _boot_sound_data
     call _play_sound
@@ -1294,19 +1317,7 @@ _repl:
     cli
     hlt
 .no_cmd_u:
-    cmp al, 'b'
-    jnz .no_cmd_b
-    mov cx, 1000
-    call _bios_beep
-    mov cx, 200
-    call _bios_wait
-    xor cx,cx 
-    call _bios_beep
-    jmp .prompt
-.no_cmd_b:
 .bad_cmd:
-    mov si, bad_cmd_msg
-    call puts
     jmp .prompt
 
 
@@ -1444,19 +1455,12 @@ cls_msg:
     db 0x1b, "[H", 0x1b, "[J", 0
 
 boot_fail_msg:
-    db 10, "Boot failure", 10, 0
-
-bad_cmd_msg:
-    db "Bad command or file name", 10, 0
+    db 10, "Operating System not found", 10, 0
 
     alignb 2
 _boot_sound_data:
     dw 2000, 100, 1000, 100
     dw 0xFFFF
-
-_vga_mode13_cmd:
-    ; dw 4, 0, 1, 640, 2, 400, 3, 8, 4, 1, -1
-    dw 4, 0, 1, 320, 2, 200, 3, 8, 4, 1, -1
 
 
 _palette_data:

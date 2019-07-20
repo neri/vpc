@@ -64,36 +64,6 @@ let midi: MPU401;
     wi.postCommand('loaded', null);
 })();
 
-const loadImage = async (imageName: string) => {
-    // wi.print('Loading image...\n');
-    console.log(`Loading image ${imageName}`);
-    return fetch(imageName)
-        .then(res => {
-            if (!res.ok) { throw Error(res.statusText); }
-            return res.blob()
-        })
-        .then(blob => {
-            return new Promise((resolve, _) => {
-                const reader = new FileReader();
-                reader.onloadend = () => {
-                    resolve(reader.result);
-                };
-                reader.readAsArrayBuffer(blob);
-            });
-        })
-        .then((buffer: ArrayBuffer) => {
-            floppy.attachImage(buffer);
-        })
-        .catch(reason => console.error(reason));
-}
-
-const start = async (gen: number, imageName: string) => {
-    if (imageName) {
-        await loadImage(imageName);
-    }
-    env.run(gen);
-};
-
 const readRegRQ = (regName: string) => {
     const value = env.getReg(regName);
     wi.postCommand('regResult', ('00000000' + value.toString(16)).slice(-8));
@@ -107,7 +77,7 @@ onmessage = e => {
             if (e.data.midi) {
                 midi = new MPU401(env, 0x330);
             }
-            setTimeout(() => start(e.data.gen, e.data.imageName), 100);
+            setTimeout(() => env.run(e.data.gen), 100);
             break;
         case 'reset':
             env.reset(e.data.gen);
