@@ -43,17 +43,17 @@ export class RuntimeEnvironment {
             // table: new WebAssembly.Table({ initial: 2, element: "anyfunc" }),
         }
         this._memory = new Uint8Array(this.env.memory.buffer);
-        this.env.println = (at: number) => {
+        this.env.println = (at: number): void => {
             const str = this.getCString(at);
             console.log(str);
         }
-        this.env.vpc_outb = (port: number, data: number) => this.iomgr.outb(port, data);
-        this.env.vpc_inb = (port: number) => this.iomgr.inb(port);
-        this.env.vpc_outw = (port: number, data: number) => this.iomgr.outw(port, data);
-        this.env.vpc_inw = (port: number) => this.iomgr.inw(port);
+        this.env.vpc_outb = (port: number, data: number): void => this.iomgr.outb(port, data);
+        this.env.vpc_inb = (port: number): number => this.iomgr.inb(port);
+        this.env.vpc_outw = (port: number, data: number): void => this.iomgr.outw(port, data);
+        this.env.vpc_inw = (port: number): number => this.iomgr.inw(port);
         this.env.vpc_irq = () => this.pic.dequeueIRQ();
-        this.env.TRAP_NORETURN = () => { throw new Error('UNEXPECTED CONTROL FLOW'); };
-        this.env.vpc_grow = (n: number) => {
+        this.env.TRAP_NORETURN = (): never => { throw new Error('UNEXPECTED CONTROL FLOW'); };
+        this.env.vpc_grow = (n: number): number => {
             const result = this.env.memory.grow(n);
             this._memory = new Uint8Array(this.env.memory.buffer);
             return result;
@@ -167,21 +167,35 @@ export class RuntimeEnvironment {
         }
         const status: number = this.instance.exports.run(this.cpu);
         this.dequeueUART();
-        if (status > 1) {
+        if (status >= 0x10000) {
             this.isRunning = false;
-            console.log(`CPU halted (${status.toString(16)})`);
+            console.log(`CPU enters to shutdown (${status.toString(16)})`);
         } else if (this.isDebugging) {
             this.instance.exports.debug_dump(this.cpu);
             this.isPausing = true;
         } else {
-            let timer: number;
-            if (status > 0) {
-                const now = new Date().valueOf();
-                const expected = this.lastTick + this.period;
-                timer = expected - now;
-                if (timer < 0) timer = 0;
-            } else {
-                timer = 1;
+            let timer = 1;
+            switch (status) {
+                case 0x1000:
+                    const now = new Date().valueOf();
+                    const expected = this.lastTick + this.period;
+                    timer = expected - now;
+                    if (timer < 0) timer = 0;
+                    break;
+                case 1:
+                    const cr0 = this.getReg('CR0');
+                    let mode: string[] = [];
+                    if (cr0 & 0x80000000) {
+                        mode.push('Paged');
+                    }
+                    if (cr0 & 0x00000001) {
+                        mode.push('Protected Mode')
+                    } else {
+                        mode.push('Real Mode')
+                    }
+                    console.log(`CPU Mode Change: ${('00000000' + cr0.toString(16)).slice(-8)} ${mode.join(' ')}`);
+                default:
+                    // timer = 1;
             }
             setTimeout(() => this.cont(), timer);
         }

@@ -172,7 +172,7 @@ describe('CPU', () => {
 
         it('HLT', () => {
             env.emitTest([0xF4]);
-            expect(env.step()).toBe(1);
+            expect(env.step()).toBe(0x1000);
             expect(env.getReg('IP')).toBe(0xFFF1);
             expect(env.changed()).toStrictEqual(['IP']);
         });

@@ -126,10 +126,11 @@ export class PS2 {
             scancode |= 0x80;
             break;
         }
-        // console.log('key', e, prefix, scancode.toString(16));
+
         if (scancode & 0x7F) {
             if (prefix) {
                 this.o_fifo.push(prefix);
+                this.env.pic.raiseIRQ(1);
             }
             this.o_fifo.push(scancode);
             this.env.pic.raiseIRQ(1);

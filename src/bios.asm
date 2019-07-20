@@ -61,9 +61,6 @@
 _HEAD:
     dw SEG_BIOS, SIZE_BIOS
 
-banner:
-    db "BIOS v0.1", 10, 0
-
     alignb 2
 
 _int10_ftbl:
@@ -72,7 +69,6 @@ _int10_ftbl:
     dw i1010, i1011, i1012, i1013, i1014, i1015, i1016, i1017
     dw i1018, i1019, i101A, i101B, i101C, i101D, i101E, i101F
 _int10_etbl:
-
 
 
 
@@ -370,7 +366,6 @@ i100F:
 
 i1006:
 i1007:
-    db 0xF1
     or al, al
     jz .cls
     ret
@@ -506,10 +501,9 @@ i1008:
 
 
 i1009:
-    cmp al, ' '
-    ja .ascii_ok
-    mov al, '?'
-.ascii_ok:
+    mov cx, BDA_SEG
+    mov ds, cx
+    jmp i100E.cont
 i100E:
     mov cx, BDA_SEG
     mov ds, cx
@@ -519,6 +513,7 @@ i100E:
     jz .lf
     cmp al, 13
     jz .cr
+.cont:
     call _chk_scroll
     mov dx, [BDA_VGA_CURSOR]
     call _bios_write_char
@@ -1179,6 +1174,28 @@ __set_irq:
     sti
 
 
+    ;; CLEAR MEMORY
+_clear_memory:
+    mov dx, VPC_MEM_PORT
+    in ax, dx
+    mov cl, 6
+    shl ax, cl
+    mov bp, ax
+    xor dx, dx
+    mov di, 0x500
+.loop:
+    mov es, dx
+    xor ax, ax
+    mov cx, di
+    not cx
+    shr cx, 1
+    inc cx
+    rep stosw
+    mov bx, 0x1000
+    add dx, bx
+    sub bp, bx
+    ja .loop
+
     ;; INIT VIDEO
     mov ax, 0x0003
     int 0x10
@@ -1214,8 +1231,8 @@ __set_vram:
     mov ax, 0x0720
     rep stosw
 
-    mov si, banner
-    call puts
+    ; mov si, banner
+    ; call puts
 
     mov si, _boot_sound_data
     call _play_sound
@@ -1444,10 +1461,6 @@ boot_fail_msg:
 _boot_sound_data:
     dw 2000, 100, 1000, 100
     dw 0xFFFF
-
-_vga_mode13_cmd:
-    ; dw 4, 0, 1, 640, 2, 400, 3, 8, 4, 1, -1
-    dw 4, 0, 1, 320, 2, 200, 3, 8, 4, 1, -1
 
 
 _palette_data:

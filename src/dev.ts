@@ -3,6 +3,7 @@
 import { RuntimeEnvironment } from './env';
 import { IOManager } from './iomgr';
 
+const PIC_PHASE_MAX = 4;
 /**
  * Programmable Interrupt Controller
  */
@@ -10,29 +11,35 @@ export class VPIC {
     private irq: number[];
     private phase: number[];
     private IMR: Uint8Array;
-    private IRR: Uint8Array;
+    // private IRR: Uint8Array;
     private ISR: Uint8Array;
     private ICW: Uint8Array;
+    private intCount: number[];
 
     constructor (iomgr: IOManager) {
         this.irq = [];
         this.phase = [0, 0];
         this.IMR = new Uint8Array([0xFF, 0xFF]);
-        this.IRR = new Uint8Array(2);
+        // this.IRR = new Uint8Array(2);
         this.ISR = new Uint8Array(2);
-        this.ICW = new Uint8Array(8);
+        this.ICW = new Uint8Array(PIC_PHASE_MAX * 2);
+        this.intCount = [];
+        for (let i = 0; i< 16; i++) {
+            this.intCount[i] = 0;
+        }
 
-        iomgr.on(0x20, (_, data) => this.writeOCR(0, data), (_) => this.readOCR(0));
+        iomgr.on(0x20, (_, data) => this.writeCMD(0, data), (_) => this.readCMD(0));
         iomgr.on(0x21, (_, data) => this.writeIMR(0, data), (_) => this.readIMR(0));
-        iomgr.on(0xA0, (_, data) => this.writeOCR(1, data), (_) => this.readOCR(1));
+        iomgr.on(0xA0, (_, data) => this.writeCMD(1, data), (_) => this.readCMD(1));
         iomgr.on(0xA1, (_, data) => this.writeIMR(1, data), (_) => this.readIMR(1));
     }
 
-    private writeOCR(port: number, data: number): void {
+    private writeCMD(port: number, data: number): void {
         if (data & 0x10) { // ICW1
             this.phase[port] = 1;
             this.ICW[port * 4] = data;
-        } else if (data == 0x20) { // normal EOI
+            this.ISR[port] = 0;
+        } else if ((data & 0xF8) == 0x20) { // auto EOI
             for (let i = 0; i < 8; i++) {
                 const mask = (1 << i);
                 if (this.ISR[port] & mask) {
@@ -41,23 +48,22 @@ export class VPIC {
                     break;
                 }
             }
-        } else {
-            // TODO:
+        } else if ((data & 0xF8) == 0x60) { // manual EOI
+            const mask = (1 << (data & 7));
+            if (this.ISR[port] & mask) {
+                this.ISR[port] &= ~mask;
+                this.enqueue(0);
+            }
         }
     }
-    private readOCR(port: number): number {
-        // TODO:
+    private readCMD(port: number): number {
         return this.ISR[port];
     }
     private writeIMR(port: number, data: number): void {
-        const phase = this.phase[port] || 0;
-        if (phase > 0 && phase < 4) { // ICW2-4
-            this.ICW[port * 4 + phase] = data;
-            if (phase < 4) {
-                this.phase[port] = 1 + phase;
-            } else {
-                this.phase[port] = 0;
-            }
+        const phase = this.phase[port];
+        if (phase > 0 && phase < PIC_PHASE_MAX) { // ICW2-4
+            this.ICW[port * PIC_PHASE_MAX + phase] = data;
+            this.phase[port] = 1 + phase;
         } else {
             this.IMR[port] = data;
         }
@@ -67,33 +73,29 @@ export class VPIC {
     }
     private enqueue(port: number): void {
         for (let i = 0; i < 8; i++) {
+            if (this.phase[port] != PIC_PHASE_MAX) return;
             if (this.irq.length) return;
+            const global_irq = port * 8 + i;
             const mask = (1 << i);
             if (port == 0 && i == this.ICW[0] && (this.IMR[0] & mask) == 0) {
                 this.enqueue(1);
                 break;
             }
             if (this.ISR[port] & mask) break;
-            if ((this.IRR[port] & mask) && (this.IMR[port] & mask) == 0) {
-                this.IRR[port] &= ~mask;
+            if (this.IMR[port] & mask) continue;
+            if (this.intCount[global_irq] > 0) {
+                this.intCount[global_irq]--;
                 this.ISR[port] |= mask;
-                this.irq.push(port * 8 + i);
+                this.irq.push(global_irq);
             }
         }
     }
     public raiseIRQ(n: number): void {
-        if (n < 8) {
-            if (n == 0) {
-                this.irq.push(0);
-            } else {
-                this.IRR[0] |= (1 << n);
-                this.enqueue(0);
-            }
-        } else if (n < 16) {
-            this.ISR[1] |= (1 << (n - 8));
-            this.IRR[0] |= this.ICW[2];
-            this.enqueue(0);
-        }
+        this.intCount[n]++;
+        this.enqueue(0);
+    }
+    public clearPendingIRQ(n: number): void {
+        this.intCount[n] = 0;
     }
     public dequeueIRQ(): number {
         const global_irq = this.irq.shift();
@@ -102,7 +104,7 @@ export class VPIC {
             const local_irq = global_irq & 7;
             const mask = 1 << local_irq;
             this.ISR[port] |= mask;
-            const vector = (this.ICW[port * 4 + 1] & 0xF8) | local_irq;
+            const vector = (this.ICW[port * PIC_PHASE_MAX + 1] & 0xF8) | local_irq;
             return vector;
         } else {
             return 0;
@@ -198,6 +200,7 @@ export class VPIT {
     }
     public clearTimer(): void {
         this.env.setTimer(0);
+        this.env.pic.clearPendingIRQ(0);
     }
     public setTimer(): void {
         this.env.setTimer(this.getCounter(0) / 1193.181);
@@ -223,7 +226,7 @@ export class UART {
         env.iomgr.on(base, (_, data) => this.fifo_o.push(data),
             (_) => this.fifo_i.shift() || 0);
         env.iomgr.on(base + 1, (_, data) => this.IER = data, (_) => this.IER);
-        env.iomgr.on(base + 5, undefined, (_) => 0x20 | ((this.fifo_i.length > 0) ? 1 : 0));
+        env.iomgr.on(base + 5, undefined, (_) => 0x60 | ((this.fifo_i.length > 0) ? 1 : 0));
     }
     public dequeueTX(): number[] {
         const result = this.fifo_o.slice();
