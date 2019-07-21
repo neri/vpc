@@ -64,11 +64,6 @@ let midi: MPU401;
     wi.postCommand('loaded', null);
 })();
 
-const readRegRQ = (regName: string) => {
-    const value = env.getReg(regName);
-    wi.postCommand('regResult', ('00000000' + value.toString(16)).slice(-8));
-}
-
 onmessage = e => {
     switch (e.data.command) {
         case 'start':
@@ -87,13 +82,9 @@ onmessage = e => {
             break
         case 'nmi':
             env.nmi();
-            readRegRQ(e.data.regName);
-            break;
-        case 'readReg':
-            readRegRQ(e.data.regName);
             break;
         case 'dump':
-            env.dump(e.data.address);
+            wi.postCommand('devWrite', env.dump(e.data.address));
             break;
         case 'attach':
             try {

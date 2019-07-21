@@ -45,7 +45,8 @@ export class RuntimeEnvironment {
         this._memory = new Uint8Array(this.env.memory.buffer);
         this.env.println = (at: number): void => {
             const str = this.getCString(at);
-            console.log(str);
+            worker.print(str);
+            // console.log(str);
         }
         this.env.vpc_outb = (port: number, data: number): void => this.iomgr.outb(port, data);
         this.env.vpc_inb = (port: number): number => this.iomgr.inb(port);
@@ -227,8 +228,8 @@ export class RuntimeEnvironment {
         let a = new Uint32Array(this.env.memory.buffer, reg, 1);
         return a[0];
     }
-    public dump(base: number): void {
-        const addrToHex = (n: number) => ('000000' + n.toString(16)).substr(-6);
+    public dump(base: number): string {
+        const addrToHex = (n: number) => ('00000000' + n.toString(16)).substr(-8);
         const toHex = (n: number) => ('00' + n.toString(16)).substr(-2);
         let lines: string[] = [];
         for (let i = 0; i < 16; i++) {
@@ -247,7 +248,7 @@ export class RuntimeEnvironment {
             line.push(chars.join(''));
             lines.push(line.join(' '));
         }
-        console.log(lines.join('\n'));
+        return lines.join('\n');
     }
     public get_vram_signature(base: number, size: number): number {
         return this.instance.exports.get_vram_signature(base, size);

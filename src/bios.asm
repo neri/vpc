@@ -297,9 +297,9 @@ i101F:
     ret
 
 i101A:
-    ; mov bx, 0x0808
-    ; mov [bp+STK_BX], bx
-    ; mov [bp+STK_AX], ah
+    mov bx, 0x0808
+    mov [bp+STK_BX], bx
+    mov [bp+STK_AX], ah
     ret
 
 
@@ -349,12 +349,6 @@ i1000: ;; SET VIDEO MODE
     mov al, 0x13
     jmp .set_mode
 
-.set_uart:
-    mov si, cls_msg
-    call puts
-    xor ax, ax
-    jmp .set_mode
-
 
 i100F:
     mov ax, BDA_SEG
@@ -370,12 +364,6 @@ i1007:
     jz .cls
     ret
 .cls:
-    ; push cs
-    ; pop ds
-    ; mov si, cls_nc_msg
-    ; call puts
-    ; xor ax, ax
-    ; ret
     add dx, 0x0001
     call _bios_cursor_addr
     mov dx, cx
@@ -421,54 +409,6 @@ i1003:
     mov ax, [BDA_VGA_CURSOR]
     mov [bp+STK_DX], ax
     ret
-
-;     sub sp, byte 16
-;     mov di, sp
-;     mov ax, 0x5B1B
-;     ss stosw
-
-;     mov al, dh
-;     aam
-;     xchg al, ah
-;     or al, al
-;     jz .comp1
-;     add al, '0'
-;     ss stosb
-; .comp1:
-;     xchg al, ah
-;     add al, '0'
-;     ss stosb
-;     mov al, ';'
-;     ss stosb
-
-;     mov al, dl
-;     aam
-;     xchg al, ah
-;     or al, al
-;     jz .comp2
-;     add al, '0'
-;     ss stosb
-; .comp2:
-;     xchg al, ah
-;     add al, '0'
-;     ss stosb
-;     mov ax, 'H'
-;     ss stosw
-
-;     xor dx, dx
-;     mov es, dx
-;     mov dx, [es:0x400]
-;     mov si, sp
-; .loop:
-;     ss lodsb
-;     or al, al
-;     jz .end
-;     out dx, al
-;     jmp .loop
-; .end:
-
-;     add sp, byte 16
-;     ret
 
 
 i1013:
@@ -825,8 +765,17 @@ _int14:
 
 ;; System BIOS
 _int15:
+    cmp ah, 0x88
+    jz i1588
     stc
     retf 2
+i1588:
+    push dx
+    mov dx, VPC_MEM_PORT + 2
+    in ax, dx
+    pop dx
+    clc
+    retf
 
 
 ;; Keyboard BIOS
@@ -1431,28 +1380,6 @@ puts:
 .end:
     ret
 
-
-_vga_command:
-    mov dx, 0x01CE
-.loop:
-    lodsw
-    cmp ax, -1
-    jz .end
-    out dx, ax
-    inc dx
-    lodsw
-    out dx, ax
-    dec dx
-    jmp .loop
-.end:
-    ret
-
-
-cls_nc_msg:
-    db 0x1b, "[2J", 0
-
-cls_msg:
-    db 0x1b, "[H", 0x1b, "[J", 0
 
 boot_fail_msg:
     db 10, "Operating System not found", 10, 0

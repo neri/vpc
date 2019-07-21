@@ -591,14 +591,15 @@ static int LOAD_SEL(cpu_state *cpu, sreg_t *sreg, uint16_t value) {
         uint32_t index = value >> 3;
         int rpl = value & 3;
         seg_desc_t *gdt = (seg_desc_t *)(mem + desc_table.base);
-        seg_desc_t new_seg = gdt[index];
-        if (new_seg.attr_P == 0) return RAISE_NOT_PRESENT(errcode);
-        if (new_seg.attr_S == 0) return RAISE_GPF(errcode);
-        if (new_seg.attr_DPL != rpl) return RAISE_GPF(errcode);
-        sreg->attrs = new_seg.attr_1 | (new_seg.attr_2 << 8) | 1;
-        sreg->base = new_seg.base_1 + (new_seg.base_2 << 16) + (new_seg.base_3 << 24);
-        uint32_t limit = new_seg.limit_1 + (new_seg.limit_2 << 16);
-        if (new_seg.attr_G) {
+        seg_desc_t new_desc = gdt[index];
+        if (new_desc.attr_P == 0) return RAISE_NOT_PRESENT(errcode);
+        if (new_desc.attr_S == 0) return RAISE_GPF(errcode);
+        if (new_desc.attr_DPL != rpl) return RAISE_GPF(errcode);
+
+        sreg->attrs = new_desc.attr_1 | (new_desc.attr_2 << 8) | 1;
+        sreg->base = new_desc.base_1 + (new_desc.base_2 << 16) + (new_desc.base_3 << 24);
+        uint32_t limit = new_desc.limit_1 + (new_desc.limit_2 << 16);
+        if (new_desc.attr_G) {
             limit = (limit << 12) | 0x00000FFF;
         }
         sreg->limit = limit;
@@ -628,15 +629,16 @@ static int LOAD_DESC(cpu_state *cpu, desc_t *desc, uint16_t value, uint32_t type
         uint32_t index = value >> 3;
         int rpl = value & 3;
         seg_desc_t *gdt = (seg_desc_t *)(mem + desc_table.base);
-        seg_desc_t new_seg = gdt[index];
-        if (new_seg.attr_P == 0) return RAISE_NOT_PRESENT(errcode);
-        if (new_seg.attr_S != 0) return RAISE_GPF(errcode);
-        if (new_seg.attr_DPL != rpl) return RAISE_GPF(errcode);
-        if (((1 << new_seg.attr_type) & type_bitmap) == 0) return RAISE_GPF(errcode);
-        desc->attrs = new_seg.attr_1 | (new_seg.attr_2 << 8) | 1;
-        desc->base = new_seg.base_1 + (new_seg.base_2 << 16) + (new_seg.base_3 << 24);
-        uint32_t limit = new_seg.limit_1 + (new_seg.limit_2 << 16);
-        if (new_seg.attr_G) {
+        seg_desc_t new_desc = gdt[index];
+        if (new_desc.attr_P == 0) return RAISE_NOT_PRESENT(errcode);
+        if (new_desc.attr_S != 0) return RAISE_GPF(errcode);
+        if (new_desc.attr_DPL != rpl) return RAISE_GPF(errcode);
+        if (((1 << new_desc.attr_type) & type_bitmap) == 0) return RAISE_GPF(errcode);
+
+        desc->attrs = new_desc.attr_1 | (new_desc.attr_2 << 8) | 1;
+        desc->base = new_desc.base_1 + (new_desc.base_2 << 16) + (new_desc.base_3 << 24);
+        uint32_t limit = new_desc.limit_1 + (new_desc.limit_2 << 16);
+        if (new_desc.attr_G) {
             limit = (limit << 12) | 0x00000FFF;
         }
         desc->limit = limit;
@@ -656,6 +658,7 @@ static int FAR_CALL(cpu_state *cpu, uint16_t new_sel, uint32_t new_eip) {
     cpu->EIP = new_eip;
     PUSHW(cpu, old_cs);
     PUSHW(cpu, old_eip);
+    if (new_sel == 0 && new_eip == 0) return cpu_status_gpf;
     return CS_LIMIT_CHECK(cpu, 0);
 }
 
@@ -3898,7 +3901,7 @@ void cpu_reset(cpu_state *cpu, int gen) {
     for (int i = 0; i < 6; i++) {
         cpu->sregs[i].limit = 0x0000FFFF;
     }
-    cpu->CR[0] = 0x60000010 & cpu->cr0_valid;
+    cpu->CR[0] = 0x00000010 & cpu->cr0_valid;
     cpu->GDT.limit = 0xFFFF;
     cpu->IDT.limit = 0xFFFF;
     cpu->LDT.limit = 0xFFFF;
@@ -3941,6 +3944,8 @@ static int cpu_block(cpu_state *cpu) {
                 }
                 status = INVOKE_INT(cpu, 0, exception); // #DE
                 if (status) return status;
+                continue;
+            case cpu_status_fpu:
                 continue;
             case cpu_status_halt:
                 return status;
@@ -4029,8 +4034,10 @@ WASM_EXPORT int run(cpu_state *cpu) {
  * |0x60000|#UD|conditional|Undefined instruction|
  * |0x70000|#FP|conditional|FPU error|
  * |0x8XXXX|#DF|N|Double Fault|
+ * |0xBXXXX|#NP|conditional|Segment Not Present|
  * |0xCXXXX|#SS|conditional|Stack Exception|
  * |0xDXXXX|#GP|conditional|General Protection Exception|
+ * |0xEXXXX|#PF|conditional|Page Fault (NOT IMPLEMENTED)|
  * 
  */
 WASM_EXPORT int step(cpu_state *cpu) {
