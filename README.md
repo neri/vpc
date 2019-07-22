@@ -39,7 +39,7 @@ A PC Emulator implemented by WebAssembly.
 
 ## Supported Software
 
-|System|Status|
+|Software|Status|
 |-|-|
 |osz|It seems working|
 |FreeDOS (16bit)|It seems working|
@@ -47,6 +47,7 @@ A PC Emulator implemented by WebAssembly.
 |elks|failed|
 |BootChess|buggy|
 |[Floppy Bird](https://github.com/icebreaker/floppybird)|Needs a patch|
+|[Invaders game in 512 bytes](https://github.com/nanochess/Invaders)|It seems working|
 
 ## License
 
