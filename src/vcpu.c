@@ -141,6 +141,7 @@ typedef struct {
 } gate_desc_t;
 
 enum {
+    type_unavailable,
     type_tss16_available = 1,
     type_ldt,
     type_tss16_busy,
@@ -153,6 +154,7 @@ enum {
     type_call_gate32,
     type_intr_gate32 = 14,
     type_trap_gate32,
+    type_segment,
 };
 
 #define SEG_CTX_DEFAULT_DATA32  0x00000010
@@ -310,7 +312,7 @@ typedef struct cpu_state {
 
 #define VOID_MEMORY_VALUE 0xDEADBEEF
 size_t max_mem = 0;
-uintptr_t null_ptr;
+intptr_t null_ptr;
 uint8_t *mem = NULL;
 
 /**
@@ -556,7 +558,7 @@ static uint32_t POPW(cpu_state *cpu) {
     return result;
 }
 
-static void PUSHW(cpu_state *cpu, uint32_t value) {
+static int _PUSHW(cpu_state *cpu, uint32_t value) {
     int addr32 = (cpu->cpu_context & CPU_CTX_ADDR32);
     int data32 = (cpu->cpu_context & CPU_CTX_DATA32);
     uint32_t esp = cpu->ESP;
@@ -565,9 +567,11 @@ static void PUSHW(cpu_state *cpu, uint32_t value) {
         if (!esp) esp = 0x10000;
     }
     if (data32) {
+        if (esp < 4) return cpu_status_stack;
         esp -= 4;
         WRITE_MEM32(&cpu->SS, esp, value);
     } else {
+        if (esp < 2) return cpu_status_stack;
         esp -= 2;
         WRITE_MEM16(&cpu->SS, esp, value);
     }
@@ -576,7 +580,9 @@ static void PUSHW(cpu_state *cpu, uint32_t value) {
     } else {
         cpu->SP = esp;
     }
+    return 0;
 }
+#define PUSHW(cpu, v) do { int status = _PUSHW(cpu, v); if (status) return status; } while(0)
 
 static int LOAD_SEL(cpu_state *cpu, sreg_t *sreg, uint16_t value) {
     if (cpu->CR0.PE) {

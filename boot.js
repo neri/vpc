@@ -9,9 +9,12 @@ let mainWindow;
 const createWindow = () => {
   mainWindow = new BrowserWindow(
     {
-      // titleBarStyle: 'hidden',
+      useContentSize: true,
       width: 640, 
-      height: 480,
+      height: 440,
+      minWidth: 640,
+      maxWidth: 640,
+      minHeight: 400,
     });
 
   mainWindow.loadURL(url.format({

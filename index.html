@@ -435,7 +435,7 @@
                     {
                         const option = document.createElement('option');
                         option.setAttribute('value', PORT_NOT_SELECTED);
-                        option.appendChild(document.createTextNode('---'));
+                        // option.appendChild(document.createTextNode(''));
                         select.appendChild(option);
                     }
                     for(let i = 0; i < this.outputs.length; i++){
@@ -596,7 +596,7 @@
                     this.updateCursor(e / 2);
                 });
 
-                this.setMode({ dim:[640, 400], vdim: [640, 400], bpp: 8, mode: 1 });
+                this.setMode({ dim:[640 * scale, 400 * scale], vdim: [640, 400], bpp: 8, mode: 1 });
                 this.showProgress(0);
             }
             setMode(e) {
@@ -627,7 +627,7 @@
             showProgress (value) {
                 const { ctx, scale } = this;
                 const { width, height } = this.canvas;
-                const pw = 160, ph = 12;
+                const pw = 160 * scale, ph = 12 * scale;
                 const px = Math.floor((width - pw) / 2);
                 const py = Math.floor((height - ph) * 23 / 25);
                 if (value <= 0) {
@@ -882,7 +882,7 @@ const unicodeMap = [
                 <label>
                     &#x1f4be;
                     <select id="selDiskImage">
-                        <option value="">----</option>
+                        <option value=""></option>
                         <option value="./bin/fdos.img" selected>FreeDOS</option>
                         <option value="./bin/floppybird.img">Floppy Bird</option>
                         <option value="./bin/osz.img">osz</option>
@@ -926,12 +926,8 @@ const unicodeMap = [
                             <option value="896">896KB *</option>
                             <option value="960">960KB *</option> -->
                             <option value="2048">2MB</option>
-                            <option value="3072">3MB</option>
                             <option value="4096">4MB</option>
-                            <option value="6144">6MB</option>
                             <option value="8192">8MB</option>
-                            <option value="10240">10MB</option>
-                            <option value="12288">12MB</option>
                             <option value="16384" selected>16MB</option>
                         </select>
                     </label>

@@ -48,7 +48,9 @@
 %define BDA_KBD_BUFF_BEGIN  0x001E
 %define BDA_KBD_BUFF_MASK   0x001F
 %define BDA_VGA_CURRENT_MODE    0x0049
+%define BDA_VGA_CONSOLE_COLS    0x004A
 %define BDA_VGA_CURSOR      0x0050
+%define BDA_VGA_CONSOLE_ROWSm1  0x0084
 %define BDA_KBD_MODE_TYPE   0x0096
 
 %define KBD_MODE_CLEAR_MASK 0xFC
@@ -84,14 +86,14 @@ _irq0:
     inc ax
     cmp ax, 24
     jb .nb
-    sub ax, 24
+    xor ax, ax
     mov byte [ds:0x0470], 1
 .nb:
     mov [ds:0x046E], ax
 .skip:
+    int 0x1C
     mov al, 0x20
     out 0x20, al
-    int 0x1C
     pop ax
     pop ds
     iret
@@ -250,8 +252,7 @@ _int10:
     cmp ah, (_int10_etbl - _int10_ftbl) / 2
     ja .not_supported
     call i10_caller
-.not_supported:
-
+.end:
     pop ax
     pop cx
     pop dx
@@ -262,6 +263,9 @@ _int10:
     pop ds
     pop es
     iret
+.not_supported:
+    ; db 0xF1
+    jmp .end
 
 i10_caller:
     mov bl, ah
@@ -297,7 +301,7 @@ i101F:
     ret
 
 i101A:
-    mov bx, 0x0808
+    mov bx, 0x0008
     mov [bp+STK_BX], bx
     mov [bp+STK_AX], ah
     ret
@@ -508,17 +512,18 @@ _bios_set_cursor:
 
 
 _bios_cursor_addr:
-    push bx
+    push ds
     push cx
-    mov bx, dx
-    mov al, bh
-    mov cl, 80
+    mov cx, BDA_SEG
+    mov ds, cx
+    mov al, dh
+    mov cl, [BDA_VGA_CONSOLE_COLS]
     mul cl
-    add al, bl
+    add al, dl
     adc ah, 0
     add ax, ax
     pop cx
-    pop bx
+    pop ds
     ret
 
 
@@ -544,17 +549,21 @@ _chk_scroll:
     push es
     push ax
     push cx
+    push dx
+    push bx
     push si
     push di
     mov cx, BDA_SEG
     mov ds, cx
     mov cx, [BDA_VGA_CURSOR]
-    cmp cl, 80
+    mov bl, [BDA_VGA_CONSOLE_COLS]
+    mov bh, [BDA_VGA_CONSOLE_ROWSm1]
+    cmp cl, bl
     jnz .no80
     xor cl, cl
     inc ch
 .no80:
-    mov al, 24
+    mov al, bh
     cmp ch, al
     jbe .end
     mov ch, al
@@ -562,16 +571,22 @@ _chk_scroll:
     mov cx, 0xB800
     mov ds, cx
     mov es, cx
+    mov al, bl
+    mul bh
+    mov cx, ax
+    xor bh, bh
+    add bx, bx
+    mov si, bx
     xor di, di
-    mov si, 80 * 2
-    mov cx, 80 * 24
     rep movsw
-    mov cx, 80
+    mov cl, bl
     mov ax, 0x0720
     rep stosw
 .end:
     pop di
     pop si
+    pop bx
+    pop dx
     pop cx
     pop ax
     pop es
@@ -1044,6 +1059,9 @@ __set_irq:
     stosw
     xor ax, ax
     stosw
+    mov di, 0x400 + BDA_VGA_CONSOLE_ROWSm1
+    mov al, 24
+    stosb
 
     ;; init PIC
     mov al, 0xFF
@@ -1144,6 +1162,7 @@ _clear_memory:
     add dx, bx
     sub bp, bx
     ja .loop
+
 
     ;; INIT VIDEO
     mov ax, 0x0003

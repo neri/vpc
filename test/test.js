@@ -2,11 +2,11 @@
 
 const expect= require('expect');
 const fs = require('fs');
-const RuntimeEnvironment = require('./env');
+const MinimalRuntimeEnvironment = require('./mre');
 
 const WASM_PATH = './lib/vcpu.wasm';
 const MAIN_CPU_GEN = 4;
-const env = new RuntimeEnvironment();
+const env = new MinimalRuntimeEnvironment();
 
 const prepare = async () => {
     return new Promise(resolve => resolve(fs.readFileSync(WASM_PATH)))
@@ -28,6 +28,7 @@ describe('CPU', () => {
             expect(env.getReg('CS')).toBe(0x0000F000);
             expect(env.getReg('CS.base')).toBe(0x000F0000);
             expect(env.getReg('CS.attr')).toBe(0x0000009B);
+            expect(env.getReg('CS.limit')).toBe(0x0000FFFF);
             expect(env.getReg('IP')).toBe(0x0000FFF0);
         });
 
@@ -36,6 +37,7 @@ describe('CPU', () => {
             expect(env.getReg('CS')).toBe(0x0000F000);
             expect(env.getReg('CS.base')).toBe(0x000F0000);
             expect(env.getReg('CS.attr')).toBe(0x0000009B);
+            expect(env.getReg('CS.limit')).toBe(0x0000FFFF);
             expect(env.getReg('IP')).toBe(0x0000FFF0);
             expect(env.getReg('flags')).toBe(0x0000F002);
             expect(env.getReg('DX') & 0x0F00).toBe(0x0000);
@@ -46,6 +48,7 @@ describe('CPU', () => {
             expect(env.getReg('CS')).toBe(0x0000F000);
             expect(env.getReg('CS.base')).toBe(0x000F0000);
             expect(env.getReg('CS.attr')).toBe(0x0000009B);
+            expect(env.getReg('CS.limit')).toBe(0x0000FFFF);
             expect(env.getReg('IP')).toBe(0x0000FFF0);
             expect(env.getReg('flags')).toBe(0x0000F002);
             expect(env.getReg('DX') & 0x0F00).toBe(0x0100);
@@ -56,6 +59,7 @@ describe('CPU', () => {
             expect(env.getReg('CS')).toBe(0x0000F000);
             expect(env.getReg('CS.base')).toBe(0x000F0000);
             expect(env.getReg('CS.attr')).toBe(0x0000009B);
+            expect(env.getReg('CS.limit')).toBe(0x0000FFFF);
             expect(env.getReg('IP')).toBe(0x0000FFF0);
             expect(env.getReg('flags')).toBe(0x00000002);
             expect(env.getReg('DX') & 0x0F00).toBe(0x0200);
@@ -66,6 +70,7 @@ describe('CPU', () => {
             expect(env.getReg('CS')).toBe(0x0000F000);
             expect(env.getReg('CS.base')).toBe(0x000F0000);
             expect(env.getReg('CS.attr')).toBe(0x0000009B);
+            expect(env.getReg('CS.limit')).toBe(0x0000FFFF);
             expect(env.getReg('IP')).toBe(0x0000FFF0);
             expect(env.getReg('flags')).toBe(0x00000002);
             expect(env.getReg('DX') & 0x0F00).toBe(0x0300);
@@ -76,6 +81,7 @@ describe('CPU', () => {
             expect(env.getReg('CS')).toBe(0x0000F000);
             expect(env.getReg('CS.base')).toBe(0x000F0000);
             expect(env.getReg('CS.attr')).toBe(0x0000009B);
+            expect(env.getReg('CS.limit')).toBe(0x0000FFFF);
             expect(env.getReg('IP')).toBe(0x0000FFF0);
             expect(env.getReg('flags')).toBe(0x00000002);
             expect(env.getReg('DX') & 0x0F00).toBe(0x0400);
@@ -343,6 +349,11 @@ describe('CPU', () => {
 
         it('JMP FAR32', () => {
             env.emitTest([0x66, 0xEA, 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0]);
+            expect(env.step()).toBe(0xD0000);
+
+            env.reset();
+            env.setReg('CS.limit', 0xFFFFFFFF);
+            env.saveState();
             expect(env.step()).toBe(0);
             expect(env.getReg('CS')).toBe(0xBC9A);
             expect(env.getReg('CS.base')).toBe(0x000BC9A0);
