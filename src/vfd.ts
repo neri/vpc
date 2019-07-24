@@ -128,18 +128,54 @@ export class VFD {
     }
     public attachImage(blob?: ArrayBuffer): void {
         if (blob != null) {
-            if (blob.byteLength == 512) { // For Boot Sector Test
-                this.image = new Uint8Array(blob);
+            const kb = blob.byteLength / 1024;
+            const image = new Uint8Array(blob);
+            if (blob.byteLength == 512) {
+                // Boot Sector Only
+                this.image = image;
                 this.maxLBA = 1;
                 this.driveType = 4;
                 this.n_heads = 2;
                 this.n_sectors = 18;
                 this.n_cylinders = 80;
-                console.log(`vfd_attach: BootSector ${this.bytesPerSector}`);
+                console.log(`vfd_attach: BootSector Only`);
+            } else if (image[0x26] == 0x29 &&
+                (image[0x00] == 0xEB || image[0x00] == 0xE9) &&
+                image[0x01] >= 0x3C &&
+                image[0x0B] == 0 && //image[0x0C] == 2 &&
+                image[0x10] == 0x02 &&
+                image[510] == 0x55 && image[511] == 0xAA) {
+                // FAT
+                const maxLBA = image[0x13] + (image[0x14] << 8);
+                let driveType = 0;
+                switch (kb) {
+                    case 360:
+                        driveType = 1;
+                        break;
+                    case 120:
+                        driveType = 2;
+                        break;
+                    case 720:
+                        driveType = 3;
+                        break;
+                    case 1440:
+                        driveType = 4;
+                        break;
+                    case 2880:
+                        driveType = 6;
+                        break;
+                }
+                this.image = image;
+                this.maxLBA = maxLBA;
+                this.driveType = driveType;
+                this.n_heads = image[0x1A];
+                this.n_sectors = image[0x18];
+                this.n_cylinders = maxLBA / this.n_sectors / this.n_heads;
+                console.log(`vfd_attach: FAT ${kb}KB LBA:${this.maxLBA} [C:${this.n_cylinders} H:${this.n_heads} R:${this.n_sectors}]`)
             } else {
-                const kb = blob.byteLength / 1024;
+                // Other Regular Floppy Image
                 let n_heads = 2;
-                let n_sectors: number;
+                let n_sectors: number | null = null;
                 let driveType = 0;
                 switch (kb) {
                     case 160:
@@ -176,16 +212,29 @@ export class VFD {
                         driveType = 6;
                         n_sectors = 36;
                         break;
-                    default:
-                        throw new Error('Unexpected image size');
+                    // default:
+                    //     break;
                 }
-                this.image = new Uint8Array(blob);
-                this.maxLBA = this.image.byteLength / this.bytesPerSector;
-                this.driveType = driveType;
-                this.n_heads = n_heads;
-                this.n_sectors = n_sectors;
-                this.n_cylinders = this.maxLBA / this.n_heads / this.n_sectors;
-                console.log(`vfd_attach: ${kb}KB LBA:${this.maxLBA} [C:${this.n_cylinders} H:${this.n_heads} R:${this.n_sectors}]`)
+                if (n_sectors != null) {
+                    this.image = image;
+                    this.maxLBA = this.image.byteLength / this.bytesPerSector;
+                    this.driveType = driveType;
+                    this.n_heads = n_heads;
+                    this.n_sectors = n_sectors;
+                    this.n_cylinders = this.maxLBA / this.n_heads / this.n_sectors;
+                    console.log(`vfd_attach: ${kb}KB LBA:${this.maxLBA} [C:${this.n_cylinders} H:${this.n_heads} R:${this.n_sectors}]`)
+                } else if (kb <= 2880 && image[510] == 0x55 && image[511] == 0xAA) {
+                    // treat as 2HD
+                    this.image = image;
+                    this.maxLBA = Math.ceil(this.image.byteLength / this.bytesPerSector);
+                    this.driveType = 4;
+                    this.n_heads = 2;
+                    this.n_sectors = 18;
+                    this.n_cylinders = 80;
+                    console.log(`vfd_attach: UNKNOWN ${kb}KB LBA:${this.maxLBA}`);
+                } else {
+                    throw new Error ('Unexpected disk image format');
+                }
             }
         } else {
             this.maxLBA = 0;
