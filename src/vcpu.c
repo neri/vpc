@@ -2647,28 +2647,71 @@ static int cpu_step(cpu_state *cpu) {
 
             case 0xAC: // LODSB
             {
-                if (cpu->cpu_context & (CPU_CTX_DATA32 | CPU_CTX_ADDR32)) return cpu_status_ud;
                 sreg_t *_seg = SEGMENT(&cpu->DS);
-                if (prefix & (PREFIX_REPZ | PREFIX_REPNZ)) return cpu_status_ud;
-                cpu->AL = READ_MEM8(_seg, cpu->SI);
-                if (cpu->DF) {
-                    cpu->SI--;
+                int rep = prefix & (PREFIX_REPZ | PREFIX_REPNZ);
+                if (rep) return cpu_status_ud;
+                uint32_t index, index_mask;
+                if (cpu->cpu_context & CPU_CTX_ADDR32) {
+                    index_mask = UINT32_MAX;
+                    // count = cpu->ECX;
+                    index = cpu->ESI;
                 } else {
-                    cpu->SI++;
+                    index_mask = UINT16_MAX;
+                    // count = cpu->CX;
+                    index = cpu->SI;
+                }
+                cpu->AL = READ_MEM8(_seg, index);
+                if (cpu->DF) {
+                    index--;
+                } else {
+                    index++;
+                }
+                if (cpu->cpu_context & CPU_CTX_ADDR32) {
+                    cpu->ESI = index;
+                    // if (rep) cpu->ECX = count;
+                } else {
+                    cpu->SI = index;
+                    // if (rep) cpu->CX = count;
                 }
                 return 0;
             }
 
             case 0xAD: // LODSW
             {
-                if (cpu->cpu_context & (CPU_CTX_DATA32 | CPU_CTX_ADDR32)) return cpu_status_ud;
-                if (prefix & (PREFIX_REPZ | PREFIX_REPNZ)) return cpu_status_ud;
                 sreg_t *_seg = SEGMENT(&cpu->DS);
-                cpu->AX = READ_MEM16(_seg, cpu->SI);
-                if (cpu->DF) {
-                    cpu->SI -= 2;
+                int rep = prefix & (PREFIX_REPZ | PREFIX_REPNZ);
+                if (rep) return cpu_status_ud;
+                uint32_t index, index_mask;
+                if (cpu->cpu_context & CPU_CTX_ADDR32) {
+                    index_mask = UINT32_MAX;
+                    // count = cpu->ECX;
+                    index = cpu->ESI;
                 } else {
-                    cpu->SI += 2;
+                    index_mask = UINT16_MAX;
+                    // count = cpu->CX;
+                    index = cpu->SI;
+                }
+                if (cpu->cpu_context & CPU_CTX_DATA32) {
+                    cpu->EAX = READ_MEM32(_seg, index);
+                    if (cpu->DF) {
+                        index -= 4;
+                    } else {
+                        index += 4;
+                    }
+                } else {
+                    cpu->AX = READ_MEM16(_seg, index);
+                    if (cpu->DF) {
+                        index -= 2;
+                    } else {
+                        index += 2;
+                    }
+                }
+                if (cpu->cpu_context & CPU_CTX_ADDR32) {
+                    cpu->ESI = index;
+                    // if (rep) cpu->ECX = count;
+                } else {
+                    cpu->SI = index;
+                    // if (rep) cpu->CX = count;
                 }
                 return 0;
             }
@@ -2929,6 +2972,7 @@ static int cpu_step(cpu_state *cpu) {
                 return 0;
             
             case 0xE5: // IN AX, imm8
+                if (cpu->cpu_context & (CPU_CTX_DATA32)) return cpu_status_ud;
                 cpu->AX = vpc_inw(FETCH8(cpu));
                 return 0;
 
@@ -2937,6 +2981,7 @@ static int cpu_step(cpu_state *cpu) {
                 return 0;
 
             case 0xE7: // OUT imm8, AX
+                if (cpu->cpu_context & (CPU_CTX_DATA32)) return cpu_status_ud;
                 vpc_outw(FETCH8(cpu), cpu->AX);
                 return 0;
 
@@ -2981,6 +3026,7 @@ static int cpu_step(cpu_state *cpu) {
                 return 0;
 
             case 0xED: // IN AX, DX
+                if (cpu->cpu_context & (CPU_CTX_DATA32)) return cpu_status_ud;
                 cpu->AX = vpc_inw(cpu->DX);
                 return 0;
 
@@ -2989,6 +3035,7 @@ static int cpu_step(cpu_state *cpu) {
                 return 0;
 
             case 0xEF: // OUT DX, AX
+                if (cpu->cpu_context & (CPU_CTX_DATA32)) return cpu_status_ud;
                 vpc_outw(cpu->DX, cpu->AX);
                 return 0;
 
@@ -3296,7 +3343,10 @@ static int cpu_step(cpu_state *cpu) {
                                 if (mod) return cpu_status_ud;
                                 desc_t new_dt;
                                 new_dt.limit = READ_LE16(set.opr1b);
-                                new_dt.base = 0xFFFFFF & READ_LE32(set.opr1b + 2);
+                                new_dt.base = READ_LE32(set.opr1b + 2);
+                                if ((cpu->cpu_context & CPU_CTX_DATA32) == 0) {
+                                    new_dt.base &= 0xFFFFFF;
+                                }
                                 cpu->GDT = new_dt;
                                 return 0;
                             }
@@ -3305,7 +3355,10 @@ static int cpu_step(cpu_state *cpu) {
                                 if (mod) return cpu_status_ud;
                                 desc_t new_dt;
                                 new_dt.limit = READ_LE16(set.opr1b);
-                                new_dt.base = 0xFFFFFF & READ_LE32(set.opr1b + 2);
+                                new_dt.base = READ_LE32(set.opr1b + 2);
+                                if ((cpu->cpu_context & CPU_CTX_DATA32) == 0) {
+                                    new_dt.base &= 0xFFFFFF;
+                                }
                                 cpu->IDT = new_dt;
                                 return 0;
                             }
@@ -3323,7 +3376,7 @@ static int cpu_step(cpu_state *cpu) {
 
                     // case 0x02: // LAR reg, r/m
                     // case 0x03: // LSL reg, r/m
-                    // case 0x05: // LOADALL / SYSCALl
+                    // case 0x05: // LOADALL / SYSCALL
 
                     case 0x06: // CLTS
                         cpu->CR0.TS = 0;
@@ -4038,7 +4091,7 @@ WASM_EXPORT int run(cpu_state *cpu) {
  * |>0x10000|Exit|N|CPU enters to shutdown|
  * ||#DE|conditional|Divide by zero|
  * |0x60000|#UD|conditional|Undefined instruction|
- * |0x70000|#FP|conditional|FPU error|
+ * |0x70000|#NM|conditional|FPU Not Available|
  * |0x8XXXX|#DF|N|Double Fault|
  * |0xBXXXX|#NP|conditional|Segment Not Present|
  * |0xCXXXX|#SS|conditional|Stack Exception|

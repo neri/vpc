@@ -875,19 +875,14 @@ const unicodeMap = [
 
     <div id="controlPanel">
         <div class="left">
-            <label id="volumeControl" class="controlFrame">
-                &#x1F64A;<input id="inputVolume" type="range" min="0" max="10" step="1" value="5">&#x1F649;
-            </label>
             <span id="frameFD" class="controlFrame">
-                <label>
-                    &#x1f4be;
-                    <select id="selDiskImage">
-                        <option value=""></option>
-                        <option value="./bin/fdos.img" selected>FreeDOS</option>
-                        <option value="./bin/floppybird.img">Floppy Bird</option>
-                        <option value="./bin/osz.img">osz</option>
-                    </select>
-                </label>
+                <a id="buttonReset" class="buttonFace destructiveButton">RESET</a>
+                <select id="selDiskImage">
+                    <option value=""></option>
+                    <option value="./bin/fdos.img" selected>FreeDOS</option>
+                    <option value="./bin/floppybird.img">Floppy Bird</option>
+                    <option value="./bin/osz.img">osz</option>
+                </select>
                 <input id="fileLocal" type="file" style="position: absolute; width:0px; height:0px; z-index: -1;">
                 <label>
                     <a id="buttonLocal" class="buttonFace">file:</a>
@@ -899,9 +894,12 @@ const unicodeMap = [
             <summary class="buttonFace activeButton">Option</summary>
             <article>
 
-                <fieldset>
-                    <legend>System</legend>
-                    <a id="buttonReset" class="buttonFace destructiveButton">RESET</a>
+                <label id="volumeControl" class="controlFrame">
+                    &#x1F64A;<input id="inputVolume" type="range" min="0" max="10" step="1" value="5">&#x1F649;
+                </label>
+
+                <div class="controlFrame">
+
                     <label>
                         CPU:
                         <select id="selCpuGen">
@@ -931,7 +929,8 @@ const unicodeMap = [
                             <option value="16384" selected>16MB</option>
                         </select>
                     </label>
-                </fieldset>
+
+                </div>
 
                 <!-- <fieldset>
                     <legend>Screen Option</legend>
