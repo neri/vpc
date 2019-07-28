@@ -13,6 +13,8 @@ module.exports = class MinimalRuntimeEnvironment {
         this.env.vpc_inb = (port) => { throw new Error('UNEXPECTED CONTROL FLOW'); };
         this.env.vpc_outw = (port, data) => { throw new Error('UNEXPECTED CONTROL FLOW'); };
         this.env.vpc_inw = (port) => { throw new Error('UNEXPECTED CONTROL FLOW'); };
+        this.env.vpc_outd = (port, data) => { throw new Error('UNEXPECTED CONTROL FLOW'); };
+        this.env.vpc_ind = (port) => { throw new Error('UNEXPECTED CONTROL FLOW'); };
         this.env.vpc_irq = () => { throw new Error('UNEXPECTED CONTROL FLOW'); };
         this.env.TRAP_NORETURN = () => { throw new Error('UNEXPECTED CONTROL FLOW'); };
         this.env.vpc_grow = (n) => {

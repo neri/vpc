@@ -59,6 +59,17 @@
             font-size: 14px;
         }
 
+        .leftFrame {
+            float: left;
+            margin: 1px 3px;
+            padding: 1px 3px;
+            border-radius: 8px;
+            min-height: 24px;
+            vertical-align: middle;
+            border: transparent dashed 2px;
+            font-size: 14px;
+        }
+
         .controlActive {
             border-color: #00F;
         }
@@ -121,15 +132,16 @@
             min-height: 16px;
             vertical-align: middle;
             font-size: 12px;
-            border: none;
+            border: solid 1px transparent;
             background: #9E9E9E;
             color: #FFF;
             border-radius: 4px;
             cursor: pointer;
+            box-shadow: 1px 1px 4px 2px rgba(0, 0, 0, 0.125);
         }
 
         .buttonFace:hover {
-            box-shadow: 1px 1px 4px 2px rgba(0, 0, 0, 0.125);
+            border-color: rgba(0, 0, 0, 0.25);
         }
         
         .activeButton {
@@ -152,6 +164,7 @@
         #devTerminal {
             font: 10px 'TerminalWebFont', 'Menlo', 'Monaco', 'Consolas', 'Courier New', 'Courier', monospace;
         }
+
     </style>
     <script>
 
@@ -784,6 +797,7 @@ const unicodeMap = [
             $('#buttonReset').addEventListener('click', e => {
                 if (window.worker) {
                     worker.postMessage({command: 'reset', gen: parseInt($('#selCpuGen').value)});
+                    window.term.focus();
                 }
             });
 
@@ -874,22 +888,22 @@ const unicodeMap = [
     </div>
 
     <div id="controlPanel">
-        <div class="left">
-            <span id="frameFD" class="controlFrame">
-                <a id="buttonReset" class="buttonFace destructiveButton">RESET</a>
-                <select id="selDiskImage">
-                    <option value=""></option>
-                    <option value="./bin/fdos.img" selected>FreeDOS</option>
-                    <option value="./bin/floppybird.img">Floppy Bird</option>
-                    <option value="./bin/osz.img">osz</option>
-                </select>
-                <input id="fileLocal" type="file" style="position: absolute; width:0px; height:0px; z-index: -1;">
-                <label>
-                    <a id="buttonLocal" class="buttonFace">file:</a>
-                    <input id="labelLocal" type="text" size="12" readonly>
-                </label>
-            </span>
-        </div>
+
+        <span id="frameFD" class="leftFrame">
+            <a id="buttonReset" class="buttonFace destructiveButton">RESET</a>
+            <select id="selDiskImage">
+                <option value=""></option>
+                <option value="./bin/fdos.img" selected>FreeDOS</option>
+                <option value="./bin/floppybird.img">Floppy Bird</option>
+                <option value="./bin/osz.img">osz</option>
+            </select>
+            <input id="fileLocal" type="file" style="position: absolute; width:0px; height:0px; z-index: -1;">
+            <label>
+                <a id="buttonLocal" class="buttonFace">file:</a>
+                <input id="labelLocal" type="text" size="12" readonly>
+            </label>
+        </span>
+
         <details open>
             <summary class="buttonFace activeButton">Option</summary>
             <article>

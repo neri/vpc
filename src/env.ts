@@ -52,6 +52,8 @@ export class RuntimeEnvironment {
         this.env.vpc_inb = (port: number): number => this.iomgr.inb(port);
         this.env.vpc_outw = (port: number, data: number): void => this.iomgr.outw(port, data);
         this.env.vpc_inw = (port: number): number => this.iomgr.inw(port);
+        this.env.vpc_outd = (port: number, data: number): void => this.iomgr.outd(port, data);
+        this.env.vpc_ind = (port: number): number => this.iomgr.ind(port);
         this.env.vpc_irq = () => this.pic.dequeueIRQ();
         this.env.TRAP_NORETURN = (): never => { throw new Error('UNEXPECTED CONTROL FLOW'); };
         this.env.vpc_grow = (n: number): number => {
@@ -136,7 +138,7 @@ export class RuntimeEnvironment {
         if (this.worker.hasClass('TextDecoder')) {
             return new TextDecoder('utf-8').decode(bytes);
         } else {
-            return String.fromCharCode(...bytes);
+            return String.fromCharCode.apply(String, bytes);
         }
     }
     public reset(gen: number): void {
@@ -159,6 +161,7 @@ export class RuntimeEnvironment {
         this.cont();
     }
     public cont(): void {
+        const STATUS_EXCEPTION = 0x10000;
         if (this.period > 0) {
             const now = new Date().valueOf();
             for (let expected = this.lastTick + this.period; now >= expected; expected += this.period) {
@@ -166,9 +169,16 @@ export class RuntimeEnvironment {
                 this.lastTick = expected;
             }
         }
-        const status: number = this.instance.exports.run(this.cpu);
+        let status: number;
+        try {
+            status = this.instance.exports.run(this.cpu);
+        } catch (e) {
+            console.error(e);
+            status = STATUS_EXCEPTION;
+            this.instance.exports.debug_dump(this.cpu);
+        }
         this.dequeueUART();
-        if (status >= 0x10000) {
+        if (status >= STATUS_EXCEPTION) {
             this.isRunning = false;
             console.log(`CPU enters to shutdown (${status.toString(16)})`);
         } else if (this.isDebugging) {
