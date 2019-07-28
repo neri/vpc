@@ -59,6 +59,17 @@
             font-size: 14px;
         }
 
+        .leftFrame {
+            float: left;
+            margin: 1px 3px;
+            padding: 1px 3px;
+            border-radius: 8px;
+            min-height: 24px;
+            vertical-align: middle;
+            border: transparent dashed 2px;
+            font-size: 14px;
+        }
+
         .controlActive {
             border-color: #00F;
         }
@@ -121,15 +132,16 @@
             min-height: 16px;
             vertical-align: middle;
             font-size: 12px;
-            border: none;
+            border: solid 1px transparent;
             background: #9E9E9E;
             color: #FFF;
             border-radius: 4px;
             cursor: pointer;
+            box-shadow: 1px 1px 4px 2px rgba(0, 0, 0, 0.125);
         }
 
         .buttonFace:hover {
-            box-shadow: 1px 1px 4px 2px rgba(0, 0, 0, 0.125);
+            border-color: rgba(0, 0, 0, 0.25);
         }
         
         .activeButton {
@@ -147,6 +159,10 @@
 
         #midiMode {
             font-weight: bold;
+        }
+
+        #devTerminal {
+            font: 10px 'TerminalWebFont', 'Menlo', 'Monaco', 'Consolas', 'Courier New', 'Courier', monospace;
         }
 
     </style>
@@ -264,15 +280,19 @@
                         })
                         break;
                     }
-                    case 'write':
-                        window.term.write(message.data.data);
-                        break;
                     case 'alert':
                         alert(message.data.data);
                         break;
-                    case 'regResult':
-                        $('#inputRegister').value = message.data.data;
+                    case 'write':
+                        // window.term.write(message.data.data);
+                        // break;
+                    case 'devWrite':
+                    {
+                        const terminal = $('#devTerminal');
+                        terminal.value += `${message.data.data}\n`;
+                        terminal.scrollTop = terminal.scrollHeight;
                         break;
+                    }
                     default:
                         window.devmgr.dispatchMessage(message.data.command, message.data.data);
                 }
@@ -428,7 +448,7 @@
                     {
                         const option = document.createElement('option');
                         option.setAttribute('value', PORT_NOT_SELECTED);
-                        option.appendChild(document.createTextNode('---'));
+                        // option.appendChild(document.createTextNode(''));
                         select.appendChild(option);
                     }
                     for(let i = 0; i < this.outputs.length; i++){
@@ -589,7 +609,7 @@
                     this.updateCursor(e / 2);
                 });
 
-                this.setMode({ dim:[640, 400], vdim: [640, 400], bpp: 8, mode: 1 });
+                this.setMode({ dim:[640 * scale, 400 * scale], vdim: [640, 400], bpp: 8, mode: 1 });
                 this.showProgress(0);
             }
             setMode(e) {
@@ -620,9 +640,9 @@
             showProgress (value) {
                 const { ctx, scale } = this;
                 const { width, height } = this.canvas;
-                const pw = 100, ph = 12;
+                const pw = 160 * scale, ph = 12 * scale;
                 const px = Math.floor((width - pw) / 2);
-                const py = Math.floor((height - ph) * 0.75);
+                const py = Math.floor((height - ph) * 23 / 25);
                 if (value <= 0) {
                     ctx.fillStyle = '#000';
                     ctx.fillRect(px, py, pw, ph);
@@ -777,12 +797,13 @@ const unicodeMap = [
             $('#buttonReset').addEventListener('click', e => {
                 if (window.worker) {
                     worker.postMessage({command: 'reset', gen: parseInt($('#selCpuGen').value)});
+                    window.term.focus();
                 }
             });
 
             $('#buttonNMI').addEventListener('click', e => {
                 if (window.worker) {
-                    worker.postMessage({command: 'nmi', regName: $('#selRegName').value });
+                    worker.postMessage({command: 'nmi' });
                 }
             });
             $('#buttonDump').addEventListener('click', e => {
@@ -796,11 +817,6 @@ const unicodeMap = [
                 }
                 if (window.worker) {
                     worker.postMessage({command: 'dump', address: address})
-                }
-            });
-            $('#selRegName').addEventListener('change', e => {
-                if (window.worker) {
-                    worker.postMessage({command: 'readReg', regName: $('#selRegName').value });
                 }
             });
 
@@ -853,6 +869,10 @@ const unicodeMap = [
                 });
                 reader.readAsArrayBuffer(file);
             }, false);
+
+            $('#buttonDevCLS').addEventListener('click', e => {
+                $('#devTerminal').value = '';
+            });
         });
 
 
@@ -868,34 +888,32 @@ const unicodeMap = [
     </div>
 
     <div id="controlPanel">
-        <div class="left">
-            <label id="volumeControl" class="controlFrame">
-                &#x1F64A;<input id="inputVolume" type="range" min="0" max="10" step="1" value="5">&#x1F649;
+
+        <span id="frameFD" class="leftFrame">
+            <a id="buttonReset" class="buttonFace destructiveButton">RESET</a>
+            <select id="selDiskImage">
+                <option value=""></option>
+                <option value="./bin/fdos.img" selected>FreeDOS</option>
+                <option value="./bin/floppybird.img">Floppy Bird</option>
+                <option value="./bin/osz.img">osz</option>
+            </select>
+            <input id="fileLocal" type="file" style="position: absolute; width:0px; height:0px; z-index: -1;">
+            <label>
+                <a id="buttonLocal" class="buttonFace">file:</a>
+                <input id="labelLocal" type="text" size="12" readonly>
             </label>
-            <span id="frameFD" class="controlFrame">
-                <label>
-                    &#x1f4be;
-                    <select id="selDiskImage">
-                        <option value="">----</option>
-                        <option value="./bin/osz.img">osz</option>
-                        <option value="./bin/fdos.img" selected>FreeDOS</option>
-                        <option value="./bin/floppybird.img">Floppy Bird</option>
-                    </select>
-                </label>
-                <input id="fileLocal" type="file" style="position: absolute; width:0px; height:0px; z-index: -1;">
-                <label>
-                    <a id="buttonLocal" class="buttonFace">file:</a>
-                    <input id="labelLocal" type="text" size="12" readonly>
-                </label>
-            </span>
-        </div>
+        </span>
+
         <details open>
             <summary class="buttonFace activeButton">Option</summary>
             <article>
 
-                <fieldset>
-                    <legend>System</legend>
-                    <a id="buttonReset" class="buttonFace destructiveButton">RESET</a>
+                <label id="volumeControl" class="controlFrame">
+                    &#x1F64A;<input id="inputVolume" type="range" min="0" max="10" step="1" value="5">&#x1F649;
+                </label>
+
+                <div class="controlFrame">
+
                     <label>
                         CPU:
                         <select id="selCpuGen">
@@ -920,56 +938,39 @@ const unicodeMap = [
                             <option value="896">896KB *</option>
                             <option value="960">960KB *</option> -->
                             <option value="2048">2MB</option>
-                            <option value="3072">3MB</option>
                             <option value="4096">4MB</option>
-                            <option value="6144">6MB</option>
                             <option value="8192">8MB</option>
-                            <option value="10240">10MB</option>
-                            <option value="12288">12MB</option>
                             <option value="16384" selected>16MB</option>
                         </select>
                     </label>
-                </fieldset>
+
+                </div>
 
                 <!-- <fieldset>
                     <legend>Screen Option</legend>
                     <label>
-                        Performance:
-                        <input type="range" min="1" max="1" value="1">
+                        Console Color:
+                        <select>
+                            <option>Default Dark</option>
+                            <option>Light</option>
+                            <option>Green Display</option>
+                        </select>
                     </label>
                 </fieldset> -->
     
                 <div id="cpMidi"></div>
 
-                <!-- <div class="controlFrame"> -->
-                <fieldset>
-                    <legend>Developer Tools</legend>
-
-                    <a id="buttonNMI" class="buttonFace">Step</a>
-                    <select id="selRegName">
-                        <option value="AX">AX</option>
-                        <option value="BX">BX</option>
-                        <option value="CX">CX</option>
-                        <option value="DX">DX</option>
-                        <option value="BP">BP</option>
-                        <option value="SP">SP</option>
-                        <option value="SI">SI</option>
-                        <option value="DI">DI</option>
-                        <option value="IP">IP</option>
-                        <option value="flags">flags</option>
-                        <option value="CS">CS</option>
-                        <option value="DS">DS</option>
-                        <option value="ES">ES</option>
-                        <option value="SS">SS</option>
-                        <option value="FS">FS</option>
-                        <option value="GS">GS</option>
-                        <option value="CR0">CR0</option>
-                    </select>
-                    <input id="inputRegister" value="" placeholder="00000000" size="12">
-                    <input id="inputAddress" value="" placeholder="0000:0000" size="12">
-                    <a id="buttonDump" class="buttonFace">Dump</a>
-                </fieldset>
-            <!-- </div> -->
+                <div class="controlFrame">
+                    <details>
+                        <summary class="buttonFace">DevTool</summary>
+                        <a id="buttonNMI" class="buttonFace">Step</a>
+                        <a id="buttonDevCLS" class="buttonFace destructiveButton">Clear</a>
+                        <input id="inputAddress" value="" placeholder="0000:0000" size="12">
+                        <a id="buttonDump" class="buttonFace">Dump</a>
+                        <br>
+                        <textarea id="devTerminal" cols="80" rows="20" readonly></textarea>
+                    </details>
+                </div>
             </article>
         </details>
     </div>
@@ -977,7 +978,6 @@ const unicodeMap = [
     <address>
         POWERED by 
         <a href="https://github.com/neri/vpc">Virtual Playground</a>
-        <!-- / <a href="https://github.com/xtermjs/xterm.js/">xterm.js</a> -->
     </address>
 </body>
 </html>

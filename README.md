@@ -39,14 +39,15 @@ A PC Emulator implemented by WebAssembly.
 
 ## Supported Software
 
-|System|Status|
+|Software|Status|
 |-|-|
 |osz|It seems working|
 |FreeDOS (16bit)|It seems working|
 |FreeDOS (32bit)|failed|
 |elks|failed|
 |BootChess|buggy|
-|[Floppy Bird](https://github.com/icebreaker/floppybird)|Needs a patch|
+|[Floppy Bird](https://github.com/icebreaker/floppybird)|Needs a [patch](https://github.com/neri/floppybird/commit/6db932489afd6bbb5bddcdf0185d9f9051914459)|
+|[Invaders game in 512 bytes](https://github.com/nanochess/Invaders)|It seems working|
 
 ## License
 

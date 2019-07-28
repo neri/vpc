@@ -29,7 +29,7 @@ type Size = [number, number];
 
 export class VGA {
 
-    private timer: number | null;
+    private timer: NodeJS.Timeout | null;
     private pal_u32: Uint32Array;
     private pal_u8: Uint8Array;
     private pal_index: number;

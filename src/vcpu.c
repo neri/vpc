@@ -15,6 +15,8 @@ WASM_IMPORT void vpc_outb(int port, int value);
 WASM_IMPORT int vpc_inb(int port);
 WASM_IMPORT void vpc_outw(int port, int value);
 WASM_IMPORT int vpc_inw(int port);
+WASM_IMPORT void vpc_outd(int port, uint32_t value);
+WASM_IMPORT uint32_t vpc_ind(int port);
 WASM_IMPORT int vpc_irq();
 WASM_IMPORT _Noreturn void TRAP_NORETURN();
 WASM_IMPORT int vpc_grow(int n);
@@ -68,6 +70,7 @@ typedef enum cpu_status_t {
     cpu_status_exception_base,
     cpu_status_fpu = 0x70000,
     cpu_status_double = 0x80000,
+    cpu_status_invalid_tss = 0xA0000,
     cpu_status_not_present = 0xB0000,
     cpu_status_stack = 0xC0000,
     cpu_status_gpf = 0xD0000,
@@ -141,6 +144,7 @@ typedef struct {
 } gate_desc_t;
 
 enum {
+    type_unavailable,
     type_tss16_available = 1,
     type_ldt,
     type_tss16_busy,
@@ -153,6 +157,7 @@ enum {
     type_call_gate32,
     type_intr_gate32 = 14,
     type_trap_gate32,
+    type_segment,
 };
 
 #define SEG_CTX_DEFAULT_DATA32  0x00000010
@@ -310,7 +315,7 @@ typedef struct cpu_state {
 
 #define VOID_MEMORY_VALUE 0xDEADBEEF
 size_t max_mem = 0;
-uintptr_t null_ptr;
+intptr_t null_ptr;
 uint8_t *mem = NULL;
 
 /**
@@ -341,6 +346,10 @@ static int RAISE_GPF(uint16_t errcode) {
 
 static int RAISE_NOT_PRESENT(uint16_t errcode) {
     return cpu_status_not_present | errcode;
+}
+
+static int RAISE_INVALID_TSS(uint16_t errcode) {
+    return cpu_status_invalid_tss | errcode;
 }
 
 static char *hextbl = "0123456789abcdef";
@@ -556,7 +565,7 @@ static uint32_t POPW(cpu_state *cpu) {
     return result;
 }
 
-static void PUSHW(cpu_state *cpu, uint32_t value) {
+static int _PUSHW(cpu_state *cpu, uint32_t value) {
     int addr32 = (cpu->cpu_context & CPU_CTX_ADDR32);
     int data32 = (cpu->cpu_context & CPU_CTX_DATA32);
     uint32_t esp = cpu->ESP;
@@ -565,9 +574,11 @@ static void PUSHW(cpu_state *cpu, uint32_t value) {
         if (!esp) esp = 0x10000;
     }
     if (data32) {
+        if (esp < 4) return cpu_status_stack;
         esp -= 4;
         WRITE_MEM32(&cpu->SS, esp, value);
     } else {
+        if (esp < 2) return cpu_status_stack;
         esp -= 2;
         WRITE_MEM16(&cpu->SS, esp, value);
     }
@@ -576,7 +587,9 @@ static void PUSHW(cpu_state *cpu, uint32_t value) {
     } else {
         cpu->SP = esp;
     }
+    return 0;
 }
+#define PUSHW(cpu, v) do { int status = _PUSHW(cpu, v); if (status) return status; } while(0)
 
 static int LOAD_SEL(cpu_state *cpu, sreg_t *sreg, uint16_t value) {
     if (cpu->CR0.PE) {
@@ -591,14 +604,16 @@ static int LOAD_SEL(cpu_state *cpu, sreg_t *sreg, uint16_t value) {
         uint32_t index = value >> 3;
         int rpl = value & 3;
         seg_desc_t *gdt = (seg_desc_t *)(mem + desc_table.base);
-        seg_desc_t new_seg = gdt[index];
-        if (new_seg.attr_P == 0) return RAISE_NOT_PRESENT(errcode);
-        if (new_seg.attr_S == 0) return RAISE_GPF(errcode);
-        if (new_seg.attr_DPL != rpl) return RAISE_GPF(errcode);
-        sreg->attrs = new_seg.attr_1 | (new_seg.attr_2 << 8) | 1;
-        sreg->base = new_seg.base_1 + (new_seg.base_2 << 16) + (new_seg.base_3 << 24);
-        uint32_t limit = new_seg.limit_1 + (new_seg.limit_2 << 16);
-        if (new_seg.attr_G) {
+        seg_desc_t new_desc = gdt[index];
+        if (new_desc.attr_P == 0) return RAISE_NOT_PRESENT(errcode);
+        if (new_desc.attr_S == 0) return RAISE_GPF(errcode);
+        // if (new_desc.attr_DPL != rpl) return RAISE_GPF(errcode);
+
+        gdt[index].attr_1 |= 1;
+        sreg->attrs = new_desc.attr_1 | (new_desc.attr_2 << 8);
+        sreg->base = new_desc.base_1 + (new_desc.base_2 << 16) + (new_desc.base_3 << 24);
+        uint32_t limit = new_desc.limit_1 + (new_desc.limit_2 << 16);
+        if (new_desc.attr_G) {
             limit = (limit << 12) | 0x00000FFF;
         }
         sreg->limit = limit;
@@ -628,15 +643,16 @@ static int LOAD_DESC(cpu_state *cpu, desc_t *desc, uint16_t value, uint32_t type
         uint32_t index = value >> 3;
         int rpl = value & 3;
         seg_desc_t *gdt = (seg_desc_t *)(mem + desc_table.base);
-        seg_desc_t new_seg = gdt[index];
-        if (new_seg.attr_P == 0) return RAISE_NOT_PRESENT(errcode);
-        if (new_seg.attr_S != 0) return RAISE_GPF(errcode);
-        if (new_seg.attr_DPL != rpl) return RAISE_GPF(errcode);
-        if (((1 << new_seg.attr_type) & type_bitmap) == 0) return RAISE_GPF(errcode);
-        desc->attrs = new_seg.attr_1 | (new_seg.attr_2 << 8) | 1;
-        desc->base = new_seg.base_1 + (new_seg.base_2 << 16) + (new_seg.base_3 << 24);
-        uint32_t limit = new_seg.limit_1 + (new_seg.limit_2 << 16);
-        if (new_seg.attr_G) {
+        seg_desc_t new_desc = gdt[index];
+        if (new_desc.attr_P == 0) return RAISE_NOT_PRESENT(errcode);
+        if (new_desc.attr_S != 0) return RAISE_GPF(errcode);
+        if (new_desc.attr_DPL != rpl) return RAISE_GPF(errcode);
+        if (((1 << new_desc.attr_type) & type_bitmap) == 0) return RAISE_GPF(errcode);
+
+        desc->attrs = new_desc.attr_1 | (new_desc.attr_2 << 8);
+        desc->base = new_desc.base_1 + (new_desc.base_2 << 16) + (new_desc.base_3 << 24);
+        uint32_t limit = new_desc.limit_1 + (new_desc.limit_2 << 16);
+        if (new_desc.attr_G) {
             limit = (limit << 12) | 0x00000FFF;
         }
         desc->limit = limit;
@@ -656,6 +672,7 @@ static int FAR_CALL(cpu_state *cpu, uint16_t new_sel, uint32_t new_eip) {
     cpu->EIP = new_eip;
     PUSHW(cpu, old_cs);
     PUSHW(cpu, old_eip);
+    if (new_sel == 0 && new_eip == 0) return cpu_status_gpf;
     return CS_LIMIT_CHECK(cpu, 0);
 }
 
@@ -1652,6 +1669,9 @@ static int MOV_CR(cpu_state *cpu, int cr, uint32_t value) {
             if (changed & 0x80000001) return cpu_status_significant;
             return 0;
         }
+        case 3:
+            cpu->CR[cr] = value;
+            return 0;
         case 4:
         {
             uint32_t old_value = cpu->CR[cr];
@@ -1662,6 +1682,39 @@ static int MOV_CR(cpu_state *cpu, int cr, uint32_t value) {
         }
         default:
             return cpu_status_gpf;
+    }
+}
+
+typedef enum  {
+    BitTestOp_BT,
+    BitTestOp_BTS,
+    BitTestOp_BTR,
+    BitTestOp_BTC,
+} BitTestOp;
+
+static void BitTest(cpu_state *cpu, operand_set *set, int mod, uint32_t src, BitTestOp op) {
+    uint32_t mask = 1 << (src & 31);
+    uint32_t *dst;
+    if (mod) {
+        dst = set->opr1;
+    } else {
+        uint32_t offset = src >> 5;
+        dst = (uint32_t *)(set->opr1b + offset);
+    }
+    uint32_t value = READ_LE32(dst);
+    cpu->CF = (value & mask) != 0;
+    switch (op) {
+        case BitTestOp_BT:
+            break;
+        case BitTestOp_BTS:
+            WRITE_LE32(dst, value |= mask);
+            break;
+        case BitTestOp_BTR:
+            WRITE_LE32(dst, value &= ~mask);
+            break;
+        case BitTestOp_BTC:
+            WRITE_LE32(dst, value ^= mask);
+            break;
     }
 }
 
@@ -2211,9 +2264,15 @@ static int cpu_step(cpu_state *cpu) {
             case 0x96:
             case 0x97:
             {
-                uint32_t temp = cpu->gpr[inst & 7];
-                cpu->gpr[inst & 7] = cpu->EAX;
-                cpu->EAX = temp;
+                if (cpu->cpu_context & CPU_CTX_DATA32) {
+                    uint32_t temp = cpu->gpr[inst & 7];
+                    cpu->gpr[inst & 7] = cpu->EAX;
+                    cpu->EAX = temp;
+                } else {
+                    uint32_t temp = cpu->gpr[inst & 7];
+                    WRITE_LE16(&cpu->gpr[inst & 7], cpu->AX);
+                    cpu->AX = temp;
+                }
                 return 0;
             }
 
@@ -2534,8 +2593,16 @@ static int cpu_step(cpu_state *cpu) {
 
             case 0xA8: // TEST AL, imm8
             case 0xA9: // TEST AX, imm16
-                set.size = inst & 1;
-                set.opr1 = &cpu->AX;
+                if (inst & 1) {
+                    if (cpu->cpu_context & CPU_CTX_DATA32) {
+                        set.size = 2;
+                    } else {
+                        set.size = 1;
+                    }
+                } else {
+                    set.size = 0;
+                }
+                set.opr1 = &cpu->EAX;
                 if (set.size) {
                     set.opr2 = FETCHW(cpu);
                 } else {
@@ -2638,28 +2705,71 @@ static int cpu_step(cpu_state *cpu) {
 
             case 0xAC: // LODSB
             {
-                if (cpu->cpu_context & (CPU_CTX_DATA32 | CPU_CTX_ADDR32)) return cpu_status_ud;
                 sreg_t *_seg = SEGMENT(&cpu->DS);
-                if (prefix & (PREFIX_REPZ | PREFIX_REPNZ)) return cpu_status_ud;
-                cpu->AL = READ_MEM8(_seg, cpu->SI);
-                if (cpu->DF) {
-                    cpu->SI--;
+                int rep = prefix & (PREFIX_REPZ | PREFIX_REPNZ);
+                if (rep) return cpu_status_ud;
+                uint32_t index, index_mask;
+                if (cpu->cpu_context & CPU_CTX_ADDR32) {
+                    index_mask = UINT32_MAX;
+                    // count = cpu->ECX;
+                    index = cpu->ESI;
                 } else {
-                    cpu->SI++;
+                    index_mask = UINT16_MAX;
+                    // count = cpu->CX;
+                    index = cpu->SI;
+                }
+                cpu->AL = READ_MEM8(_seg, index);
+                if (cpu->DF) {
+                    index--;
+                } else {
+                    index++;
+                }
+                if (cpu->cpu_context & CPU_CTX_ADDR32) {
+                    cpu->ESI = index;
+                    // if (rep) cpu->ECX = count;
+                } else {
+                    cpu->SI = index;
+                    // if (rep) cpu->CX = count;
                 }
                 return 0;
             }
 
             case 0xAD: // LODSW
             {
-                if (cpu->cpu_context & (CPU_CTX_DATA32 | CPU_CTX_ADDR32)) return cpu_status_ud;
-                if (prefix & (PREFIX_REPZ | PREFIX_REPNZ)) return cpu_status_ud;
                 sreg_t *_seg = SEGMENT(&cpu->DS);
-                cpu->AX = READ_MEM16(_seg, cpu->SI);
-                if (cpu->DF) {
-                    cpu->SI -= 2;
+                int rep = prefix & (PREFIX_REPZ | PREFIX_REPNZ);
+                if (rep) return cpu_status_ud;
+                uint32_t index, index_mask;
+                if (cpu->cpu_context & CPU_CTX_ADDR32) {
+                    index_mask = UINT32_MAX;
+                    // count = cpu->ECX;
+                    index = cpu->ESI;
                 } else {
-                    cpu->SI += 2;
+                    index_mask = UINT16_MAX;
+                    // count = cpu->CX;
+                    index = cpu->SI;
+                }
+                if (cpu->cpu_context & CPU_CTX_DATA32) {
+                    cpu->EAX = READ_MEM32(_seg, index);
+                    if (cpu->DF) {
+                        index -= 4;
+                    } else {
+                        index += 4;
+                    }
+                } else {
+                    cpu->AX = READ_MEM16(_seg, index);
+                    if (cpu->DF) {
+                        index -= 2;
+                    } else {
+                        index += 2;
+                    }
+                }
+                if (cpu->cpu_context & CPU_CTX_ADDR32) {
+                    cpu->ESI = index;
+                    // if (rep) cpu->ECX = count;
+                } else {
+                    cpu->SI = index;
+                    // if (rep) cpu->CX = count;
                 }
                 return 0;
             }
@@ -2920,7 +3030,11 @@ static int cpu_step(cpu_state *cpu) {
                 return 0;
             
             case 0xE5: // IN AX, imm8
-                cpu->AX = vpc_inw(FETCH8(cpu));
+                if (cpu->cpu_context & (CPU_CTX_DATA32)) {
+                    cpu->EAX = vpc_ind(FETCH8(cpu));
+                } else {
+                    cpu->AX = vpc_inw(FETCH8(cpu));
+                }
                 return 0;
 
             case 0xE6: // OUT imm8, AL
@@ -2928,7 +3042,11 @@ static int cpu_step(cpu_state *cpu) {
                 return 0;
 
             case 0xE7: // OUT imm8, AX
-                vpc_outw(FETCH8(cpu), cpu->AX);
+                if (cpu->cpu_context & (CPU_CTX_DATA32)) {
+                    vpc_outd(FETCH8(cpu), cpu->EAX);
+                } else {
+                    vpc_outw(FETCH8(cpu), cpu->AX);
+                }
                 return 0;
 
             case 0xE8: // call imm16
@@ -2972,7 +3090,11 @@ static int cpu_step(cpu_state *cpu) {
                 return 0;
 
             case 0xED: // IN AX, DX
-                cpu->AX = vpc_inw(cpu->DX);
+                if (cpu->cpu_context & (CPU_CTX_DATA32)) {
+                    cpu->EAX = vpc_ind(cpu->DX);
+                } else {
+                    cpu->AX = vpc_inw(cpu->DX);
+                }
                 return 0;
 
             case 0xEE: // OUT DX, AL
@@ -2980,7 +3102,11 @@ static int cpu_step(cpu_state *cpu) {
                 return 0;
 
             case 0xEF: // OUT DX, AX
-                vpc_outw(cpu->DX, cpu->AX);
+                if (cpu->cpu_context & (CPU_CTX_DATA32)) {
+                    vpc_outd(cpu->DX, cpu->EAX);
+                } else {
+                    vpc_outw(cpu->DX, cpu->AX);
+                }
                 return 0;
 
             case 0xF0: // prefix LOCK (NOP)
@@ -3266,7 +3392,18 @@ static int cpu_step(cpu_state *cpu) {
                                 WRITE_LE16(set.opr1, cpu->TSS.sel);
                                 return 0;
                             case 2: // LLDT
-                                return LOAD_DESC(cpu, &cpu->LDT, READ_LE16(set.opr1), 0x0004);
+                            {
+                                uint16_t new_sel = READ_LE16(set.opr1);
+                                if (new_sel & 0xFFFC) {
+                                    return LOAD_DESC(cpu, &cpu->LDT, new_sel, 0x0004);
+                                } else {
+                                    cpu->LDT.attrs = 0;
+                                    cpu->LDT.base = 0;
+                                    cpu->LDT.limit = 0;
+                                    cpu->LDT.sel = new_sel;
+                                    return 0;
+                                }
+                            }
                             case 3: // LTR
                                 return LOAD_DESC(cpu, &cpu->TSS, READ_LE16(set.opr1), 0x0200);
                             // case 4: // VERR
@@ -3287,7 +3424,10 @@ static int cpu_step(cpu_state *cpu) {
                                 if (mod) return cpu_status_ud;
                                 desc_t new_dt;
                                 new_dt.limit = READ_LE16(set.opr1b);
-                                new_dt.base = 0xFFFFFF & READ_LE32(set.opr1b + 2);
+                                new_dt.base = READ_LE32(set.opr1b + 2);
+                                if ((cpu->cpu_context & CPU_CTX_DATA32) == 0) {
+                                    new_dt.base &= 0xFFFFFF;
+                                }
                                 cpu->GDT = new_dt;
                                 return 0;
                             }
@@ -3296,7 +3436,10 @@ static int cpu_step(cpu_state *cpu) {
                                 if (mod) return cpu_status_ud;
                                 desc_t new_dt;
                                 new_dt.limit = READ_LE16(set.opr1b);
-                                new_dt.base = 0xFFFFFF & READ_LE32(set.opr1b + 2);
+                                new_dt.base = READ_LE32(set.opr1b + 2);
+                                if ((cpu->cpu_context & CPU_CTX_DATA32) == 0) {
+                                    new_dt.base &= 0xFFFFFF;
+                                }
                                 cpu->IDT = new_dt;
                                 return 0;
                             }
@@ -3314,7 +3457,7 @@ static int cpu_step(cpu_state *cpu) {
 
                     // case 0x02: // LAR reg, r/m
                     // case 0x03: // LSL reg, r/m
-                    // case 0x05: // LOADALL / SYSCALl
+                    // case 0x05: // LOADALL / SYSCALL
 
                     case 0x06: // CLTS
                         cpu->CR0.TS = 0;
@@ -3450,14 +3593,7 @@ static int cpu_step(cpu_state *cpu) {
                     case 0xA3: // BT r/m, reg
                     {
                         int mod = MODRM_W(cpu, seg, 1, &set);
-                        uint32_t src = cpu->gpr[set.opr2];
-                        if (mod) {
-                            cpu->CF = (READ_LE32(set.opr1) & (1 << (src & 31))) != 0;
-                        } else {
-                            uint32_t offset = (src >> 3);
-                            uint32_t bit = (1 << (src & 7));
-                            cpu->CF = (set.opr1b[offset] & bit) != 0;
-                        }
+                        BitTest(cpu, &set, mod, cpu->gpr[set.opr2], BitTestOp_BT);
                         return 0;
                     }
 
@@ -3479,6 +3615,13 @@ static int cpu_step(cpu_state *cpu) {
 
                     case 0xA9: // POP GS
                         return LOAD_SEL(cpu, &cpu->GS, POPW(cpu));
+
+                    case 0xAB: // BTS r/m, reg
+                    {
+                        int mod = MODRM_W(cpu, seg, 1, &set);
+                        BitTest(cpu, &set, mod, cpu->gpr[set.opr2], BitTestOp_BTS);
+                        return 0;
+                    }
 
                     case 0xAC: // SHRD r/m, reg, imm8
                     {
@@ -3522,6 +3665,13 @@ static int cpu_step(cpu_state *cpu) {
 
                     case 0xB2: // LSS reg, r/m
                         return LDS(cpu, seg, &cpu->SS);
+
+                    case 0xB3: // BTR r/m, reg
+                    {
+                        int mod = MODRM_W(cpu, seg, 1, &set);
+                        BitTest(cpu, &set, mod, cpu->gpr[set.opr2], BitTestOp_BTR);
+                        return 0;
+                    }
 
                     case 0xB4: // LFS reg, r/m
                         return LDS(cpu, seg, &cpu->FS);
@@ -3567,29 +3717,26 @@ static int cpu_step(cpu_state *cpu) {
                         }
                     }
 
-                    case 0xBA: // BT r/m, imm8
+                    case 0xBA: // BTx r/m, imm8
                     {
                         int mod = MODRM_W(cpu, seg, 1, &set);
                         int imm = FETCH8(cpu);
-                        uint32_t offset;
-                        uint32_t mask;
-                        if (mod) {
-                            offset = 0;
-                            mask = 1 << (imm & 31);
-                        } else {
-                            offset = imm >> 3;
-                            mask = 1 << (imm & 7);
-                        }
                         switch (set.opr2) {
-                            case 4: // BT r/m, imm8
-                                if (mod) {
-                                    cpu->CF = (READ_LE32(set.opr1) & mask) != 0;
-                                } else {
-                                    cpu->CF = (set.opr1b[offset] & mask) != 0;
-                                }
+                            case 4: // BT
+                            case 5: // BTS
+                            case 6: // BTR
+                            case 7: // BTC
+                                BitTest(cpu, &set, mod, imm, set.opr2 & 3);
                                 return 0;
                         }
                         return cpu_status_ud;
+                    }
+
+                    case 0xBB: // BTC r/m, reg
+                    {
+                        int mod = MODRM_W(cpu, seg, 1, &set);
+                        BitTest(cpu, &set, mod, cpu->gpr[set.opr2], BitTestOp_BTC);
+                        return 0;
                     }
 
                     case 0xBE: // MOVSX reg, r/m8
@@ -3869,7 +4016,7 @@ void cpu_reset(cpu_state *cpu, int gen) {
     cpu->flags_preserve_popf = 0x001B0000;
     LOAD_FLAGS(cpu, 0, 0);
 
-    cpu->cr0_valid = 0x6005003F;
+    cpu->cr0_valid = 0xE005003F;
     switch (cpu->cpu_gen) {
         case cpu_gen_8086:
         case cpu_gen_80186:
@@ -3898,7 +4045,7 @@ void cpu_reset(cpu_state *cpu, int gen) {
     for (int i = 0; i < 6; i++) {
         cpu->sregs[i].limit = 0x0000FFFF;
     }
-    cpu->CR[0] = 0x60000010 & cpu->cr0_valid;
+    cpu->CR[0] = 0x00000010 & cpu->cr0_valid;
     cpu->GDT.limit = 0xFFFF;
     cpu->IDT.limit = 0xFFFF;
     cpu->LDT.limit = 0xFFFF;
@@ -3941,6 +4088,8 @@ static int cpu_block(cpu_state *cpu) {
                 }
                 status = INVOKE_INT(cpu, 0, exception); // #DE
                 if (status) return status;
+                continue;
+            case cpu_status_fpu:
                 continue;
             case cpu_status_halt:
                 return status;
@@ -3990,21 +4139,21 @@ WASM_EXPORT int run(cpu_state *cpu) {
             dump_regs(cpu, cpu->EIP);
             return status;
         default:
-            if (cpu->CR0.PE && status > cpu_status_exception_base) {
-                int status2 = INVOKE_INT(cpu, status >> 16, exception);
-                if (status2) { // DOUBLE FAULT
-                    status2 = INVOKE_INT(cpu, 8, exception);
-                    if (status2 == 0) {
-                        PUSHW(cpu, 0);
-                        return 0;
-                    }
-                } else {
-                    if (status > cpu_status_ud) {
-                        PUSHW(cpu, status & UINT16_MAX);
-                    }
-                    return 0;
-                }
-            }
+            // if (cpu->CR0.PE && status > cpu_status_exception_base) {
+            //     int status2 = INVOKE_INT(cpu, status >> 16, exception);
+            //     if (status2) { // DOUBLE FAULT
+            //         status2 = INVOKE_INT(cpu, 8, exception);
+            //         if (status2 == 0) {
+            //             PUSHW(cpu, 0);
+            //             return 0;
+            //         }
+            //     } else {
+            //         if (status > cpu_status_ud) {
+            //             PUSHW(cpu, status & UINT16_MAX);
+            //         }
+            //         return 0;
+            //     }
+            // }
             println("**** PANIC: TRIPLE FAULT!!!");
             dump_regs(cpu, cpu->EIP);
             return status;
@@ -4027,10 +4176,12 @@ WASM_EXPORT int run(cpu_state *cpu) {
  * |>0x10000|Exit|N|CPU enters to shutdown|
  * ||#DE|conditional|Divide by zero|
  * |0x60000|#UD|conditional|Undefined instruction|
- * |0x70000|#FP|conditional|FPU error|
+ * |0x70000|#NM|conditional|FPU Not Available|
  * |0x8XXXX|#DF|N|Double Fault|
+ * |0xBXXXX|#NP|conditional|Segment Not Present|
  * |0xCXXXX|#SS|conditional|Stack Exception|
  * |0xDXXXX|#GP|conditional|General Protection Exception|
+ * |0xEXXXX|#PF|conditional|Page Fault (NOT IMPLEMENTED)|
  * 
  */
 WASM_EXPORT int step(cpu_state *cpu) {

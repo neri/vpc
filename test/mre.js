@@ -1,5 +1,5 @@
-
-module.exports = class RuntimeEnvironment {
+// Minimal Runtime Environment
+module.exports = class MinimalRuntimeEnvironment {
     constructor () {
         this.env = {
             memoryBase: 0,
@@ -13,6 +13,8 @@ module.exports = class RuntimeEnvironment {
         this.env.vpc_inb = (port) => { throw new Error('UNEXPECTED CONTROL FLOW'); };
         this.env.vpc_outw = (port, data) => { throw new Error('UNEXPECTED CONTROL FLOW'); };
         this.env.vpc_inw = (port) => { throw new Error('UNEXPECTED CONTROL FLOW'); };
+        this.env.vpc_outd = (port, data) => { throw new Error('UNEXPECTED CONTROL FLOW'); };
+        this.env.vpc_ind = (port) => { throw new Error('UNEXPECTED CONTROL FLOW'); };
         this.env.vpc_irq = () => { throw new Error('UNEXPECTED CONTROL FLOW'); };
         this.env.TRAP_NORETURN = () => { throw new Error('UNEXPECTED CONTROL FLOW'); };
         this.env.vpc_grow = (n) => {
@@ -21,14 +23,13 @@ module.exports = class RuntimeEnvironment {
             return result;
         }
     }
-    async instantiate(blob, memsize, mode) {
+    async instantiate(blob, megabytes, mode) {
         return WebAssembly.instantiate(new Uint8Array(blob.buffer), this)
         .then(result => {
             this.wasm = result.instance
-            this.vmem = this.wasm.exports._init(memsize);
+            this.vmem = this.wasm.exports._init(megabytes);
             this.vcpu = this.wasm.exports.alloc_cpu(mode);
             this.regmap = JSON.parse(this.getCString(this.wasm.exports.debug_get_register_map(this.vcpu)));
-            // console.log(env.regmap);
         });
     }
     strlen(at) {

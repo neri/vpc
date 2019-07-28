@@ -61,11 +61,14 @@ const scanTable: number[] = [
 
 export class PS2 {
     private env: RuntimeEnvironment;
+    private lastCmd: number;
+    private iram: Uint8Array;
     private o_fifo: number[];
     private i_fifo: number[];
 
     constructor (env: RuntimeEnvironment) {
         this.env = env;
+        this.iram = new Uint8Array(32);
         this.o_fifo = [];
         this.i_fifo = [];
 
@@ -80,9 +83,8 @@ export class PS2 {
         env.iomgr.onw(0x64, undefined, (_) => this.o_fifo.shift() || 0);
     }
     private command(data: number): void {
-        switch (data) {
-            // TODO:
-        }
+        this.lastCmd = data;
+        // console.log(`ps2: unsupported command ${data.toString(16)}`);
     }
     onKey(e: any): void {
         const { type, key, code, keyCode, ctrlKey, altKey } = e;
