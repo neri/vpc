@@ -559,9 +559,10 @@ _chk_scroll:
     mov bl, [BDA_VGA_CONSOLE_COLS]
     mov bh, [BDA_VGA_CONSOLE_ROWSm1]
     cmp cl, bl
-    jnz .no80
+    jb .no80
     xor cl, cl
     inc ch
+    mov [BDA_VGA_CURSOR], cx
 .no80:
     mov al, bh
     cmp ch, al
