@@ -24,6 +24,7 @@
     "mocha": "^6.1.4",
     "typescript": "^3.5.3",
     "webpack": "^4.35.3",
-    "webpack-cli": "^3.3.5"
+    "webpack-cli": "^3.3.5",
+    "serialize-javascript": ">=2.1.1"
   }
 }
