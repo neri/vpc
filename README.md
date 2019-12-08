@@ -3,7 +3,7 @@
 A PC Emulator implemented by WebAssembly.
 
 <img src="images/ss1.png" width="50%"><img src="images/ss2.png" width="50%">
-<img src="images/ss3.png" width="50%">
+<img src="images/ss3.png" width="50%"><img src="images/ss4.png" width="50%">
 
 - [Preview website](https://nerry.jp/vpc/)
 - [Repository](https://github.com/neri/vpc)
