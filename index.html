@@ -4,168 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=640">
     <title>Virtual Playground</title>
-    <style>
-        :root {
-            --main-screen-width: 640px;
-            --main-screen-height: 400px;
-        }
-        html, body {
-            padding: 0;
-            margin: 0;
-            font-family: sans-serif;
-            -webkit-user-select: none;
-        }
-        #screen_container {
-            margin: 0;
-            padding: 0;
-            display: none;
-            cursor: text;
-            width: var(--main-screen-width);
-            min-height: var(--main-screen-height);
-        }
-        
-        #click_to_start {
-            background: #EEE;
-            color: #777;
-            width: var(--main-screen-width);
-            line-height: var(--main-screen-height);
-            text-align: center;
-            cursor: pointer;
-        }
-        
-        #click_to_start p {
-            margin: 0;
-            display: inline-block;
-            vertical-align: middle;
-        }
-
-        #controlPanel {
-            width: var(--main-screen-width);
-            min-height: 2em;
-            margin: 0;
-            padding: 0;
-            background: #F7F7F7;
-        }
-        
-        .controlFrame {
-            display: inline-block;
-            margin: 1px 3px;
-            padding: 1px 3px;
-            background: rgba(0, 0, 0, 0.125);
-            border-radius: 8px;
-            min-height: 24px;
-            vertical-align: middle;
-            border: transparent dashed 2px;
-            font-size: 14px;
-        }
-
-        .leftFrame {
-            float: left;
-            margin: 1px 3px;
-            padding: 1px 3px;
-            border-radius: 8px;
-            min-height: 24px;
-            vertical-align: middle;
-            border: transparent dashed 2px;
-            font-size: 14px;
-        }
-
-        .controlActive {
-            border-color: #00F;
-        }
-
-        #volumeControl {
-            display: none;
-        }
-
-        address {
-            width: var(--main-screen-width);
-            margin: 1em 0;
-            text-align: right;
-            font-size: smaller;
-            font-style: normal;
-            color: #999;
-        }
-
-        address a {
-            color: inherit;
-            text-decoration: none;
-            font-weight: bold;
-        }
-        address a:hover {
-            text-decoration: underline;
-        }
-
-        .left {
-            float: left;
-        }
-
-        summary {
-            float: right;
-            margin: 4px 8px;
-        }
-
-        details article {
-            display: block;
-            clear: both;
-            padding: 8px 1em;
-        }
-
-        address {
-            clear: both;
-        }
-
-        #terminal {
-            position: absolute;
-            margin: 0;
-            padding: 0;
-            width: 0;
-            height: 0;
-            border: none;
-            color: transparent;
-            background: transparent;
-        }
-        
-        .buttonFace {
-            display: inline-block;
-            padding: 0 12px;
-            min-height: 16px;
-            vertical-align: middle;
-            font-size: 12px;
-            border: solid 1px transparent;
-            background: #9E9E9E;
-            color: #FFF;
-            border-radius: 4px;
-            cursor: pointer;
-            box-shadow: 1px 1px 4px 2px rgba(0, 0, 0, 0.125);
-        }
-
-        .buttonFace:hover {
-            border-color: rgba(0, 0, 0, 0.25);
-        }
-        
-        .activeButton {
-            background: #2196F3;
-        }
-        
-        .destructiveButton {
-            background: #F44336;
-        }
-
-        input[type=text] {
-            border: #AAA dashed 1px;
-            background: transparent;
-        }
-
-        #midiMode {
-            font-weight: bold;
-        }
-
-        #devTerminal {
-            font: 10px 'TerminalWebFont', 'Menlo', 'Monaco', 'Consolas', 'Courier New', 'Courier', monospace;
-        }
-
-    </style>
+    <link rel="stylesheet" href="styles/vpc.css">
     <script>
 
         const $ = x => document.querySelector(x);
@@ -900,11 +739,11 @@ const unicodeMap = [
             <input id="fileLocal" type="file" style="position: absolute; width:0px; height:0px; z-index: -1;">
             <label>
                 <a id="buttonLocal" class="buttonFace">file:</a>
-                <input id="labelLocal" type="text" size="12" readonly>
+                <input id="labelLocal" type="text" readonly="readonly">
             </label>
         </span>
 
-        <details open>
+        <details>
             <summary class="buttonFace activeButton">Option</summary>
             <article>
 
@@ -934,9 +773,6 @@ const unicodeMap = [
                             <option value="384">384KB</option>
                             <option value="512">512KB</option>
                             <option value="640">640KB</option>
-                            <!-- <option value="768">768KB *</option>
-                            <option value="896">896KB *</option>
-                            <option value="960">960KB *</option> -->
                             <option value="2048">2MB</option>
                             <option value="4096">4MB</option>
                             <option value="8192">8MB</option>
@@ -945,18 +781,6 @@ const unicodeMap = [
                     </label>
 
                 </div>
-
-                <!-- <fieldset>
-                    <legend>Screen Option</legend>
-                    <label>
-                        Console Color:
-                        <select>
-                            <option>Default Dark</option>
-                            <option>Light</option>
-                            <option>Green Display</option>
-                        </select>
-                    </label>
-                </fieldset> -->
     
                 <div id="cpMidi"></div>
 
@@ -964,18 +788,15 @@ const unicodeMap = [
                     <details>
                         <summary class="buttonFace">DevTool</summary>
                         <a id="buttonNMI" class="buttonFace">Step</a>
-                        <a id="buttonDevCLS" class="buttonFace destructiveButton">Clear</a>
-                        <input id="inputAddress" value="" placeholder="0000:0000" size="12">
+                        <a id="buttonDevCLS" class="buttonFace destructiveButton">&#x1f5d1;</a>
+                        <input id="inputAddress" type="text" value="" placeholder="0000:0000" size="12">
                         <a id="buttonDump" class="buttonFace">Dump</a>
                         <br>
                         <textarea id="devTerminal" cols="80" rows="20" readonly></textarea>
                     </details>
                 </div>
             </article>
-            <address>
-                POWERED by 
-                <a href="https://github.com/neri/vpc">Virtual Playground</a>
-            </address>
+            <address>POWERED by <a href="https://github.com/neri/vpc">Virtual Playground</a></address>
         </details>
     </div>
 

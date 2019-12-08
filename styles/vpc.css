@@ -1,0 +1,210 @@
+@media (prefers-color-scheme: light) {
+    :root {
+        --bg-color: rgb(255, 255, 255);
+        --fg-color: #555;
+        --system-blue: rgb(0, 122, 255);
+        --system-red:  rgb(255, 59, 48);
+        --system-gray1: rgb(142, 142, 147);
+        --system-gray2: rgb(174, 174, 178);
+        --system-gray5: rgb(229, 229, 234);
+        --system-gray6: rgb(242, 242, 247);
+        --shadow-color: rgba(0, 0, 0, 0.125);
+    }
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg-color: #111;
+        --fg-color: #6C6;
+        --system-blue: rgb(10, 132, 255);
+        --system-red:  rgb(255, 69, 58);
+        --system-gray1: rgb(142, 142, 147);
+        --system-gray2: rgb(99, 99, 102);
+        --system-gray5: rgb(44, 44, 46);
+        --system-gray6: rgb(28, 28, 30);
+        --shadow-color: rgba(195, 195, 195, 0.125);
+    }
+
+    img.dimOnDarkMode {
+        filter: grayscale(50%) brightness(67%);
+    }
+
+}
+
+:root {
+    --main-screen-width: 640px;
+    --main-screen-height: 400px;
+}
+html, body {
+    padding: 0;
+    margin: 0;
+    font-family: sans-serif;
+    -webkit-user-select: none;
+    background: var(--bg-color);
+    color: var(--fg-color);
+}
+#screen_container {
+    margin: 0;
+    padding: 0;
+    display: none;
+    cursor: text;
+    width: var(--main-screen-width);
+    min-height: var(--main-screen-height);
+    line-height: 0;
+}
+
+#click_to_start {
+    background: var(--system-gray5);
+    color: var(--system-gray1);
+    width: var(--main-screen-width);
+    height: var(--main-screen-height);
+    line-height: var(--main-screen-height);
+    text-align: center;
+    cursor: pointer;
+}
+
+#click_to_start p {
+    margin: 0;
+    display: inline-block;
+    vertical-align: middle;
+}
+
+#controlPanel {
+    width: var(--main-screen-width);
+    min-height: 32px;
+    margin: 0;
+    padding: 0;
+    background: var(--system-gray6);
+    color: var(--fg-color);
+}
+
+@media screen and (max-height: 432px) {
+    #controlPanel {
+        position: fixed;
+        bottom: 0;
+    }
+}
+
+.controlFrame {
+    display: inline-block;
+    margin: 1px 3px;
+    padding: 1px 3px;
+    background: var(--system-gray5);
+    border-radius: 8px;
+    min-height: 24px;
+    vertical-align: middle;
+    border: transparent dashed 2px;
+    font-size: 14px;
+}
+
+.leftFrame {
+    float: left;
+    margin: 1px 3px;
+    padding: 1px 3px;
+    border-radius: 8px;
+    vertical-align: middle;
+    border: transparent dashed 2px;
+    font-size: 14px;
+}
+
+.controlActive {
+    border-color: var(--system-blue);
+}
+
+#volumeControl {
+    display: none;
+}
+
+address {
+    margin: 0 1em;
+    padding: 0;
+    text-align: right;
+    font-size: smaller;
+    font-style: normal;
+    color: var(--system-gray1);
+}
+
+address a {
+    color: inherit;
+    text-decoration: none;
+    font-weight: bold;
+}
+address a:hover {
+    text-decoration: underline;
+}
+
+.left {
+    float: left;
+}
+
+summary {
+    float: right;
+    margin: 4px 8px;
+}
+
+details article {
+    display: block;
+    clear: both;
+    padding: 8px;
+}
+
+address {
+    clear: both;
+}
+
+#terminal {
+    position: absolute;
+    margin: 0;
+    padding: 0;
+    width: 0;
+    height: 0;
+    border: none;
+    color: transparent;
+    background: transparent;
+}
+
+.buttonFace {
+    display: inline-block;
+    padding: 0 12px;
+    min-height: 16px;
+    vertical-align: middle;
+    font-size: 12px;
+    border: solid 1px transparent;
+    background: var(--system-gray1);
+    color: var(--system-gray6);
+    border-radius: 4px;
+    cursor: pointer;
+    box-shadow: 1px 1px 4px 2px var(--shadow-color);
+}
+
+.buttonFace:hover {
+    border-color: rgba(0, 0, 0, 0.25);
+}
+
+.activeButton {
+    background: var(--system-blue) ;
+}
+
+.destructiveButton {
+    background: var(--system-red);
+}
+
+input[type=text], textarea, select {
+    border: var(--fg-color) solid 1px;
+    background: var(--bg-color);
+    color: var(--fg-color);
+}
+
+input[readonly], select[disabled] {
+    border: var(--system-gray2) dashed 1px;
+    background: transparent;
+    color: var(--system-gray1);
+}
+
+#midiMode {
+    font-weight: bold;
+}
+
+#devTerminal {
+    font: 10px 'TerminalWebFont', 'Menlo', 'Monaco', 'Consolas', 'Courier New', 'Courier', monospace;
+}

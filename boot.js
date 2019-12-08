@@ -11,7 +11,7 @@ const createWindow = () => {
     {
       useContentSize: true,
       width: 640, 
-      height: 440,
+      height: 432,
       minWidth: 640,
       maxWidth: 640,
       minHeight: 400,
