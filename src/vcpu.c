@@ -21,6 +21,786 @@ WASM_IMPORT int vpc_irq();
 WASM_IMPORT _Noreturn void TRAP_NORETURN();
 WASM_IMPORT int vpc_grow(int n);
 
+typedef enum {
+    optype_undefined,
+    optype_implied,
+    optype_nop, // NOP / PAUSE
+    optype_prefix,
+    optype_string,
+    optype_prefix66,
+    optype_prefix67,
+    optype_extended, // 0F
+
+    optype_Zv,
+    optype_Zb,
+    optype_ZbIb,
+    optype_ZvIv,
+
+    optype_ALIb,
+    optype_AXIz,
+    optype_IbAL,
+    optype_IbAX,
+    optype_AXIb,
+
+    optype_Ib,
+    optype_Iw, // RET Iw
+    optype_Iz,
+    optype_Jb,
+    optype_Jz,
+
+    optype_Ap,
+    optype_IwIb, // ENTER
+
+    optype_ALOb, // MOV AL, Ob
+    optype_AXOv, // MOV rAX, Ov
+    optype_ObAL, // MOV Ob, AL
+    optype_OvAX, // MOV Ov, rAX
+
+    optype_modrm_   = 0x40000000,
+    optype_simd     = 0x70000000,
+
+    opa_Emask       = 0x00000003,
+    opa_Eb          = 0x00000001,
+    opa_Ew          = 0x00000002,
+    opa_Ev          = 0x00000003,
+    opa_Gmask       = 0x0000000C,
+    opa_Gb          = 0x00000004,
+    opa_Gw          = 0x00000008,
+    opa_Gv          = 0x0000000C,
+    opa_Imask       = 0x00000030,
+    opa_Ib          = 0x00000010,
+    opa_Iw          = 0x00000020,
+    opa_Iz          = 0x00000030,
+    opa_Omask       = 0x0000FF00,
+    opa_M           = 0x00000100,
+    opa_EwSw        = 0x00000200,
+    opa_RdCd        = 0x00000300,
+    opa_RdDd        = 0x00000400,
+    opa_group       = 0x01000000,
+    opa_shift       = 0x02000000,
+    opa_reverse     = 0x08000000,
+
+    optype_fpu      = optype_modrm_,
+    optype_group    = optype_modrm_ | opa_group,
+
+    optype_EbGb     = optype_modrm_ | opa_Eb | opa_Gb,
+    optype_EvGv     = optype_modrm_ | opa_Ev | opa_Gv,
+    optype_GbEb     = optype_modrm_ | opa_Eb | opa_Gb | opa_reverse,
+    optype_GvEv     = optype_modrm_ | opa_Ev | opa_Gv | opa_reverse,
+    optype_GvEb     = optype_modrm_ | opa_Eb | opa_Gv,
+    optype_GvEw     = optype_modrm_ | opa_Ew | opa_Gv,
+    optype_Eb       = optype_modrm_ | opa_Eb,
+    optype_Ev       = optype_modrm_ | opa_Ev,
+
+    optype_EwGw     = optype_modrm_ | opa_Ew | opa_Gw,
+    optype_GvM      = optype_modrm_ | opa_Gv | opa_M ,
+    optype_M        = optype_modrm_ | opa_M,
+    optype_Mp       = optype_modrm_ | opa_M,
+    optype_EwSw     = optype_modrm_ | opa_Ew | opa_EwSw,
+    optype_SwEw     = optype_modrm_ | opa_Ew | opa_EwSw | opa_reverse,
+
+    optype_RdCd     = optype_modrm_ | opa_RdCd,
+    optype_RdDd     = optype_modrm_ | opa_RdDd,
+    optype_CdRd     = optype_modrm_ | opa_RdCd | opa_reverse,
+    optype_DdRd     = optype_modrm_ | opa_RdDd | opa_reverse,
+
+    optype_EvGvIb   = optype_modrm_ | opa_Ev | opa_Gv | opa_Ib,
+    optype_EvGvIz   = optype_modrm_ | opa_Ev | opa_Gv | opa_Iz,
+    optype_GvEvIb   = optype_modrm_ | opa_Ev | opa_Gv | opa_Ib | opa_reverse,
+    optype_GvEvIz   = optype_modrm_ | opa_Ev | opa_Gv | opa_Iz | opa_reverse,
+    optype_EbIb     = optype_modrm_ | opa_Eb | opa_Ib,
+    optype_EvIv     = optype_modrm_ | opa_Ev | opa_Iz,
+    optype_EvIbs    = optype_modrm_ | opa_Ev | opa_Ib,
+    optype_EvIb     = optype_modrm_ | opa_Ev | opa_Ib,
+
+    optype_shEbIb   = optype_modrm_ | opa_Eb | opa_Ib | opa_shift,
+    optype_shEvIb   = optype_modrm_ | opa_Ev | opa_Ib | opa_shift,
+    optype_shEb     = optype_modrm_ | opa_Eb | opa_shift,
+    optype_shEv     = optype_modrm_ | opa_Ev | opa_shift,
+
+} optype_t;
+
+typedef enum {
+    reg_type_al,
+    reg_type_ax,
+    reg_type_eax,
+    reg_type_sreg,
+    reg_type_creg,
+    reg_type_dreg,
+} disasm_reg_type;
+
+const char *reg_names_AL[] = {"AL", "CL", "DL", "BL", "AH", "CH", "DH", "BL" };
+const char *reg_names_AX[] = {"AX", "CX", "DX", "BX", "SP", "BP", "SI", "DI" };
+const char *reg_names_EAX[] = {"EAX", "ECX", "EDX", "EBX", "ESP", "EBP", "ESI", "EDI" };
+const char *reg_names_sreg[] = {"ES", "CS", "SS", "DS", "FS", "GS", "???", "???" };
+
+enum {
+    index_AX = 0,
+    index_CX,
+    index_DX,
+    index_BX,
+    index_SP,
+    index_BP,
+    index_SI,
+    index_DI,
+    index_EAX = 0,
+    index_ECX,
+    index_EDX,
+    index_EBX,
+    index_ESP,
+    index_EBP,
+    index_ESI,
+    index_EDI,
+    index_AL = 0,
+    index_CL,
+    index_DL,
+    index_BL,
+    index_AH,
+    index_CH,
+    index_DH,
+    index_BH,
+    index_ES = 0,
+    index_CS,
+    index_SS,
+    index_DS,
+    index_FS,
+    index_GS,
+};
+
+typedef struct opmap_t {
+    const char * name;
+    const char * name32;
+    optype_t optype;
+    struct opmap_t *group;
+    int n_oplands;
+    const char *oplands1;
+    const char *oplands2;
+} opmap_t;
+
+static opmap_t opcode_80[8] = {
+    { "ADD", NULL, optype_EbIb },
+    { "OR", NULL, optype_EbIb },
+    { "ADC", NULL, optype_EbIb },
+    { "SBB", NULL, optype_EbIb },
+    { "AND", NULL, optype_EbIb },
+    { "SUB", NULL, optype_EbIb },
+    { "XOR", NULL, optype_EbIb },
+    { "CMP", NULL, optype_EbIb },
+};
+
+static opmap_t opcode_81[8] = {
+    { "ADD", NULL, optype_EvIv },
+    { "OR", NULL, optype_EvIv },
+    { "ADC", NULL, optype_EvIv },
+    { "SBB", NULL, optype_EvIv },
+    { "AND", NULL, optype_EvIv },
+    { "SUB", NULL, optype_EvIv },
+    { "XOR", NULL, optype_EvIv },
+    { "CMP", NULL, optype_EvIv },
+};
+
+static opmap_t opcode_83[8] = {
+    { "ADD", NULL, optype_EvIbs },
+    { "OR", NULL, optype_EvIbs },
+    { "ADC", NULL, optype_EvIbs },
+    { "SBB", NULL, optype_EvIbs },
+    { "AND", NULL, optype_EvIbs },
+    { "SUB", NULL, optype_EvIbs },
+    { "XOR", NULL, optype_EvIbs },
+    { "CMP", NULL, optype_EvIbs },
+};
+
+static opmap_t opcode_8F[8] = {
+    { "POP", NULL, optype_Ev },
+    { NULL, NULL, optype_undefined },
+    { NULL, NULL, optype_undefined },
+    { NULL, NULL, optype_undefined },
+    { NULL, NULL, optype_undefined },
+    { NULL, NULL, optype_undefined },
+    { NULL, NULL, optype_undefined },
+    { NULL, NULL, optype_undefined },
+};
+
+static opmap_t opcode_F6[8] = {
+    { "TEST", NULL, optype_EbIb },
+    { NULL, NULL, optype_undefined },
+    { "NOT", NULL, optype_Eb },
+    { "NEG", NULL, optype_Eb },
+    { "MUL", NULL, optype_Eb },
+    { "IMUL", NULL, optype_Eb },
+    { "DIV", NULL, optype_Eb },
+    { "IDIV", NULL, optype_Eb },
+};
+
+static opmap_t opcode_F7[8] = {
+    { "TEST", NULL, optype_EvIv },
+    { NULL, NULL, optype_undefined },
+    { "NOT", NULL, optype_Ev },
+    { "NEG", NULL, optype_Ev },
+    { "MUL", NULL, optype_Ev },
+    { "IMUL", NULL, optype_Ev },
+    { "DIV", NULL, optype_Ev },
+    { "IDIV", NULL, optype_Ev },
+};
+
+static opmap_t opcode_FE[8] = {
+    { "INC", NULL, optype_Eb },
+    { "DEC", NULL, optype_Eb },
+    { NULL, NULL, optype_undefined },
+    { NULL, NULL, optype_undefined },
+    { NULL, NULL, optype_undefined },
+    { NULL, NULL, optype_undefined },
+    { NULL, NULL, optype_undefined },
+    { NULL, NULL, optype_undefined },
+};
+
+static opmap_t opcode_FF[8] = {
+    { "INC", NULL, optype_Ev },
+    { "DEC", NULL, optype_Ev },
+    { "CALL", NULL, optype_Ev },
+    { "CALLF", NULL, optype_Mp },
+    { "JMP", NULL, optype_Ev },
+    { "JMPF", NULL, optype_Mp },
+    { "PUSH", NULL, optype_Ev },
+    { NULL, NULL, optype_undefined },
+};
+
+
+static opmap_t opcode_0F00[8] = {
+    { "SLDT", NULL, optype_Ev },
+    { "STR", NULL, optype_Ev },
+    { "LLDT", NULL, optype_Ev },
+    { "LTR", NULL, optype_Ev },
+    { "VERR", NULL, optype_Ev },
+    { "VERW", NULL, optype_Ev },
+    { "JMPE", NULL, optype_implied },
+    { NULL, NULL, optype_undefined },
+};
+
+static opmap_t opcode_0F01[8] = {
+    { "SGDT", NULL, optype_M },
+    { "SIDT", NULL, optype_M },
+    { "LGDT", NULL, optype_M },
+    { "LIDT", NULL, optype_M },
+    { "SMSW", NULL, optype_Ev },
+    { NULL, NULL, optype_undefined },
+    { "LMSW", NULL, optype_Ev },
+    { "INVLPG", NULL, optype_M },
+};
+
+static opmap_t opcode_0FAE[8] = {
+    { "FXSAVE", NULL, optype_M },
+    { "FXRSTOR", NULL, optype_M },
+    { "LDMXCSR", NULL, optype_Ev },
+    { "STMXCSR", NULL, optype_Ev },
+    { "XSAVE", NULL, optype_M },
+    { "XRSTOR", NULL, optype_M },
+    { NULL, NULL, optype_undefined },
+    { "CLFLUSH", NULL, optype_M },
+};
+
+static opmap_t opcode_0FBA[8] = {
+    { "BT", NULL, optype_EvIb },
+    { "BTS", NULL, optype_EvIb },
+    { "BTR", NULL, optype_EvIb },
+    { "BTC", NULL, optype_EvIb },
+    { NULL, NULL, optype_undefined },
+    { NULL, NULL, optype_undefined },
+    { NULL, NULL, optype_undefined },
+    { NULL, NULL, optype_undefined },
+};
+
+const char *shift_names[8] = {"ROL", "ROR", "RCL", "RCR", "SHL", "SHR", NULL, "SAR" };
+
+opmap_t opcode1[256] = {
+    { "ADD", NULL, optype_EbGb },
+    { "ADD", NULL, optype_EvGv },
+    { "ADD", NULL, optype_GbEb },
+    { "ADD", NULL, optype_GvEv },
+    { "ADD", NULL, optype_ALIb },
+    { "ADD", NULL, optype_AXIz },
+    { "PUSH", NULL, optype_implied, NULL, 1, "ES" },
+    { "POP", NULL, optype_implied, NULL, 1, "ES" },
+    { "OR", NULL, optype_EbGb },
+    { "OR", NULL, optype_EvGv },
+    { "OR", NULL, optype_GbEb },
+    { "OR", NULL, optype_GvEv },
+    { "OR", NULL, optype_ALIb },
+    { "OR", NULL, optype_AXIz },
+    { "PUSH", NULL, optype_implied, NULL, 1, "CS" },
+    { NULL, NULL, optype_extended },
+    { "ADC", NULL, optype_EbGb },
+    { "ADC", NULL, optype_EvGv },
+    { "ADC", NULL, optype_GbEb },
+    { "ADC", NULL, optype_GvEv },
+    { "ADC", NULL, optype_ALIb },
+    { "ADC", NULL, optype_AXIz },
+    { "PUSH", NULL, optype_implied, NULL, 1, "SS" },
+    { "POP", NULL, optype_implied, NULL, 1, "SS" },
+    { "SBB", NULL, optype_EbGb },
+    { "SBB", NULL, optype_EvGv },
+    { "SBB", NULL, optype_GbEb },
+    { "SBB", NULL, optype_GvEv },
+    { "SBB", NULL, optype_ALIb },
+    { "SBB", NULL, optype_AXIz },
+    { "PUSH", NULL, optype_implied, NULL, 1, "DS" },
+    { "POP", NULL, optype_implied, NULL, 1, "DS" },
+    { "AND", NULL, optype_EbGb },
+    { "AND", NULL, optype_EvGv },
+    { "AND", NULL, optype_GbEb },
+    { "AND", NULL, optype_GvEv },
+    { "AND", NULL, optype_ALIb },
+    { "AND", NULL, optype_AXIz },
+    { "ES:", NULL, optype_prefix },
+    { "DAA", NULL, optype_implied },
+    { "SUB", NULL, optype_EbGb },
+    { "SUB", NULL, optype_EvGv },
+    { "SUB", NULL, optype_GbEb },
+    { "SUB", NULL, optype_GvEv },
+    { "SUB", NULL, optype_ALIb },
+    { "SUB", NULL, optype_AXIz },
+    { "CS:", NULL, optype_prefix },
+    { "DAS", NULL, optype_implied },
+    { "XOR", NULL, optype_EbGb },
+    { "XOR", NULL, optype_EvGv },
+    { "XOR", NULL, optype_GbEb },
+    { "XOR", NULL, optype_GvEv },
+    { "XOR", NULL, optype_ALIb },
+    { "XOR", NULL, optype_AXIz },
+    { "SS:", NULL, optype_prefix },
+    { "AAA", NULL, optype_implied },
+    { "CMP", NULL, optype_EbGb },
+    { "CMP", NULL, optype_EvGv },
+    { "CMP", NULL, optype_GbEb },
+    { "CMP", NULL, optype_GvEv },
+    { "CMP", NULL, optype_ALIb },
+    { "CMP", NULL, optype_AXIz },
+    { "DS:", NULL, optype_prefix },
+    { "AAS", NULL, optype_implied },
+    { "INC", NULL, optype_Zv },
+    { "INC", NULL, optype_Zv },
+    { "INC", NULL, optype_Zv },
+    { "INC", NULL, optype_Zv },
+    { "INC", NULL, optype_Zv },
+    { "INC", NULL, optype_Zv },
+    { "INC", NULL, optype_Zv },
+    { "INC", NULL, optype_Zv },
+    { "DEC", NULL, optype_Zv },
+    { "DEC", NULL, optype_Zv },
+    { "DEC", NULL, optype_Zv },
+    { "DEC", NULL, optype_Zv },
+    { "DEC", NULL, optype_Zv },
+    { "DEC", NULL, optype_Zv },
+    { "DEC", NULL, optype_Zv },
+    { "DEC", NULL, optype_Zv },
+    { "PUSH", NULL, optype_Zv },
+    { "PUSH", NULL, optype_Zv },
+    { "PUSH", NULL, optype_Zv },
+    { "PUSH", NULL, optype_Zv },
+    { "PUSH", NULL, optype_Zv },
+    { "PUSH", NULL, optype_Zv },
+    { "PUSH", NULL, optype_Zv },
+    { "PUSH", NULL, optype_Zv },
+    { "POP", NULL, optype_Zv },
+    { "POP", NULL, optype_Zv },
+    { "POP", NULL, optype_Zv },
+    { "POP", NULL, optype_Zv },
+    { "POP", NULL, optype_Zv },
+    { "POP", NULL, optype_Zv },
+    { "POP", NULL, optype_Zv },
+    { "POP", NULL, optype_Zv },
+    { "PUSHA", "PUSHAD", optype_implied },
+    { "POPA", "POPAD", optype_implied },
+    { "BOUNDS", NULL, optype_GvM },
+    { "ARPL", NULL, optype_EwGw },
+    { "FS:", NULL, optype_prefix },
+    { "GS:", NULL, optype_prefix },
+    { NULL, NULL, optype_prefix66 },
+    { NULL, NULL, optype_prefix67 },
+    { "PUSH", NULL, optype_Iz },
+    { "IMUL", NULL, optype_GvEvIz },
+    { "PUSH", NULL, optype_Ib },
+    { "IMUL", NULL, optype_GvEvIb },
+    { "INSB", NULL, optype_string },
+    { "INSW", "INSD", optype_string },
+    { "OUTSB", NULL, optype_string },
+    { "OUTSW", "OUTSD", optype_string },
+    { "JO", NULL, optype_Jb },
+    { "JNO", NULL, optype_Jb },
+    { "JB", NULL, optype_Jb },
+    { "JNB", NULL, optype_Jb },
+    { "JZ", NULL, optype_Jb },
+    { "JNZ", NULL, optype_Jb },
+    { "JNA", NULL, optype_Jb },
+    { "JA", NULL, optype_Jb },
+    { "JS", NULL, optype_Jb },
+    { "JNS", NULL, optype_Jb },
+    { "JP", NULL, optype_Jb },
+    { "JNP", NULL, optype_Jb },
+    { "JL", NULL, optype_Jb },
+    { "JNL", NULL, optype_Jb },
+    { "JNG", NULL, optype_Jb },
+    { "JG", NULL, optype_Jb },
+    { NULL, NULL, optype_group, opcode_80 },
+    { NULL, NULL, optype_group, opcode_81 },
+    { NULL, NULL, optype_group, opcode_80 },
+    { NULL, NULL, optype_group, opcode_83 },
+    { "TEST", NULL, optype_GbEb },
+    { "TEST", NULL, optype_GvEv },
+    { "XCHG", NULL, optype_GbEb },
+    { "XCHG", NULL, optype_GvEv },
+    { "MOV", NULL, optype_GbEb },
+    { "MOV", NULL, optype_GvEv },
+    { "MOV", NULL, optype_EbGb },
+    { "MOV", NULL, optype_EvGv },
+    { "MOV", NULL, optype_EwSw },
+    { "LEA", NULL, optype_GvM },
+    { "MOV", NULL, optype_SwEw },
+    { NULL, NULL, optype_group, opcode_8F },
+    { "NOP", NULL, optype_nop },
+    { "XCHG", NULL, optype_Zv, NULL, 1, "AX" },
+    { "XCHG", NULL, optype_Zv, NULL, 1, "AX" },
+    { "XCHG", NULL, optype_Zv, NULL, 1, "AX" },
+    { "XCHG", NULL, optype_Zv, NULL, 1, "AX" },
+    { "XCHG", NULL, optype_Zv, NULL, 1, "AX" },
+    { "XCHG", NULL, optype_Zv, NULL, 1, "AX" },
+    { "XCHG", NULL, optype_Zv, NULL, 1, "AX" },
+    { "CBW", "CWDE", optype_implied },
+    { "CWD", "CDQ", optype_implied },
+    { "CALL", NULL, optype_Ap },
+    { "FWAIT", NULL, optype_implied },
+    { "PUSHF", "PUSHFD", optype_implied },
+    { "POPF", "POPFD", optype_implied },
+    { "SAHF", NULL, optype_implied },
+    { "LAHF", NULL, optype_implied },
+    { "MOV", NULL, optype_ALOb },
+    { "MOV", NULL, optype_AXOv },
+    { "MOV", NULL, optype_ObAL },
+    { "MOV", NULL, optype_OvAX },
+    { "MOVSB", NULL, optype_string },
+    { "MOVSW", "MOVSD", optype_string },
+    { "CMPSB", NULL, optype_string },
+    { "CMPSW", "CMPSD", optype_string },
+    { "TEST", NULL, optype_ALIb },
+    { "TEST", NULL, optype_AXIz },
+    { "STOSB", NULL, optype_string },
+    { "STOSW", "STOSD", optype_string },
+    { "LODSB", NULL, optype_string },
+    { "LODSW", "LODSD", optype_string },
+    { "SCASB", NULL, optype_string },
+    { "SCASW", "SCASD", optype_string },
+    { "MOV", NULL, optype_ZbIb },
+    { "MOV", NULL, optype_ZbIb },
+    { "MOV", NULL, optype_ZbIb },
+    { "MOV", NULL, optype_ZbIb },
+    { "MOV", NULL, optype_ZbIb },
+    { "MOV", NULL, optype_ZbIb },
+    { "MOV", NULL, optype_ZbIb },
+    { "MOV", NULL, optype_ZbIb },
+    { "MOV", NULL, optype_ZvIv },
+    { "MOV", NULL, optype_ZvIv },
+    { "MOV", NULL, optype_ZvIv },
+    { "MOV", NULL, optype_ZvIv },
+    { "MOV", NULL, optype_ZvIv },
+    { "MOV", NULL, optype_ZvIv },
+    { "MOV", NULL, optype_ZvIv },
+    { "MOV", NULL, optype_ZvIv },
+    { NULL, NULL, optype_shEbIb, },
+    { NULL, NULL, optype_shEvIb, },
+    { "RET", NULL, optype_Iw },
+    { "RET", NULL, optype_implied },
+    { "LES", NULL, optype_GvM, NULL, 1, "ES" },
+    { "LDS", NULL, optype_GvM, NULL, 1, "DS" },
+    { "MOV", NULL, optype_EbIb },
+    { "MOV", NULL, optype_EvIv },
+    { "ENTER", NULL, optype_IwIb },
+    { "LEAVE", NULL, optype_implied },
+    { "RETF", NULL, optype_Iw },
+    { "RETF", NULL, optype_implied },
+    { "INT3", NULL, optype_implied },
+    { "INT", NULL, optype_Ib },
+    { "INTO", NULL, optype_implied },
+    { "IRET", "IRETD", optype_implied },
+    { NULL, NULL, optype_shEb, NULL, 2, "1" },
+    { NULL, NULL, optype_shEv, NULL, 2, "1" },
+    { NULL, NULL, optype_shEb, NULL, 2, "CL" },
+    { NULL, NULL, optype_shEv, NULL, 2, "CL" },
+    { "AAM", NULL, optype_Ib },
+    { "AAD", NULL, optype_Ib },
+    { "SALC", NULL, optype_implied },
+    { "XLAT", NULL, optype_implied },
+    { NULL, NULL, optype_fpu },
+    { NULL, NULL, optype_fpu },
+    { NULL, NULL, optype_fpu },
+    { NULL, NULL, optype_fpu },
+    { NULL, NULL, optype_fpu },
+    { NULL, NULL, optype_fpu },
+    { NULL, NULL, optype_fpu },
+    { NULL, NULL, optype_fpu },
+    { "LOOPNZ", NULL, optype_Jb },
+    { "LOOPZ", NULL, optype_Jb },
+    { "LOOP", NULL, optype_Jb },
+    { "JCXZ", "JECXZ", optype_Jb },
+    { "IN", NULL, optype_ALIb },
+    { "IN", NULL, optype_AXIb },
+    { "OUT", NULL, optype_IbAL },
+    { "OUT", NULL, optype_IbAX },
+    { "CALL", NULL, optype_Jz },
+    { "JMP", NULL, optype_Jz },
+    { "JMP", NULL, optype_Ap },
+    { "JMP", NULL, optype_Jb },
+    { "IN", NULL, optype_implied, NULL, 3, "AL", "DX" },
+    { "IN", NULL, optype_implied, NULL, 3, "AX", "DX" },
+    { "OUT", NULL, optype_implied, NULL, 3, "DX", "AL" },
+    { "OUT", NULL, optype_implied, NULL, 3, "DX", "AX" },
+    { "LOCK", NULL, optype_prefix },
+    { "ICEBP", NULL, optype_implied },
+    { "REPZ", NULL, optype_prefix },
+    { "REPNZ", NULL, optype_prefix },
+    { "HLT", NULL, optype_implied },
+    { "CMC", NULL, optype_implied },
+    { NULL, NULL, optype_group, opcode_F6 },
+    { NULL, NULL, optype_group, opcode_F7 },
+    { "CLC", NULL, optype_implied },
+    { "STC", NULL, optype_implied },
+    { "CLI", NULL, optype_implied },
+    { "STI", NULL, optype_implied },
+    { "CLD", NULL, optype_implied },
+    { "STD", NULL, optype_implied },
+    { NULL, NULL, optype_group, opcode_FE },
+    { NULL, NULL, optype_group, opcode_FF },
+};
+
+opmap_t opcode2[256] = {
+    { NULL, NULL, optype_group, opcode_0F00 },
+    { NULL, NULL, optype_group, opcode_0F01 },
+    { "LAR", NULL, optype_GvM },
+    { "LSL", NULL, optype_GvM },
+    { NULL, NULL, optype_undefined },
+    { "LOADALL286", NULL, optype_implied },
+    { "CLTS", NULL, optype_implied },
+    { "LOADALL386", NULL, optype_implied },
+    { "INVD", NULL, optype_implied },
+    { "WBINVD", NULL, optype_implied },
+    { NULL, NULL, optype_undefined },
+    { "UD2", NULL, optype_undefined },
+    { NULL, NULL, optype_undefined },
+    { "NOP", NULL, optype_Ev },
+    { NULL, NULL, optype_undefined },
+    { NULL, NULL, optype_undefined },
+
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+
+    { "MOV", NULL, optype_RdCd },
+    { "MOV", NULL, optype_RdDd },
+    { "MOV", NULL, optype_DdRd },
+    { "MOV", NULL, optype_CdRd },
+    { NULL, NULL, optype_undefined },
+    { NULL, NULL, optype_undefined },
+    { NULL, NULL, optype_undefined },
+    { NULL, NULL, optype_undefined },
+
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+
+    { "WRMSR", NULL, optype_implied },
+    { "RDTSC", NULL, optype_implied },
+    { "RDMSR", NULL, optype_implied },
+    { "RDPMC", NULL, optype_implied },
+    { "SYSENTER", NULL, optype_implied },
+    { "SYSEXIT", NULL, optype_implied },
+    { NULL, NULL, optype_undefined },
+    { NULL, NULL, optype_undefined },
+
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+
+    { "CMOVO", NULL, optype_GvEv },
+    { "CMOVNO", NULL, optype_GvEv },
+    { "CMOVC", NULL, optype_GvEv },
+    { "CMOVNC", NULL, optype_GvEv },
+    { "CMOVZ", NULL, optype_GvEv },
+    { "CMOVNZ", NULL, optype_GvEv },
+    { "CMOVNA", NULL, optype_GvEv },
+    { "CMOVA", NULL, optype_GvEv },
+    { "CMOVS", NULL, optype_GvEv },
+    { "CMOVNS", NULL, optype_GvEv },
+    { "CMOVPE", NULL, optype_GvEv },
+    { "CMOVPO", NULL, optype_GvEv },
+    { "CMOVL", NULL, optype_GvEv },
+    { "CMOVNL", NULL, optype_GvEv },
+    { "CMOVNG", NULL, optype_GvEv },
+    { "CMOVG", NULL, optype_GvEv },
+
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+
+    { "JO", NULL, optype_Jz },
+    { "JNO", NULL, optype_Jz },
+    { "JB", NULL, optype_Jz },
+    { "JNB", NULL, optype_Jz },
+    { "JZ", NULL, optype_Jz },
+    { "JNZ", NULL, optype_Jz },
+    { "JNA", NULL, optype_Jz },
+    { "JA", NULL, optype_Jz },
+    { "JS", NULL, optype_Jz },
+    { "JNS", NULL, optype_Jz },
+    { "JP", NULL, optype_Jz },
+    { "JNP", NULL, optype_Jz },
+    { "JL", NULL, optype_Jz },
+    { "JNL", NULL, optype_Jz },
+    { "JNG", NULL, optype_Jz },
+    { "JG", NULL, optype_Jz },
+
+    { "SETO", NULL, optype_Eb },
+    { "SETNO", NULL, optype_Eb },
+    { "SETB", NULL, optype_Eb },
+    { "SETNB", NULL, optype_Eb },
+    { "SETZ", NULL, optype_Eb },
+    { "SETNZ", NULL, optype_Eb },
+    { "SETNA", NULL, optype_Eb },
+    { "SETA", NULL, optype_Eb },
+    { "SETS", NULL, optype_Eb },
+    { "SETNS", NULL, optype_Eb },
+    { "SETP", NULL, optype_Eb },
+    { "SETNP", NULL, optype_Eb },
+    { "SETL", NULL, optype_Eb },
+    { "SETNL", NULL, optype_Eb },
+    { "SETNG", NULL, optype_Eb },
+    { "SETG", NULL, optype_Eb },
+
+    { "PUSH", NULL, optype_implied, NULL, 1, "FS" },
+    { "POP", NULL, optype_implied, NULL, 1, "FS" },
+    { "CPUID", NULL, optype_implied },
+    { "BT", NULL, optype_EvGv },
+    { "SHLD", NULL, optype_EvGvIb },
+    { "SHLD", NULL, optype_EvGv, NULL, 2, "CL" },
+    { NULL, NULL, optype_undefined },
+    { NULL, NULL, optype_undefined },
+
+    { "PUSH", NULL, optype_implied, NULL, 1, "GS" },
+    { "POP", NULL, optype_implied, NULL, 1, "GS" },
+    { "RSM", NULL, optype_implied },
+    { "BTS", NULL, optype_EvGv },
+    { "SHRD", NULL, optype_EvGvIb },
+    { "SHRD", NULL, optype_EvGv, NULL, 1, "CL" },
+    { NULL, NULL, optype_group, opcode_0FAE },
+    { "IMUL", NULL, optype_GvEv },
+
+    { "CMPXCHG", NULL, optype_EbGb, NULL, 1 , "AL" },
+    { "CMPXCHG", NULL, optype_EvGv, NULL, 1 , "AX" },
+    { "LSS", NULL, optype_GvM },
+    { "BTR", NULL, optype_EvGv },
+    { "LFS", NULL, optype_GvM },
+    { "LGS", NULL, optype_GvM },
+    { "MOVZX", NULL, optype_GvEb },
+    { "MOVZX", NULL, optype_GvEw },
+
+    { NULL, NULL, optype_undefined },
+    { NULL, NULL, optype_undefined },
+    { NULL, NULL, optype_group, opcode_0FBA },
+    { "BTC", NULL, optype_EvGv },
+    { "BSF", NULL, optype_GvEv },
+    { "BSR", NULL, optype_GvEv },
+    { "MOVSX", NULL, optype_GvEb },
+    { "MOVSX", NULL, optype_GvEw },
+
+    { "XADD", NULL, optype_EbGb },
+    { "XADD", NULL, optype_EvGv },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+    { NULL, NULL, optype_simd },
+
+    { "BSWAP", NULL, optype_Zv },
+    { "BSWAP", NULL, optype_Zv },
+    { "BSWAP", NULL, optype_Zv },
+    { "BSWAP", NULL, optype_Zv },
+    { "BSWAP", NULL, optype_Zv },
+    { "BSWAP", NULL, optype_Zv },
+    { "BSWAP", NULL, optype_Zv },
+    { "BSWAP", NULL, optype_Zv },
+
+};
+
 
 void *memset(void *p, int v, size_t n) {
     uint8_t *_p = p;
@@ -44,6 +824,7 @@ typedef struct cpu_state cpu_state;
 typedef struct sreg_t sreg_t;
 WASM_EXPORT void cpu_reset(cpu_state *cpu, int gen);
 WASM_EXPORT void dump_regs(cpu_state *cpu, uint32_t eip);
+char *dump_disasm(char *p, cpu_state *cpu, uint32_t eip);
 
 enum {
     cpu_gen_8086 = 0,
@@ -158,12 +939,12 @@ enum {
     type_intr_gate32 = 14,
     type_trap_gate32,
     type_segment,
-};
 
-#define SEG_CTX_DEFAULT_DATA32  0x00000010
-#define SEG_CTX_DEFAULT_ADDR32  0x00000020
-#define CPU_CTX_DATA32          0x00000001
-#define CPU_CTX_ADDR32          0x00000002
+    CPU_CTX_DATA32 = 0x00000001,
+    CPU_CTX_ADDR32 = 0x00000002,
+    SEG_CTX_DEFAULT_DATA32 = 0x00000010,
+    SEG_CTX_DEFAULT_ADDR32 = 0x00000020,
+};
 
 typedef union {
     uint32_t value;
@@ -826,7 +1607,7 @@ static int MODRM(cpu_state *cpu, sreg_t *seg_ovr, modrm_t *result) {
             if (result->mod == 0 && result->rm == 5) {
                 result->offset = FETCH32(cpu);
             } else {
-                if (result->rm == 5) {
+                if (result->rm == index_EBP) {
                     seg = &cpu->SS;
                 }
                 base = cpu->gpr[result->rm];
@@ -850,14 +1631,14 @@ static int MODRM(cpu_state *cpu, sreg_t *seg_ovr, modrm_t *result) {
             uint32_t scale = 1 << result->scale;
             if (index == 4) scale = 0;
 
-            if (base == 4 || (base == 5 && result->mod != 0)) {
+            if (base == index_ESP || (base == index_EBP && result->mod != 0)) {
                 seg = &cpu->SS;
             }
 
             const int BASE_DISABLED = -1;
             switch (result->mod) {
             case 0: // [base]
-                if (base == 5) {
+                if (base == index_EBP) {
                     base = BASE_DISABLED;
                     disp = FETCH32(cpu);
                 }
@@ -2599,15 +3380,12 @@ static int cpu_step(cpu_state *cpu) {
                     } else {
                         set.size = 1;
                     }
-                } else {
-                    set.size = 0;
-                }
-                set.opr1 = &cpu->EAX;
-                if (set.size) {
                     set.opr2 = FETCHW(cpu);
                 } else {
+                    set.size = 0;
                     set.opr2 = FETCH8(cpu);
                 }
+                set.opr1 = &cpu->EAX;
                 AND(cpu, &set, 1);
                 return 0;
 
@@ -3956,19 +4734,19 @@ void dump_regs(cpu_state *cpu, uint32_t eip) {
     *p++ = cpu->PF ? 'P' : '-';
     *p++ = cpu->CF ? 'C' : '-';
     if (cpu->cpu_gen >= cpu_gen_80286) {
-        p = dump_string(p, "\nCS ");
-        p = dump_segment(p, &cpu->CS);
-        p = dump_string(p, " SS ");
-        p = dump_segment(p, &cpu->SS);
-        p = dump_string(p, "\nDS ");
-        p = dump_segment(p, &cpu->DS);
-        p = dump_string(p, " ES ");
-        p = dump_segment(p, &cpu->ES);
-        p = dump_string(p, "\nFS ");
-        p = dump_segment(p, &cpu->FS);
-        p = dump_string(p, " GS ");
-        p = dump_segment(p, &cpu->GS);
         if (cpu->CR0.PE) {
+            p = dump_string(p, "\nCS ");
+            p = dump_segment(p, &cpu->CS);
+            p = dump_string(p, " SS ");
+            p = dump_segment(p, &cpu->SS);
+            p = dump_string(p, "\nDS ");
+            p = dump_segment(p, &cpu->DS);
+            p = dump_string(p, " ES ");
+            p = dump_segment(p, &cpu->ES);
+            p = dump_string(p, "\nFS ");
+            p = dump_segment(p, &cpu->FS);
+            p = dump_string(p, " GS ");
+            p = dump_segment(p, &cpu->GS);
             p = dump_string(p, "\nGDT ");
             p = dump_segment(p, &cpu->GDT);
             p = dump_string(p, " IDT ");
@@ -3977,8 +4755,19 @@ void dump_regs(cpu_state *cpu, uint32_t eip) {
             p = dump_segment(p, &cpu->LDT);
             p = dump_string(p, " TSS ");
             p = dump_segment(p, &cpu->TSS);
+        } else {
+            p = dump_string(p, "\nDS ");
+            p = dump16(p, cpu->DS.sel);
+            p = dump_string(p, " ES ");
+            p = dump16(p, cpu->ES.sel);
+            p = dump_string(p, " FS ");
+            p = dump16(p, cpu->FS.sel);
+            p = dump_string(p, " GS ");
+            p = dump16(p, cpu->GS.sel);
         }
     }
+    *p++ = '\n';
+    p = dump_disasm(p, cpu, eip);
     *p = 0;
     println(buff);
 }
@@ -4063,13 +4852,18 @@ static int check_irq(cpu_state *cpu) {
 #define CPU_PERIODIC    0x100000
 static int cpu_block(cpu_state *cpu) {
     int periodic = CPU_PERIODIC;
-    if (cpu->TF) periodic = 1;
     int status = check_irq(cpu);
     if (status) return status;
     for (int i = 0; i < periodic; i++) {
         uint32_t last_known_eip = cpu->EIP;
         int status = cpu_step(cpu);
-        if (status == cpu_status_periodic) continue;
+        if (status == cpu_status_periodic) {
+            // if (cpu->TF) {
+            //     INVOKE_INT(cpu, 1, exception);
+            //     break;
+            // }
+            continue;
+        }
         switch (status) {
             // case cpu_status_periodic:
             //     continue;
@@ -4099,7 +4893,6 @@ static int cpu_block(cpu_state *cpu) {
                 return status;
         }
     }
-    if (cpu->TF) INVOKE_INT(cpu, 1, exception);
     return cpu_status_periodic;
 }
 
@@ -4178,6 +4971,7 @@ WASM_EXPORT int run(cpu_state *cpu) {
  * |0x60000|#UD|conditional|Undefined instruction|
  * |0x70000|#NM|conditional|FPU Not Available|
  * |0x8XXXX|#DF|N|Double Fault|
+ * |0xAXXXX|#TS|conditional|Invalid TSS|
  * |0xBXXXX|#NP|conditional|Segment Not Present|
  * |0xCXXXX|#SS|conditional|Stack Exception|
  * |0xDXXXX|#GP|conditional|General Protection Exception|
@@ -4281,4 +5075,541 @@ WASM_EXPORT uint32_t get_vram_signature(uint32_t base, size_t size) {
         acc = ((acc >> (32 - shift)) | (acc << shift)) ^ v;
     }
     return acc;
+}
+
+
+static inline char *disasm_separator(char *p, int *n_opl) {
+    if (*n_opl) {
+        p = dump_string(p, ", ");
+    } else {
+        p = dump_string(p, "\t");
+    }
+    *n_opl += 1;
+    return p;
+}
+
+
+static inline char *disasm_reg(char *p, int *n_opl, int index, disasm_reg_type type) {
+    p = disasm_separator(p, n_opl);
+    switch (type) {
+        case reg_type_al:
+            p = dump_string(p, reg_names_AL[index]);
+            break;
+        case reg_type_ax:
+            p = dump_string(p, reg_names_AX[index]);
+            break;
+        case reg_type_eax:
+            p = dump_string(p, reg_names_EAX[index]);
+            break;
+        case reg_type_sreg:
+            p = dump_string(p, reg_names_sreg[index]);
+            break;
+        case reg_type_creg:
+            p = dump_string(p, "CR");
+            *p++ = '0' + index;
+            break;
+        case reg_type_dreg:
+            p = dump_string(p, "DR");
+            *p++ = '0' + index;
+            break;
+    }
+    return p;
+}
+
+static inline char *disasm_Ib(char *p, int *n_opl, uint32_t base, int *_len) {
+    int len = *_len;
+    p = disasm_separator(p, n_opl);
+    int8_t i = mem[base + len];
+    p = dump8(p, i);
+    len++;
+    *_len = len;
+    return p;
+}
+
+static inline char *disasm_Iw(char *p, int *n_opl, uint32_t base, int *_len) {
+    int len = *_len;
+    p = disasm_separator(p, n_opl);
+    int16_t i = READ_LE16(mem + base + len);
+    p = dump16(p, i);
+    len += 2;
+    *_len = len;
+    return p;
+}
+
+static inline char *disasm_Iz(char *p, int *n_opl, uint32_t base, int *_len, int use32) {
+    int len = *_len;
+    p = disasm_separator(p, n_opl);
+    if (use32) {
+        int32_t i = READ_LE32(mem + base + len);
+        p = dump32(p, i);
+        len += 4;
+    } else {
+        int16_t i = READ_LE16(mem + base + len);
+        p = dump16(p, i);
+        len += 2;
+    }
+    *_len = len;
+    return p;
+}
+
+static inline char *disasm_dump_Gx(char *p, int *n_opl, modrm_t modrm, optype_t optype, int use32) {
+    int type_gx = optype & opa_Gmask;
+    switch (type_gx) {
+        case opa_Gb:
+            p = disasm_reg(p, n_opl, modrm.reg, reg_type_al);
+            break;
+        case opa_Gw:
+            p = disasm_reg(p, n_opl, modrm.reg, reg_type_ax);
+            break;
+        case opa_Gv:
+            p = disasm_reg(p, n_opl, modrm.reg, reg_type_ax + !!(use32 & CPU_CTX_DATA32));
+            break;
+        default:
+        {
+            int type_Ox = optype & opa_Omask;
+            switch (type_Ox) {
+                case opa_EwSw:
+                    p = disasm_reg(p, n_opl, modrm.reg, reg_type_sreg);
+                    break;
+                case opa_RdCd:
+                    p = disasm_reg(p, n_opl, modrm.reg, reg_type_creg);
+                    break;
+                case opa_RdDd:
+                    p = disasm_reg(p, n_opl, modrm.reg, reg_type_dreg);
+                    break;
+                default: break;
+            }
+        }
+    }
+    return p;
+}
+
+static inline char *disasm_main(char * p, cpu_state *cpu, sreg_t *cseg, uint32_t eip, int *length) {
+    int len = 0;
+    int use32 = cseg->attr_D * (CPU_CTX_DATA32 + CPU_CTX_ADDR32);
+    uint32_t base = cseg->base + eip;
+    unsigned opcode;
+    if (base < max_mem) {
+        while (base < max_mem) {
+
+            opcode = mem[base + len];
+            len++;
+            opmap_t map1 = opcode1[opcode];
+            modrm_t modrm;
+            const char *name_ptr = NULL;
+
+            switch (map1.optype) {
+                case optype_prefix66:
+                    use32 ^= 0x1;
+                    continue;
+                case optype_prefix67:
+                    use32 ^= 0x2;
+                    continue;
+                case optype_extended:
+                    opcode = (opcode * 256) + mem[base + len];
+                    len++;
+                    map1 = opcode2[opcode & 0xFF];
+                    break;
+                default: break;
+            }
+
+            if (map1.name) {
+                if (use32 && map1.name32) {
+                    name_ptr = map1.name32;
+                } else {
+                    name_ptr = map1.name;
+                }
+            }
+            if (map1.optype == optype_prefix) {
+                if (name_ptr) {
+                    p = dump_string(p, name_ptr);
+                }
+                *p++ = ' ';
+                continue;
+            }
+
+            if ((map1.optype & optype_modrm_)) {
+                modrm.modrm = mem[base + len];
+                len++;
+                if ((map1.optype & opa_group) != 0 && map1.group != 0) {
+                    map1 = map1.group[modrm.reg];
+                    name_ptr = map1.name;
+                } else if (map1.optype & opa_shift) {
+                    name_ptr = shift_names[modrm.reg];
+                }
+            }
+            if (name_ptr) {
+                p = dump_string(p, name_ptr);
+            } else {
+                p = dump_string(p, "db 0x");
+                p = dump8(p, opcode);
+            }
+
+            int n_oplands = 0;
+
+            if ((map1.n_oplands & 1) != 0) {
+                p = disasm_separator(p, &n_oplands);
+                p = dump_string(p, map1.oplands1);
+            }
+
+            switch (map1.optype) {
+                case optype_implied:
+                    break;
+
+                case optype_Zb:
+                    p = disasm_reg(p, &n_oplands, opcode & 7, reg_type_al);
+                    break;
+
+                case optype_ZbIb:
+                    p = disasm_reg(p, &n_oplands, opcode & 7, reg_type_al);
+                    p = disasm_Ib(p, &n_oplands, base, &len);
+                    break;
+
+                case optype_Zv:
+                    p = disasm_reg(p, &n_oplands, opcode & 7, reg_type_ax + !!(use32 & CPU_CTX_DATA32));
+                    break;
+
+                case optype_ZvIv:
+                    p = disasm_reg(p, &n_oplands, opcode & 7, reg_type_ax + !!(use32 & CPU_CTX_DATA32));
+                    p = disasm_Iz(p, &n_oplands, base, &len, use32 & CPU_CTX_DATA32);
+                    break;
+
+                case optype_Ib:
+                    p = disasm_Ib(p, &n_oplands, base, &len);
+                    break;
+
+                case optype_ALIb:
+                    p = disasm_reg(p, &n_oplands, index_AL, reg_type_al);
+                    p = disasm_Ib(p, &n_oplands, base, &len);
+                    break;
+
+                case optype_IbAL:
+                    p = disasm_Ib(p, &n_oplands, base, &len);
+                    p = disasm_reg(p, &n_oplands, index_AL, reg_type_al);
+                    break;
+
+                case optype_Iw:
+                    p = disasm_Iw(p, &n_oplands, base, &len);
+                    break;
+
+                case optype_Iz:
+                    p = disasm_Iz(p, &n_oplands, base, &len, use32 & CPU_CTX_DATA32);
+                    break;
+
+                case optype_Jb:
+                {
+                    p = disasm_separator(p, &n_oplands);
+                    int8_t j = mem[base + len];
+                    len++;
+                    if (use32 & CPU_CTX_ADDR32) {
+                        p = dump32(p, eip + len + j);
+                    } else {
+                        p = dump16(p, eip + len + j);
+                    }
+                    n_oplands++;
+                    break;
+                }
+
+                case optype_Jz:
+                {
+                    p = disasm_separator(p, &n_oplands);
+                    if (use32 & CPU_CTX_ADDR32) {
+                        int32_t j = READ_LE32(mem + base + len);
+                        len += 4;
+                        p = dump32(p, eip + len + j);
+                    } else {
+                        int16_t j = READ_LE16(mem + base + len);
+                        len += 2;
+                        p = dump16(p, eip + len + j);
+                    }
+                    n_oplands++;
+                    break;
+                }
+
+                case optype_Ap:
+                {
+                    p = disasm_separator(p, &n_oplands);
+                    n_oplands++;
+
+                    uint32_t offset;
+                    if (use32 & CPU_CTX_DATA32) {
+                        offset = READ_LE32(mem + base + len);
+                        len += 4;
+                    } else {
+                        offset = READ_LE16(mem + base + len);
+                        len += 2;
+                    }
+                    int16_t sel = READ_LE16(mem + base + len);
+                    len += 2;
+
+                    p = dump16(p, sel);
+                    *p++ = ':';
+                    if (use32 & CPU_CTX_DATA32) {
+                        p = dump32(p, offset);
+                    } else {
+                        p = dump16(p, offset);
+                    }
+                    break;
+                }
+
+                case optype_ALOb:
+                case optype_AXOv:
+                case optype_ObAL:
+                case optype_OvAX:
+                {
+                    switch (map1.optype) {
+                    case optype_ALOb:
+                        p = disasm_reg(p, &n_oplands, index_AL, reg_type_al);
+                        break;
+                    case optype_AXOv:
+                        p = disasm_reg(p, &n_oplands, index_AX, reg_type_ax + !!(use32 & CPU_CTX_DATA32));
+                        break;
+                    default: break;
+                    }
+
+                    p = disasm_separator(p, &n_oplands);
+                    *p++ = '[';
+                    if (use32 & CPU_CTX_ADDR32) {
+                        int32_t i = READ_LE32(mem + base + len);
+                        p = dump32(p, i);
+                        len += 4;
+                    } else {
+                        int16_t i = READ_LE16(mem + base + len);
+                        p = dump16(p, i);
+                        len += 2;
+                    }
+                    *p++ = ']';
+
+                    switch (map1.optype) {
+                    case optype_ObAL:
+                        p = disasm_reg(p, &n_oplands, index_AL, reg_type_al);
+                        break;
+                    case optype_OvAX:
+                        p = disasm_reg(p, &n_oplands, index_AX, reg_type_ax + !!(use32 & CPU_CTX_DATA32));
+                        break;
+                    default: break;
+                    }
+
+                    break;
+                }
+
+                default:
+                {
+                    if (map1.optype >= optype_modrm_) {
+                        int reverse = map1.optype & opa_reverse;
+
+                        if (reverse == 0) {
+                            p = disasm_dump_Gx(p, &n_oplands, modrm, map1.optype, use32);
+                        }
+
+                        if (modrm.mod == 3) {
+                            switch (map1.optype & opa_Emask) {
+                                case opa_Eb:
+                                    p = disasm_reg(p, &n_oplands, modrm.rm, reg_type_al);
+                                    break;
+                                case opa_Ew:
+                                    p = disasm_reg(p, &n_oplands, modrm.rm, reg_type_ax);
+                                    break;
+                                case opa_Ev:
+                                    p = disasm_reg(p, &n_oplands, modrm.rm, reg_type_ax + !!(use32 & CPU_CTX_DATA32));
+                                    break;
+                                default:
+                                {
+                                    int type_Ox = map1.optype & opa_Omask;
+                                    switch (type_Ox) {
+                                        case opa_RdCd:
+                                        case opa_RdDd:
+                                            p = disasm_reg(p, &n_oplands, modrm.rm, reg_type_eax);
+                                            break;
+                                        default: break;
+                                    }
+                                }
+                            }
+                        } else {
+                            const char **name_table;
+                            int rmb = -1, index = -1, scale = 1, disp_mode = modrm.mod, disp = 0, n = 0;
+                            if (use32 & CPU_CTX_ADDR32) {
+                                name_table = reg_names_EAX;
+                                if (modrm.rm != 4) {
+                                    rmb = modrm.rm;
+                                } else {
+                                    modrm.sib = mem[base + len];
+                                    len++;
+                                    rmb = modrm.base;
+                                    if (modrm.index != 4) {
+                                        index = modrm.index;
+                                        scale = modrm.scale;
+                                    }
+                                }
+                                if (disp_mode == 0 && rmb == index_EBP) {
+                                    rmb = -1;
+                                    disp_mode = 4;
+                                }
+                                if (disp_mode == 2) {
+                                    disp_mode = 4;
+                                }
+                            } else {
+                                name_table = reg_names_AX;
+                                switch (modrm.rm) {
+                                    case 0:
+                                        rmb = index_BX;
+                                        index = index_SI;
+                                        break;
+                                    case 1:
+                                        rmb = index_BX;
+                                        index = index_DI;
+                                        break;
+                                    case 2:
+                                        rmb = index_BP;
+                                        index = index_SI;
+                                        break;
+                                    case 3:
+                                        rmb = index_BP;
+                                        index = index_DI;
+                                        break;
+                                    case 4:
+                                        rmb = index_SI;
+                                        break;
+                                    case 5:
+                                        rmb = index_DI;
+                                        break;
+                                    case 6:
+                                        if (disp_mode == 0) {
+                                            disp_mode = 2;
+                                        } else {
+                                            rmb = index_BP;
+                                        }
+                                        break;
+                                    case 7:
+                                        rmb = index_BX;
+                                        break;
+                                }
+                            }
+
+                            p = disasm_separator(p, &n_oplands);
+                            *p++ = '[';
+                            if (rmb >= 0) {
+                                p = dump_string(p, name_table[rmb]);
+                                n++;
+                            }
+                            if (index >= 0) {
+                                if (n) {
+                                    *p++ = '+';
+                                    n++;
+                                }
+                                p = dump_string(p, name_table[index]);
+                                if (scale > 1) {
+                                    *p++ = '*';
+                                    *p++ = '0' + scale;
+                                }
+                            }
+
+                            if (disp_mode > 0) {
+                                if (n) {
+                                    *p++ = '+';
+                                    n++;
+                                }
+                                switch (disp_mode) {
+                                case 1:
+                                    disp = MOVSXB(mem[base + len]);
+                                    len++;
+                                    p = dump8(p, disp);
+                                    break;
+                                case 2:
+                                    disp = MOVSXW(READ_LE16(mem + base + len));
+                                    len += 2;
+                                    p = dump16(p, disp);
+                                    break;
+                                case 4:
+                                    disp = READ_LE32(mem + base + len);
+                                    len += 4;
+                                    p = dump32(p, disp);
+                                    break;
+                                }
+                            }
+                            *p++ = ']';
+
+                        }
+
+                        if (reverse != 0) {
+                            p = disasm_dump_Gx(p, &n_oplands, modrm, map1.optype, use32);
+                        }
+
+                        int ix = map1.optype & opa_Imask;
+                        if (ix) {
+                            switch (ix) {
+                                case opa_Ib:
+                                    p = disasm_Ib(p, &n_oplands, base, &len);
+                                    break;
+                                case opa_Iw:
+                                    p = disasm_Iw(p, &n_oplands, base, &len);
+                                    break;
+                                case opa_Iz:
+                                    p = disasm_Iz(p, &n_oplands, base, &len, !!(use32 & CPU_CTX_DATA32));
+                                    break;
+                            }
+                        }
+
+                    } else {
+                        p = disasm_separator(p, &n_oplands);
+                        p = dump_string(p, "???");
+                    }
+                    break;
+                }
+            }
+
+            if ((map1.n_oplands & 2) != 0) {
+                p = disasm_separator(p, &n_oplands);
+                p = dump_string(p, map1.oplands2);
+            }
+
+            break;
+        }
+
+    } else {
+        p = dump_string(p, "???");
+    }
+    *p++ = '\0';
+    if (length) {
+        *length = len;
+    }
+    return p;
+}
+
+char *dump_disasm(char *p, cpu_state *cpu, uint32_t eip) {
+    sreg_t *seg = &cpu->CS;
+    int use32 = seg->attr_D;
+    p = dump16(p, seg->sel);
+    *p++ = ':';
+    if (use32 || eip > 0xFFFF) {
+        p = dump32(p, eip);
+    } else {
+        p = dump16(p, eip);
+    }
+    *p++ = ' ';
+    char *q = p;
+    int max_len = 8;
+    for (int i = 0; i < max_len * 2 + 1; i++) {
+        *p++ = ' ';
+    }
+    int length;
+    p = disasm_main(p, cpu, seg, eip, &length);
+    if (length > 0) {
+        int len = (length < max_len) ? length : max_len;
+        size_t base = seg->base + eip;
+        for (int i = 0; i < len; i++) {
+            uint8_t c = mem[base + i];
+            q = dump8(q, c);
+        }
+    }
+    return p;
+
+    // *p++ = '\n';
+    // for (int i = 0; i < 256; i++) {
+    //     p = dump8(p, i);
+    //     *p++ = ' ';
+    //     p = dump_string(p, opcode2[i].name);
+    //     *p++ = '\n';
+    // }
+    // return p;
 }
