@@ -655,7 +655,12 @@ const unicodeMap = [
                     address = parseInt(`0x0${rawValue}`);
                 }
                 if (window.worker) {
-                    worker.postMessage({command: 'dump', address: address})
+                    worker.postMessage({command: 'dump', address: address});
+                }
+            });
+            $('#buttonDisAsm').addEventListener('click', e => {
+                if (window.worker) {
+                    worker.postMessage({command: 'disasm', range: [$('#inputAddress2').value || "cs:eip", 10]});
                 }
             });
 
@@ -789,8 +794,10 @@ const unicodeMap = [
                         <summary class="buttonFace">DevTool</summary>
                         <a id="buttonNMI" class="buttonFace">Step</a>
                         <a id="buttonDevCLS" class="buttonFace destructiveButton">&#x1f5d1;</a>
-                        <input id="inputAddress" type="text" value="" placeholder="0000:0000" size="12">
+                        <input id="inputAddress" type="text" value="" placeholder="0000:0000" size="9">
                         <a id="buttonDump" class="buttonFace">Dump</a>
+                        <input id="inputAddress2" type="text" value="" placeholder="0000:0000" size="9">
+                        <a id="buttonDisAsm" class="buttonFace">DisAsm</a>
                         <br>
                         <textarea id="devTerminal" cols="80" rows="20" readonly></textarea>
                     </details>

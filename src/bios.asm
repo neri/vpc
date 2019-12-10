@@ -80,16 +80,16 @@ _irq0:
     push ax
     xor ax, ax
     mov ds, ax
-    inc word [ds:0x046C]
+    inc word [0x046C]
     jnz .skip
-    mov ax, [ds:0x046E]
+    mov ax, [0x046E]
     inc ax
     cmp ax, 24
     jb .nb
     xor ax, ax
-    mov byte [ds:0x0470], 1
+    mov byte [0x0470], 1
 .nb:
-    mov [ds:0x046E], ax
+    mov [0x046E], ax
 .skip:
     int 0x1C
     mov al, 0x20
@@ -564,10 +564,9 @@ _chk_scroll:
     inc ch
     mov [BDA_VGA_CURSOR], cx
 .no80:
-    mov al, bh
-    cmp ch, al
+    cmp ch, bh
     jbe .end
-    mov ch, al
+    mov ch, bh
     mov [BDA_VGA_CURSOR], cx
     mov cx, 0xB800
     mov ds, cx
@@ -600,7 +599,7 @@ _int11:
     push ds
     xor ax, ax
     mov ds, ax
-    mov ax, [ds: 0x410]
+    mov ax, [0x410]
     pop ds
     iret
 
@@ -1328,9 +1327,9 @@ _bios_tick:
     xor ax, ax
     mov ds, ax
 .retry:
-    mov ax, [ds:0x046C]
-    mov dx, [ds:0x046E]
-    cmp ax, [ds:0x046C]
+    mov ax, [0x046C]
+    mov dx, [0x046E]
+    cmp ax, [0x046C]
     jnz .retry
     mov cx, _TIMER_RES
     pop ds

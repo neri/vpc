@@ -29,7 +29,9 @@ typedef enum {
     optype_string,
     optype_prefix66,
     optype_prefix67,
-    optype_extended, // 0F
+    optype_extend_0F,
+    optype_extend_0F38,
+    optype_extend_0F3A,
 
     optype_Zv,
     optype_Zb,
@@ -328,7 +330,7 @@ opmap_t opcode1[256] = {
     { "OR", NULL, optype_ALIb },
     { "OR", NULL, optype_AXIz },
     { "PUSH", NULL, optype_implied, NULL, 1, "CS" },
-    { NULL, NULL, optype_extended },
+    { NULL, NULL, optype_extend_0F },
     { "ADC", NULL, optype_EbGb },
     { "ADC", NULL, optype_EvGv },
     { "ADC", NULL, optype_GbEb },
@@ -1566,6 +1568,22 @@ static int SETF32(cpu_state *cpu, int value) {
 typedef struct {
     uint32_t linear;
     uint32_t offset;
+    struct {
+        uint32_t disp;
+        union {
+            struct {
+                uint32_t base:4;
+                uint32_t index:4;
+                uint32_t reg:4;
+                uint32_t disp_bits:4;
+                uint32_t scale:2;
+                uint32_t has_base:1;
+                uint32_t has_index:1;
+                uint32_t use32:1;
+            };
+            uint32_t d32;
+        };
+    } parsed;
     union {
         uint8_t modrm;
         struct {
@@ -1582,6 +1600,16 @@ typedef struct {
             uint8_t scale:2;
         };
     };
+    union {
+        uint8_t rex;
+        struct {
+            uint8_t b:1;
+            uint8_t x:1;
+            uint8_t r:1;
+            uint8_t w:1;
+            uint8_t fixed:4;
+        };
+    };
 } modrm_t;
 
 typedef struct {
@@ -1593,127 +1621,136 @@ typedef struct {
     int32_t opr2;
 } operand_set;
 
-static int MODRM(cpu_state *cpu, sreg_t *seg_ovr, modrm_t *result) {
+static int parse_modrm(int use32, uint32_t rip, int *_skip, modrm_t *result) {
+    const int REG_NOT_SELECTED = -1;
+    int len = 0;
+    result->modrm = mem[rip + len];
+    len++;
+    result->parsed.d32 = 0;
+    result->parsed.reg = result->reg;
+    int mod = result->mod;
+    if (mod == 3) {
+        result->parsed.base = result->rm;
+    } else {
+        int base = REG_NOT_SELECTED, index = REG_NOT_SELECTED;
+        if (use32) {
+            result->parsed.use32 = 1;
+            if (result->rm != 4) {
+                base = result->rm;
+            } else {
+                result->sib = mem[rip + len];
+                len++;
+                base = result->base;
+                if (result->index != 4) {
+                    index = result->index;
+                    result->parsed.scale = result->scale;
+                }
+            }
+            if (mod == 0 && base == index_EBP) {
+                base = REG_NOT_SELECTED;
+                mod = 4;
+            }
+            if (mod == 2) {
+                mod = 4;
+            }
+        } else {
+            switch (result->rm) {
+                case 0:
+                    base = index_BX;
+                    index = index_SI;
+                    break;
+                case 1:
+                    base = index_BX;
+                    index = index_DI;
+                    break;
+                case 2:
+                    base = index_BP;
+                    index = index_SI;
+                    break;
+                case 3:
+                    base = index_BP;
+                    index = index_DI;
+                    break;
+                case 4:
+                    base = index_SI;
+                    break;
+                case 5:
+                    base = index_DI;
+                    break;
+                case 6:
+                    if (mod == 0) {
+                        mod = 2;
+                    } else {
+                        base = index_BP;
+                    }
+                    break;
+                case 7:
+                    base = index_BX;
+                    break;
+            }
+        }
+        if (base >= 0) {
+            result->parsed.base = base;
+            result->parsed.has_base = 1;
+        }
+        if (index >= 0) {
+            result->parsed.index = index;
+            result->parsed.has_index = 1;
+        }
+        result->parsed.disp_bits = mod;
+        switch (mod) {
+            case 1:
+                result->parsed.disp = MOVSXB(mem[rip + len]);
+                len++;
+                break;
+            case 2:
+                result->parsed.disp = MOVSXW(READ_LE16(mem + rip + len));
+                len += 2;
+                break;
+            case 4:
+                result->parsed.disp = READ_LE32(mem + rip + len);
+                len += 4;
+                break;
+            default:
+                result->parsed.disp = 0;
+        }
+    }
 
-    result->modrm = FETCH8(cpu);
+    *_skip = len;
+
+    return (result->mod == 3) ? 3 : 0;
+}
+
+static int MODRM(cpu_state *cpu, sreg_t *seg_ovr, modrm_t *result) {
+    int skip;
+    parse_modrm(cpu->cpu_context & CPU_CTX_ADDR32, cpu->CS.base + cpu->EIP, &skip, result);
+    cpu->EIP += skip;
 
     if (result->mod == 3) return 3;
 
     sreg_t *seg = NULL;
-    uint32_t base = 0;
-    int disp = 0;
-    if (cpu->cpu_context & CPU_CTX_ADDR32) {
-        if (result->rm != 4) {
-            if (result->mod == 0 && result->rm == 5) {
-                result->offset = FETCH32(cpu);
-            } else {
-                if (result->rm == index_EBP) {
-                    seg = &cpu->SS;
-                }
-                base = cpu->gpr[result->rm];
-                switch (result->mod) {
-                case 0: // [base]
-                    break;
-                case 1: // [base + disp8]
-                    disp = MOVSXB(FETCH8(cpu));
-                    break;
-                case 2: // [base + disp32]
-                    disp = FETCH32(cpu);
-                    break;
-                }
-                result->offset = base + disp;
-            }
-        } else {
-            // SIB
-            result->sib = FETCH8(cpu);
-            int32_t base = result->base;
-            uint32_t index = result->index;
-            uint32_t scale = 1 << result->scale;
-            if (index == 4) scale = 0;
-
-            if (base == index_ESP || (base == index_EBP && result->mod != 0)) {
-                seg = &cpu->SS;
-            }
-
-            const int BASE_DISABLED = -1;
-            switch (result->mod) {
-            case 0: // [base]
-                if (base == index_EBP) {
-                    base = BASE_DISABLED;
-                    disp = FETCH32(cpu);
-                }
-                break;
-            case 1: // [base + disp8]
-                disp = MOVSXB(FETCH8(cpu));
-                break;
-            case 2: // [base + disp32]
-                disp = FETCH32(cpu);
-                break;
-            }
-            if (base == BASE_DISABLED) {
-                base = 0;
-            } else {
-                base = cpu->gpr[base];
-            }
-            if (scale) {
-                index = cpu->gpr[index] * scale;
-            } else {
-                index = 0;
-            }
-            result->offset = base + index + disp;
-        }
-    } else {
-        switch (result->rm) {
-        case 0: // [BX+SI]
-            base = cpu->BX + cpu->SI;
-            break;
-        case 1: // [BX+DI]
-            base = cpu->BX + cpu->DI;
-            break;
-        case 2: // [BP+SI]
-            seg = &cpu->SS;
-            base = cpu->BP + cpu->SI;
-            break;
-        case 3: // [BP+DI]
-            seg = &cpu->SS;
-            base = cpu->BP + cpu->DI;
-            break;
-        case 4: // [SI]
-            base = cpu->SI;
-            break;
-        case 5: // [DI]
-            base = cpu->DI;
-            break;
-        case 6: // [BP] or [disp]
-            if (result->mod != 0) {
-                seg = &cpu->SS;
-                base = cpu->BP;
-            }
-            break;
-        case 7: // [BX]
-            base = cpu->BX;
-            break;
-        }
-        switch (result->mod) {
-        case 0: // [base] or [disp16]
-            if (result->rm == 6) {
-                disp = MOVSXW(FETCH16(cpu));
-            }
-            break;
-        case 1: // [base + disp8]
-            disp = MOVSXB(FETCH8(cpu));
-            break;
-        case 2: // [base + disp16]
-            disp = MOVSXW(FETCH16(cpu));
-            break;
-        }
-        result->offset = ((base + disp) & 0xFFFF);
+    uint32_t offset = result->parsed.disp;
+    if (result->parsed.has_base) {
+        offset += cpu->gpr[result->parsed.base];
     }
-    if (!seg) {
-        seg = &cpu->DS;
+    if (result->parsed.has_index) {
+        uint32_t index = cpu->gpr[result->parsed.index];
+        index <<= result->parsed.scale;
+        offset += index;
+    }
+    if (result->parsed.use32) {
+        result->offset = offset;
+    } else {
+        result->offset = offset & UINT16_MAX;
     }
     if (seg_ovr) {
         seg = seg_ovr;
+    } else {
+        if (result->parsed.has_base && (result->parsed.base == index_BP || result->parsed.base == index_SP)) {
+            seg = &cpu->SS;
+        } else {
+            seg = &cpu->DS;
+        }
     }
     result->linear = seg->base + result->offset;
     if (result->linear > max_mem) result->linear = null_ptr;
@@ -5184,15 +5221,29 @@ static inline char *disasm_dump_Gx(char *p, int *n_opl, modrm_t modrm, optype_t 
     return p;
 }
 
-static inline char *disasm_main(char * p, cpu_state *cpu, sreg_t *cseg, uint32_t eip, int *length) {
+static inline char *disasm_main(char * p, uint16_t sel, uint32_t eip, uint32_t rip, int _use32, int *length) {
     int len = 0;
-    int use32 = cseg->attr_D * (CPU_CTX_DATA32 + CPU_CTX_ADDR32);
-    uint32_t base = cseg->base + eip;
-    unsigned opcode;
-    if (base < max_mem) {
-        while (base < max_mem) {
+    int use32 = _use32 ? (CPU_CTX_DATA32 + CPU_CTX_ADDR32) : 0;
 
-            opcode = mem[base + len];
+    if (sel || !use32) {
+        p = dump16(p, sel);
+        *p++ = ':';
+    }
+    if (use32 || eip > 0xFFFF) {
+        p = dump32(p, eip);
+    } else {
+        p = dump16(p, eip);
+    }
+    *p++ = ' ';
+    char *q = p;
+    int max_len = 8;
+    for (int i = 0; i < max_len * 2 + 1; i++) {
+        *p++ = ' ';
+    }
+
+    if (rip < max_mem) {
+        while (rip < max_mem) {
+            unsigned opcode = mem[rip + len];
             len++;
             opmap_t map1 = opcode1[opcode];
             modrm_t modrm;
@@ -5205,8 +5256,8 @@ static inline char *disasm_main(char * p, cpu_state *cpu, sreg_t *cseg, uint32_t
                 case optype_prefix67:
                     use32 ^= 0x2;
                     continue;
-                case optype_extended:
-                    opcode = (opcode * 256) + mem[base + len];
+                case optype_extend_0F:
+                    opcode = (opcode * 256) + mem[rip + len];
                     len++;
                     map1 = opcode2[opcode & 0xFF];
                     break;
@@ -5229,8 +5280,9 @@ static inline char *disasm_main(char * p, cpu_state *cpu, sreg_t *cseg, uint32_t
             }
 
             if ((map1.optype & optype_modrm_)) {
-                modrm.modrm = mem[base + len];
-                len++;
+                int skip = 0;
+                parse_modrm(use32 & CPU_CTX_ADDR32, rip + len, &skip, &modrm);
+                len += skip;
                 if ((map1.optype & opa_group) != 0 && map1.group != 0) {
                     map1 = map1.group[modrm.reg];
                     name_ptr = map1.name;
@@ -5262,7 +5314,7 @@ static inline char *disasm_main(char * p, cpu_state *cpu, sreg_t *cseg, uint32_t
 
                 case optype_ZbIb:
                     p = disasm_reg(p, &n_oplands, opcode & 7, reg_type_al);
-                    p = disasm_Ib(p, &n_oplands, base, &len);
+                    p = disasm_Ib(p, &n_oplands, rip, &len);
                     break;
 
                 case optype_Zv:
@@ -5271,35 +5323,35 @@ static inline char *disasm_main(char * p, cpu_state *cpu, sreg_t *cseg, uint32_t
 
                 case optype_ZvIv:
                     p = disasm_reg(p, &n_oplands, opcode & 7, reg_type_ax + !!(use32 & CPU_CTX_DATA32));
-                    p = disasm_Iz(p, &n_oplands, base, &len, use32 & CPU_CTX_DATA32);
+                    p = disasm_Iz(p, &n_oplands, rip, &len, use32 & CPU_CTX_DATA32);
                     break;
 
                 case optype_Ib:
-                    p = disasm_Ib(p, &n_oplands, base, &len);
+                    p = disasm_Ib(p, &n_oplands, rip, &len);
                     break;
 
                 case optype_ALIb:
                     p = disasm_reg(p, &n_oplands, index_AL, reg_type_al);
-                    p = disasm_Ib(p, &n_oplands, base, &len);
+                    p = disasm_Ib(p, &n_oplands, rip, &len);
                     break;
 
                 case optype_IbAL:
-                    p = disasm_Ib(p, &n_oplands, base, &len);
+                    p = disasm_Ib(p, &n_oplands, rip, &len);
                     p = disasm_reg(p, &n_oplands, index_AL, reg_type_al);
                     break;
 
                 case optype_Iw:
-                    p = disasm_Iw(p, &n_oplands, base, &len);
+                    p = disasm_Iw(p, &n_oplands, rip, &len);
                     break;
 
                 case optype_Iz:
-                    p = disasm_Iz(p, &n_oplands, base, &len, use32 & CPU_CTX_DATA32);
+                    p = disasm_Iz(p, &n_oplands, rip, &len, use32 & CPU_CTX_DATA32);
                     break;
 
                 case optype_Jb:
                 {
                     p = disasm_separator(p, &n_oplands);
-                    int8_t j = mem[base + len];
+                    int8_t j = mem[rip + len];
                     len++;
                     if (use32 & CPU_CTX_ADDR32) {
                         p = dump32(p, eip + len + j);
@@ -5314,11 +5366,11 @@ static inline char *disasm_main(char * p, cpu_state *cpu, sreg_t *cseg, uint32_t
                 {
                     p = disasm_separator(p, &n_oplands);
                     if (use32 & CPU_CTX_ADDR32) {
-                        int32_t j = READ_LE32(mem + base + len);
+                        int32_t j = READ_LE32(mem + rip + len);
                         len += 4;
                         p = dump32(p, eip + len + j);
                     } else {
-                        int16_t j = READ_LE16(mem + base + len);
+                        int16_t j = READ_LE16(mem + rip + len);
                         len += 2;
                         p = dump16(p, eip + len + j);
                     }
@@ -5333,13 +5385,13 @@ static inline char *disasm_main(char * p, cpu_state *cpu, sreg_t *cseg, uint32_t
 
                     uint32_t offset;
                     if (use32 & CPU_CTX_DATA32) {
-                        offset = READ_LE32(mem + base + len);
+                        offset = READ_LE32(mem + rip + len);
                         len += 4;
                     } else {
-                        offset = READ_LE16(mem + base + len);
+                        offset = READ_LE16(mem + rip + len);
                         len += 2;
                     }
-                    int16_t sel = READ_LE16(mem + base + len);
+                    int16_t sel = READ_LE16(mem + rip + len);
                     len += 2;
 
                     p = dump16(p, sel);
@@ -5370,11 +5422,11 @@ static inline char *disasm_main(char * p, cpu_state *cpu, sreg_t *cseg, uint32_t
                     p = disasm_separator(p, &n_oplands);
                     *p++ = '[';
                     if (use32 & CPU_CTX_ADDR32) {
-                        int32_t i = READ_LE32(mem + base + len);
+                        int32_t i = READ_LE32(mem + rip + len);
                         p = dump32(p, i);
                         len += 4;
                     } else {
-                        int16_t i = READ_LE16(mem + base + len);
+                        int16_t i = READ_LE16(mem + rip + len);
                         p = dump16(p, i);
                         len += 2;
                     }
@@ -5427,102 +5479,46 @@ static inline char *disasm_main(char * p, cpu_state *cpu, sreg_t *cseg, uint32_t
                             }
                         } else {
                             const char **name_table;
-                            int rmb = -1, index = -1, scale = 1, disp_mode = modrm.mod, disp = 0, n = 0;
+                            int n = 0;
+
                             if (use32 & CPU_CTX_ADDR32) {
                                 name_table = reg_names_EAX;
-                                if (modrm.rm != 4) {
-                                    rmb = modrm.rm;
-                                } else {
-                                    modrm.sib = mem[base + len];
-                                    len++;
-                                    rmb = modrm.base;
-                                    if (modrm.index != 4) {
-                                        index = modrm.index;
-                                        scale = modrm.scale;
-                                    }
-                                }
-                                if (disp_mode == 0 && rmb == index_EBP) {
-                                    rmb = -1;
-                                    disp_mode = 4;
-                                }
-                                if (disp_mode == 2) {
-                                    disp_mode = 4;
-                                }
                             } else {
                                 name_table = reg_names_AX;
-                                switch (modrm.rm) {
-                                    case 0:
-                                        rmb = index_BX;
-                                        index = index_SI;
-                                        break;
-                                    case 1:
-                                        rmb = index_BX;
-                                        index = index_DI;
-                                        break;
-                                    case 2:
-                                        rmb = index_BP;
-                                        index = index_SI;
-                                        break;
-                                    case 3:
-                                        rmb = index_BP;
-                                        index = index_DI;
-                                        break;
-                                    case 4:
-                                        rmb = index_SI;
-                                        break;
-                                    case 5:
-                                        rmb = index_DI;
-                                        break;
-                                    case 6:
-                                        if (disp_mode == 0) {
-                                            disp_mode = 2;
-                                        } else {
-                                            rmb = index_BP;
-                                        }
-                                        break;
-                                    case 7:
-                                        rmb = index_BX;
-                                        break;
-                                }
                             }
 
                             p = disasm_separator(p, &n_oplands);
                             *p++ = '[';
-                            if (rmb >= 0) {
-                                p = dump_string(p, name_table[rmb]);
+                            if (modrm.parsed.has_base) {
+                                p = dump_string(p, name_table[modrm.parsed.base]);
                                 n++;
                             }
-                            if (index >= 0) {
+                            if (modrm.parsed.has_index) {
                                 if (n) {
                                     *p++ = '+';
                                     n++;
                                 }
-                                p = dump_string(p, name_table[index]);
-                                if (scale > 1) {
+                                p = dump_string(p, name_table[modrm.parsed.index]);
+                                if (modrm.parsed.scale > 1) {
                                     *p++ = '*';
-                                    *p++ = '0' + scale;
+                                    *p++ = '0' + (1 << modrm.parsed.scale);
                                 }
                             }
 
-                            if (disp_mode > 0) {
+                            if (modrm.parsed.disp_bits > 0) {
+                                uint32_t disp = modrm.parsed.disp;
                                 if (n) {
                                     *p++ = '+';
                                     n++;
                                 }
-                                switch (disp_mode) {
+                                switch (modrm.parsed.disp_bits) {
                                 case 1:
-                                    disp = MOVSXB(mem[base + len]);
-                                    len++;
                                     p = dump8(p, disp);
                                     break;
                                 case 2:
-                                    disp = MOVSXW(READ_LE16(mem + base + len));
-                                    len += 2;
                                     p = dump16(p, disp);
                                     break;
                                 case 4:
-                                    disp = READ_LE32(mem + base + len);
-                                    len += 4;
                                     p = dump32(p, disp);
                                     break;
                                 }
@@ -5539,13 +5535,13 @@ static inline char *disasm_main(char * p, cpu_state *cpu, sreg_t *cseg, uint32_t
                         if (ix) {
                             switch (ix) {
                                 case opa_Ib:
-                                    p = disasm_Ib(p, &n_oplands, base, &len);
+                                    p = disasm_Ib(p, &n_oplands, rip, &len);
                                     break;
                                 case opa_Iw:
-                                    p = disasm_Iw(p, &n_oplands, base, &len);
+                                    p = disasm_Iw(p, &n_oplands, rip, &len);
                                     break;
                                 case opa_Iz:
-                                    p = disasm_Iz(p, &n_oplands, base, &len, !!(use32 & CPU_CTX_DATA32));
+                                    p = disasm_Iz(p, &n_oplands, rip, &len, !!(use32 & CPU_CTX_DATA32));
                                     break;
                             }
                         }
@@ -5569,7 +5565,16 @@ static inline char *disasm_main(char * p, cpu_state *cpu, sreg_t *cseg, uint32_t
     } else {
         p = dump_string(p, "???");
     }
-    *p++ = '\0';
+    *p = '\0';
+
+    if (len > 0) {
+        int l = (len < max_len) ? len : max_len;
+        for (int i = 0; i < l; i++) {
+            uint8_t c = mem[rip + i];
+            q = dump8(q, c);
+        }
+    }
+
     if (length) {
         *length = len;
     }
@@ -5578,38 +5583,30 @@ static inline char *disasm_main(char * p, cpu_state *cpu, sreg_t *cseg, uint32_t
 
 char *dump_disasm(char *p, cpu_state *cpu, uint32_t eip) {
     sreg_t *seg = &cpu->CS;
-    int use32 = seg->attr_D;
-    p = dump16(p, seg->sel);
-    *p++ = ':';
-    if (use32 || eip > 0xFFFF) {
-        p = dump32(p, eip);
-    } else {
-        p = dump16(p, eip);
-    }
-    *p++ = ' ';
-    char *q = p;
-    int max_len = 8;
-    for (int i = 0; i < max_len * 2 + 1; i++) {
-        *p++ = ' ';
-    }
-    int length;
-    p = disasm_main(p, cpu, seg, eip, &length);
-    if (length > 0) {
-        int len = (length < max_len) ? length : max_len;
-        size_t base = seg->base + eip;
-        for (int i = 0; i < len; i++) {
-            uint8_t c = mem[base + i];
-            q = dump8(q, c);
-        }
-    }
+    p = disasm_main(p, seg->sel, eip, seg->base + eip, seg->attr_D, NULL);
     return p;
+}
 
-    // *p++ = '\n';
-    // for (int i = 0; i < 256; i++) {
-    //     p = dump8(p, i);
-    //     *p++ = ' ';
-    //     p = dump_string(p, opcode2[i].name);
-    //     *p++ = '\n';
-    // }
-    // return p;
+/**
+ * disassemble
+ */
+WASM_EXPORT void disasm(cpu_state *cpu, uint32_t sel, uint32_t offset, int count) {
+    static char buff[1024];
+    char *p = buff;
+    int len;
+    sreg_t seg;
+    if (LOAD_SEL(cpu, &seg, sel)) {
+        seg.attr_D = cpu->CS.attr_D;
+        seg.base = 0;
+    }
+    int use32 = seg.attr_D;
+    for (int i = 0; i < count; i++) {
+        if (i) {
+            *p++ = '\n';
+        }
+        uint32_t base = seg.base + offset;
+        p = disasm_main(p, sel, offset, base, use32, &len);
+        offset += len;
+    }
+    println(buff);
 }

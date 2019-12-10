@@ -37,7 +37,7 @@ let midi: MPU401;
             if (!res.ok) { throw Error(res.statusText); }
             return res.arrayBuffer()
         })
-        .then(buffer => WebAssembly.instantiate(buffer, env))
+        .then(buffer => WebAssembly.instantiate(buffer, env as any))
         .then(wasm => env.loadCPU(wasm.instance))
     
     // wi.print('Loading BIOS...\n');
@@ -85,6 +85,9 @@ onmessage = e => {
             break;
         case 'dump':
             wi.postCommand('devWrite', env.dump(e.data.address));
+            break;
+        case 'disasm':
+            env.disasm(e.data.range[0], e.data.range[1]);
             break;
         case 'attach':
             try {

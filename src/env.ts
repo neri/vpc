@@ -23,14 +23,14 @@ export class RuntimeEnvironment {
     private env: any;
     private _memory: Uint8Array;
     private instance: WebAssembly.Instance;
-    private vmem: number;
-    private cpu: number;
-    private regmap: Object;
-    private bios: Uint8Array;
-    private memoryConfig: Uint16Array;
-    isDebugging: boolean;
-    isPausing: boolean;
-    isRunning: boolean;
+    private vmem: number = 0;
+    private cpu: number = 0;
+    private regmap: { [key: string]: number } = {};
+    private bios: Uint8Array = new Uint8Array(0);
+    private memoryConfig: Uint16Array = new Uint16Array(2);
+    isDebugging: boolean = false;
+    isPausing: boolean = false;
+    isRunning: boolean = false;
 
     constructor(worker: WorkerInterface) {
         this.worker = worker;
@@ -72,6 +72,7 @@ export class RuntimeEnvironment {
         this.iomgr.on(0x0CF9, (_port, _data) => this.reset(-1));
         this.iomgr.onw(0xFC00, undefined, (_) => this.memoryConfig[0]);
         this.iomgr.onw(0xFC02, undefined, (_) => this.memoryConfig[1]);
+
     }
     public loadCPU(wasm: WebAssembly.Instance): void {
         this.instance = wasm;
@@ -259,6 +260,29 @@ export class RuntimeEnvironment {
             lines.push(line.join(' '));
         }
         return lines.join('\n');
+    }
+    private reg_or_value(_token: string): number {
+        let token = _token.toUpperCase();
+        if (token.length === 3 && token[0] === 'E') {
+            token = token.substr(1);
+        };
+        if (Object.keys(this.regmap).indexOf(token) >= 0) {
+            return this.getReg(token);
+        } else {
+            return parseInt(`0x0${token}`);
+        }
+    }
+    public disasm(seg_off: string, count: number): void {
+        const a = seg_off.split(/:/);
+        let seg: number, off: number;
+        if (a.length == 2) {
+            seg = this.reg_or_value(a[0]);
+            off = this.reg_or_value(a[1]);
+        } else {
+            seg = 0;
+            off = this.reg_or_value(a[0]);
+        }
+        this.instance.exports.disasm(this.cpu, seg, off, count);
     }
     public get_vram_signature(base: number, size: number): number {
         return this.instance.exports.get_vram_signature(base, size);
