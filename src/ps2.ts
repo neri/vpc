@@ -5,13 +5,59 @@ import { WorkerInterface, RuntimeEnvironment } from './env';
 
 const SCAN_DUMMY = 0x6F;
 
-const codeTable = {
+const codeTable: { [key: string]: number } = {
     'AltLeft': 0x38,
     'AltRight': 0xE038,
     'ControlLeft': 0x1D,
     'ControlRight': 0xE01D,
     'ShiftLeft': 0x2A,
     'ShiftRight': 0x36,
+    'Escape': 0x01,
+    'Digit1': 0x02,
+    'Digit2': 0x30,
+    'Digit3': 0x04,
+    'Digit4': 0x05,
+    'Digit5': 0x06,
+    'Digit6': 0x07,
+    'Digit7': 0x08,
+    'Digit8': 0x09,
+    'Digit9': 0x0A,
+    'Digit0': 0x0B,
+    'Minus': 0x0C,
+    'Equal': 0x0D,
+    'Backspace': 0x0E,
+    'Tab': 0x0F,
+    'BracketLeft': 0x1A,
+    'BracketRight': 0x1B,
+    'Enter': 0x1C,
+    'Semicolon': 0x27,
+    'Quote': 0x28,
+    'Backquote': 0x29,
+    'Backslash': 0x2B,
+    'Comma': 0x33,
+    'Period': 0x34,
+    'Slash': 0x35,
+    'F1': 0x3B,
+    'F2': 0x3C,
+    'F3': 0x3D,
+    'F4': 0x3E,
+    'F5': 0x3F,
+    'F6': 0x40,
+    'F7': 0x41,
+    'F8': 0x42,
+    'F9': 0x43,
+    'F10': 0x44,
+    'Home': 0xE047,
+    'ArrowUp': 0xE048,
+    'PageUp': 0xE049,
+    'ArrowLeft': 0xE04B,
+    'ArrowRight': 0xE04D,
+    'End': 0xE04F,
+    'ArrowDown': 0xE050,
+    'Insert': 0xE052,
+    'Delete': 0xE053,
+    'IntlRo': 0x73,
+    'IntlYen': 0x7D,
     'KeyA': 0x1E,
     'KeyB': 0x30,
     'KeyC': 0x2E,
@@ -61,7 +107,7 @@ const scanTable: number[] = [
 
 export class PS2 {
     private env: RuntimeEnvironment;
-    private lastCmd: number;
+    private lastCmd: number = 0;
     private iram: Uint8Array;
     private o_fifo: number[];
     private i_fifo: number[];
@@ -72,19 +118,18 @@ export class PS2 {
         this.o_fifo = [];
         this.i_fifo = [];
 
-        env.iomgr.on(0x0060, (_, data) => {
-            // TODO:
-        }, (_) => this.o_fifo.shift() || 0);
+        env.iomgr.on(0x0060, (_, data) => this.data(data), (_) => this.o_fifo.shift() || 0);
         env.iomgr.on(0x0064, (_, data) => this.command(data), (_) => {
-            return 0
-            | ((this.o_fifo.length > 0) ? 1 : 0)
-            | ((this.i_fifo.length > 0) ? 2 : 0)
+            return ((this.o_fifo.length > 0) ? 1 : 0)
         });
         env.iomgr.onw(0x64, undefined, (_) => this.o_fifo.shift() || 0);
     }
     private command(data: number): void {
         this.lastCmd = data;
-        // console.log(`ps2: unsupported command ${data.toString(16)}`);
+        // console.log(`ps2: command ${data.toString(16)}`);
+    }
+    private data(data: number): void {
+        // console.log(`ps2: data ${data.toString(16)}`);
     }
     onKey(e: any): void {
         const { type, key, code, keyCode, ctrlKey, altKey } = e;
@@ -98,6 +143,8 @@ export class PS2 {
             scancode &= 0x7F;
         }
         let ascii: number = (key.length == 1) ? key.charCodeAt(0) : 0;
+        if (ascii == 0xA5) ascii = 0x5C; // IntlYen
+        if (ascii >= 0x80) ascii = 0;
         if (ctrlKey && ascii >= 0x40 && ascii <= 0x80) {
             ascii &= 0x1F;
         }
@@ -129,6 +176,7 @@ export class PS2 {
             break;
         }
 
+        // console.log('key', e, scancode.toString(16));
         if (scancode & 0x7F) {
             if (prefix) {
                 this.o_fifo.push(prefix);
