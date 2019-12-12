@@ -32,7 +32,7 @@ A PC Emulator implemented by WebAssembly.
   - **FDC** (non standard interface)
     - Supported: 160KB, 360KB, 640KB, 720KB, 1.2MB, 1.4MB and 512 bytes (Boot Sector Only)
 
-### How to detect this virtual machine by software
+### How to detect this software in the virtual machine
 
 - In 486 mode, when the CPUID instruction is executed with EAX = 00000000, the result will be EBX = ECX = EDX = 0x4D534157 ('WASM')
 - Otherwise, undefined.
@@ -48,6 +48,7 @@ A PC Emulator implemented by WebAssembly.
 |BootChess|buggy|
 |[Floppy Bird](https://github.com/icebreaker/floppybird)|Needs a [patch](https://github.com/neri/floppybird/commit/6db932489afd6bbb5bddcdf0185d9f9051914459)|
 |[Invaders game in 512 bytes](https://github.com/nanochess/Invaders)|It seems working|
+|haribote OS|buggy|
 
 ## License
 

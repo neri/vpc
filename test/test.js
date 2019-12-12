@@ -1034,6 +1034,30 @@ describe('CPU', () => {
             expect(env.changed()).toStrictEqual(['AX','IP','flags']);
         });
 
+        it ('IDIV', () => {
+            env.emitTest([0xF7, 0xFB, 0x66, 0xF7, 0xFB]);
+
+            env.setReg('AX', 0x87654321);
+            env.setReg('BX', 0x00000100);
+            env.setReg('DX', 0x00000000);
+            env.saveState();
+            expect(env.step()).toBe(0);
+            expect(env.getReg('IP')).toBe(0xFFF2);
+            expect(env.getReg('AX')).toBe(0x87650043);
+            expect(env.getReg('DX')).toBe(0x00000021);
+            expect(env.changed()).toStrictEqual(['AX','DX','IP']);
+
+            env.setReg('AX', 0x01000000);
+            env.setReg('BX', 0x00100000);
+            env.setReg('DX', 0x00000000);
+            env.saveState();
+            expect(env.step()).toBe(0);
+            expect(env.getReg('IP')).toBe(0xFFF5);
+            expect(env.getReg('AX')).toBe(0x10);
+            expect(env.changed()).toStrictEqual(['AX','IP']);
+
+        });
+
     });
 
     describe('Stack Operations', () => {

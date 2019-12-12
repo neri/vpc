@@ -15,8 +15,8 @@ test: all
 lib:
 	mkdir lib
 
-lib/vcpu.wasm: src/vcpu.c
-	wa-compile -O $? -o $@
+lib/vcpu.wasm: src/vcpu.c src/disasm.h
+	wa-compile -O $< -o $@
 
 lib/bios.bin: src/bios.asm
 	nasm -f bin $? -o $@

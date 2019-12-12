@@ -14,7 +14,7 @@ const codeTable: { [key: string]: number } = {
     'ShiftRight': 0x36,
     'Escape': 0x01,
     'Digit1': 0x02,
-    'Digit2': 0x30,
+    'Digit2': 0x03,
     'Digit3': 0x04,
     'Digit4': 0x05,
     'Digit5': 0x06,
@@ -130,6 +130,11 @@ export class PS2 {
     }
     private data(data: number): void {
         // console.log(`ps2: data ${data.toString(16)}`);
+        this.postKeyData(0xFA);
+    }
+    private postKeyData(data: number): void {
+        this.o_fifo.push(data);
+        this.env.pic.raiseIRQ(1);
     }
     onKey(e: any): void {
         const { type, key, code, keyCode, ctrlKey, altKey } = e;
@@ -179,11 +184,9 @@ export class PS2 {
         // console.log('key', e, scancode.toString(16));
         if (scancode & 0x7F) {
             if (prefix) {
-                this.o_fifo.push(prefix);
-                this.env.pic.raiseIRQ(1);
+                this.postKeyData(prefix);
             }
-            this.o_fifo.push(scancode);
-            this.env.pic.raiseIRQ(1);
+            this.postKeyData(scancode);
         }
     }
 }

@@ -21,787 +21,7 @@ WASM_IMPORT int vpc_irq();
 WASM_IMPORT _Noreturn void TRAP_NORETURN();
 WASM_IMPORT int vpc_grow(int n);
 
-typedef enum {
-    optype_undefined,
-    optype_implied,
-    optype_nop, // NOP / PAUSE
-    optype_prefix,
-    optype_string,
-    optype_prefix66,
-    optype_prefix67,
-    optype_extend_0F,
-    optype_extend_0F38,
-    optype_extend_0F3A,
-
-    optype_Zv,
-    optype_Zb,
-    optype_ZbIb,
-    optype_ZvIv,
-
-    optype_ALIb,
-    optype_AXIz,
-    optype_IbAL,
-    optype_IbAX,
-    optype_AXIb,
-
-    optype_Ib,
-    optype_Iw, // RET Iw
-    optype_Iz,
-    optype_Jb,
-    optype_Jz,
-
-    optype_Ap,
-    optype_IwIb, // ENTER
-
-    optype_ALOb, // MOV AL, Ob
-    optype_AXOv, // MOV rAX, Ov
-    optype_ObAL, // MOV Ob, AL
-    optype_OvAX, // MOV Ov, rAX
-
-    optype_modrm_   = 0x40000000,
-    optype_simd     = 0x70000000,
-
-    opa_Emask       = 0x00000003,
-    opa_Eb          = 0x00000001,
-    opa_Ew          = 0x00000002,
-    opa_Ev          = 0x00000003,
-    opa_Gmask       = 0x0000000C,
-    opa_Gb          = 0x00000004,
-    opa_Gw          = 0x00000008,
-    opa_Gv          = 0x0000000C,
-    opa_Imask       = 0x00000030,
-    opa_Ib          = 0x00000010,
-    opa_Iw          = 0x00000020,
-    opa_Iz          = 0x00000030,
-    opa_Omask       = 0x0000FF00,
-    opa_M           = 0x00000100,
-    opa_EwSw        = 0x00000200,
-    opa_RdCd        = 0x00000300,
-    opa_RdDd        = 0x00000400,
-    opa_group       = 0x01000000,
-    opa_shift       = 0x02000000,
-    opa_reverse     = 0x08000000,
-
-    optype_fpu      = optype_modrm_,
-    optype_group    = optype_modrm_ | opa_group,
-
-    optype_EbGb     = optype_modrm_ | opa_Eb | opa_Gb,
-    optype_EvGv     = optype_modrm_ | opa_Ev | opa_Gv,
-    optype_GbEb     = optype_modrm_ | opa_Eb | opa_Gb | opa_reverse,
-    optype_GvEv     = optype_modrm_ | opa_Ev | opa_Gv | opa_reverse,
-    optype_GvEb     = optype_modrm_ | opa_Eb | opa_Gv,
-    optype_GvEw     = optype_modrm_ | opa_Ew | opa_Gv,
-    optype_Eb       = optype_modrm_ | opa_Eb,
-    optype_Ev       = optype_modrm_ | opa_Ev,
-
-    optype_EwGw     = optype_modrm_ | opa_Ew | opa_Gw,
-    optype_GvM      = optype_modrm_ | opa_Gv | opa_M ,
-    optype_M        = optype_modrm_ | opa_M,
-    optype_Mp       = optype_modrm_ | opa_M,
-    optype_EwSw     = optype_modrm_ | opa_Ew | opa_EwSw,
-    optype_SwEw     = optype_modrm_ | opa_Ew | opa_EwSw | opa_reverse,
-
-    optype_RdCd     = optype_modrm_ | opa_RdCd,
-    optype_RdDd     = optype_modrm_ | opa_RdDd,
-    optype_CdRd     = optype_modrm_ | opa_RdCd | opa_reverse,
-    optype_DdRd     = optype_modrm_ | opa_RdDd | opa_reverse,
-
-    optype_EvGvIb   = optype_modrm_ | opa_Ev | opa_Gv | opa_Ib,
-    optype_EvGvIz   = optype_modrm_ | opa_Ev | opa_Gv | opa_Iz,
-    optype_GvEvIb   = optype_modrm_ | opa_Ev | opa_Gv | opa_Ib | opa_reverse,
-    optype_GvEvIz   = optype_modrm_ | opa_Ev | opa_Gv | opa_Iz | opa_reverse,
-    optype_EbIb     = optype_modrm_ | opa_Eb | opa_Ib,
-    optype_EvIv     = optype_modrm_ | opa_Ev | opa_Iz,
-    optype_EvIbs    = optype_modrm_ | opa_Ev | opa_Ib,
-    optype_EvIb     = optype_modrm_ | opa_Ev | opa_Ib,
-
-    optype_shEbIb   = optype_modrm_ | opa_Eb | opa_Ib | opa_shift,
-    optype_shEvIb   = optype_modrm_ | opa_Ev | opa_Ib | opa_shift,
-    optype_shEb     = optype_modrm_ | opa_Eb | opa_shift,
-    optype_shEv     = optype_modrm_ | opa_Ev | opa_shift,
-
-} optype_t;
-
-typedef enum {
-    reg_type_al,
-    reg_type_ax,
-    reg_type_eax,
-    reg_type_sreg,
-    reg_type_creg,
-    reg_type_dreg,
-} disasm_reg_type;
-
-const char *reg_names_AL[] = {"AL", "CL", "DL", "BL", "AH", "CH", "DH", "BL" };
-const char *reg_names_AX[] = {"AX", "CX", "DX", "BX", "SP", "BP", "SI", "DI" };
-const char *reg_names_EAX[] = {"EAX", "ECX", "EDX", "EBX", "ESP", "EBP", "ESI", "EDI" };
-const char *reg_names_sreg[] = {"ES", "CS", "SS", "DS", "FS", "GS", "???", "???" };
-
-enum {
-    index_AX = 0,
-    index_CX,
-    index_DX,
-    index_BX,
-    index_SP,
-    index_BP,
-    index_SI,
-    index_DI,
-    index_EAX = 0,
-    index_ECX,
-    index_EDX,
-    index_EBX,
-    index_ESP,
-    index_EBP,
-    index_ESI,
-    index_EDI,
-    index_AL = 0,
-    index_CL,
-    index_DL,
-    index_BL,
-    index_AH,
-    index_CH,
-    index_DH,
-    index_BH,
-    index_ES = 0,
-    index_CS,
-    index_SS,
-    index_DS,
-    index_FS,
-    index_GS,
-};
-
-typedef struct opmap_t {
-    const char * name;
-    const char * name32;
-    optype_t optype;
-    struct opmap_t *group;
-    int n_oplands;
-    const char *oplands1;
-    const char *oplands2;
-} opmap_t;
-
-static opmap_t opcode_80[8] = {
-    { "ADD", NULL, optype_EbIb },
-    { "OR", NULL, optype_EbIb },
-    { "ADC", NULL, optype_EbIb },
-    { "SBB", NULL, optype_EbIb },
-    { "AND", NULL, optype_EbIb },
-    { "SUB", NULL, optype_EbIb },
-    { "XOR", NULL, optype_EbIb },
-    { "CMP", NULL, optype_EbIb },
-};
-
-static opmap_t opcode_81[8] = {
-    { "ADD", NULL, optype_EvIv },
-    { "OR", NULL, optype_EvIv },
-    { "ADC", NULL, optype_EvIv },
-    { "SBB", NULL, optype_EvIv },
-    { "AND", NULL, optype_EvIv },
-    { "SUB", NULL, optype_EvIv },
-    { "XOR", NULL, optype_EvIv },
-    { "CMP", NULL, optype_EvIv },
-};
-
-static opmap_t opcode_83[8] = {
-    { "ADD", NULL, optype_EvIbs },
-    { "OR", NULL, optype_EvIbs },
-    { "ADC", NULL, optype_EvIbs },
-    { "SBB", NULL, optype_EvIbs },
-    { "AND", NULL, optype_EvIbs },
-    { "SUB", NULL, optype_EvIbs },
-    { "XOR", NULL, optype_EvIbs },
-    { "CMP", NULL, optype_EvIbs },
-};
-
-static opmap_t opcode_8F[8] = {
-    { "POP", NULL, optype_Ev },
-    { NULL, NULL, optype_undefined },
-    { NULL, NULL, optype_undefined },
-    { NULL, NULL, optype_undefined },
-    { NULL, NULL, optype_undefined },
-    { NULL, NULL, optype_undefined },
-    { NULL, NULL, optype_undefined },
-    { NULL, NULL, optype_undefined },
-};
-
-static opmap_t opcode_F6[8] = {
-    { "TEST", NULL, optype_EbIb },
-    { NULL, NULL, optype_undefined },
-    { "NOT", NULL, optype_Eb },
-    { "NEG", NULL, optype_Eb },
-    { "MUL", NULL, optype_Eb },
-    { "IMUL", NULL, optype_Eb },
-    { "DIV", NULL, optype_Eb },
-    { "IDIV", NULL, optype_Eb },
-};
-
-static opmap_t opcode_F7[8] = {
-    { "TEST", NULL, optype_EvIv },
-    { NULL, NULL, optype_undefined },
-    { "NOT", NULL, optype_Ev },
-    { "NEG", NULL, optype_Ev },
-    { "MUL", NULL, optype_Ev },
-    { "IMUL", NULL, optype_Ev },
-    { "DIV", NULL, optype_Ev },
-    { "IDIV", NULL, optype_Ev },
-};
-
-static opmap_t opcode_FE[8] = {
-    { "INC", NULL, optype_Eb },
-    { "DEC", NULL, optype_Eb },
-    { NULL, NULL, optype_undefined },
-    { NULL, NULL, optype_undefined },
-    { NULL, NULL, optype_undefined },
-    { NULL, NULL, optype_undefined },
-    { NULL, NULL, optype_undefined },
-    { NULL, NULL, optype_undefined },
-};
-
-static opmap_t opcode_FF[8] = {
-    { "INC", NULL, optype_Ev },
-    { "DEC", NULL, optype_Ev },
-    { "CALL", NULL, optype_Ev },
-    { "CALLF", NULL, optype_Mp },
-    { "JMP", NULL, optype_Ev },
-    { "JMPF", NULL, optype_Mp },
-    { "PUSH", NULL, optype_Ev },
-    { NULL, NULL, optype_undefined },
-};
-
-
-static opmap_t opcode_0F00[8] = {
-    { "SLDT", NULL, optype_Ev },
-    { "STR", NULL, optype_Ev },
-    { "LLDT", NULL, optype_Ev },
-    { "LTR", NULL, optype_Ev },
-    { "VERR", NULL, optype_Ev },
-    { "VERW", NULL, optype_Ev },
-    { "JMPE", NULL, optype_implied },
-    { NULL, NULL, optype_undefined },
-};
-
-static opmap_t opcode_0F01[8] = {
-    { "SGDT", NULL, optype_M },
-    { "SIDT", NULL, optype_M },
-    { "LGDT", NULL, optype_M },
-    { "LIDT", NULL, optype_M },
-    { "SMSW", NULL, optype_Ev },
-    { NULL, NULL, optype_undefined },
-    { "LMSW", NULL, optype_Ev },
-    { "INVLPG", NULL, optype_M },
-};
-
-static opmap_t opcode_0FAE[8] = {
-    { "FXSAVE", NULL, optype_M },
-    { "FXRSTOR", NULL, optype_M },
-    { "LDMXCSR", NULL, optype_Ev },
-    { "STMXCSR", NULL, optype_Ev },
-    { "XSAVE", NULL, optype_M },
-    { "XRSTOR", NULL, optype_M },
-    { NULL, NULL, optype_undefined },
-    { "CLFLUSH", NULL, optype_M },
-};
-
-static opmap_t opcode_0FBA[8] = {
-    { "BT", NULL, optype_EvIb },
-    { "BTS", NULL, optype_EvIb },
-    { "BTR", NULL, optype_EvIb },
-    { "BTC", NULL, optype_EvIb },
-    { NULL, NULL, optype_undefined },
-    { NULL, NULL, optype_undefined },
-    { NULL, NULL, optype_undefined },
-    { NULL, NULL, optype_undefined },
-};
-
-const char *shift_names[8] = {"ROL", "ROR", "RCL", "RCR", "SHL", "SHR", NULL, "SAR" };
-
-opmap_t opcode1[256] = {
-    { "ADD", NULL, optype_EbGb },
-    { "ADD", NULL, optype_EvGv },
-    { "ADD", NULL, optype_GbEb },
-    { "ADD", NULL, optype_GvEv },
-    { "ADD", NULL, optype_ALIb },
-    { "ADD", NULL, optype_AXIz },
-    { "PUSH", NULL, optype_implied, NULL, 1, "ES" },
-    { "POP", NULL, optype_implied, NULL, 1, "ES" },
-    { "OR", NULL, optype_EbGb },
-    { "OR", NULL, optype_EvGv },
-    { "OR", NULL, optype_GbEb },
-    { "OR", NULL, optype_GvEv },
-    { "OR", NULL, optype_ALIb },
-    { "OR", NULL, optype_AXIz },
-    { "PUSH", NULL, optype_implied, NULL, 1, "CS" },
-    { NULL, NULL, optype_extend_0F },
-    { "ADC", NULL, optype_EbGb },
-    { "ADC", NULL, optype_EvGv },
-    { "ADC", NULL, optype_GbEb },
-    { "ADC", NULL, optype_GvEv },
-    { "ADC", NULL, optype_ALIb },
-    { "ADC", NULL, optype_AXIz },
-    { "PUSH", NULL, optype_implied, NULL, 1, "SS" },
-    { "POP", NULL, optype_implied, NULL, 1, "SS" },
-    { "SBB", NULL, optype_EbGb },
-    { "SBB", NULL, optype_EvGv },
-    { "SBB", NULL, optype_GbEb },
-    { "SBB", NULL, optype_GvEv },
-    { "SBB", NULL, optype_ALIb },
-    { "SBB", NULL, optype_AXIz },
-    { "PUSH", NULL, optype_implied, NULL, 1, "DS" },
-    { "POP", NULL, optype_implied, NULL, 1, "DS" },
-    { "AND", NULL, optype_EbGb },
-    { "AND", NULL, optype_EvGv },
-    { "AND", NULL, optype_GbEb },
-    { "AND", NULL, optype_GvEv },
-    { "AND", NULL, optype_ALIb },
-    { "AND", NULL, optype_AXIz },
-    { "ES:", NULL, optype_prefix },
-    { "DAA", NULL, optype_implied },
-    { "SUB", NULL, optype_EbGb },
-    { "SUB", NULL, optype_EvGv },
-    { "SUB", NULL, optype_GbEb },
-    { "SUB", NULL, optype_GvEv },
-    { "SUB", NULL, optype_ALIb },
-    { "SUB", NULL, optype_AXIz },
-    { "CS:", NULL, optype_prefix },
-    { "DAS", NULL, optype_implied },
-    { "XOR", NULL, optype_EbGb },
-    { "XOR", NULL, optype_EvGv },
-    { "XOR", NULL, optype_GbEb },
-    { "XOR", NULL, optype_GvEv },
-    { "XOR", NULL, optype_ALIb },
-    { "XOR", NULL, optype_AXIz },
-    { "SS:", NULL, optype_prefix },
-    { "AAA", NULL, optype_implied },
-    { "CMP", NULL, optype_EbGb },
-    { "CMP", NULL, optype_EvGv },
-    { "CMP", NULL, optype_GbEb },
-    { "CMP", NULL, optype_GvEv },
-    { "CMP", NULL, optype_ALIb },
-    { "CMP", NULL, optype_AXIz },
-    { "DS:", NULL, optype_prefix },
-    { "AAS", NULL, optype_implied },
-    { "INC", NULL, optype_Zv },
-    { "INC", NULL, optype_Zv },
-    { "INC", NULL, optype_Zv },
-    { "INC", NULL, optype_Zv },
-    { "INC", NULL, optype_Zv },
-    { "INC", NULL, optype_Zv },
-    { "INC", NULL, optype_Zv },
-    { "INC", NULL, optype_Zv },
-    { "DEC", NULL, optype_Zv },
-    { "DEC", NULL, optype_Zv },
-    { "DEC", NULL, optype_Zv },
-    { "DEC", NULL, optype_Zv },
-    { "DEC", NULL, optype_Zv },
-    { "DEC", NULL, optype_Zv },
-    { "DEC", NULL, optype_Zv },
-    { "DEC", NULL, optype_Zv },
-    { "PUSH", NULL, optype_Zv },
-    { "PUSH", NULL, optype_Zv },
-    { "PUSH", NULL, optype_Zv },
-    { "PUSH", NULL, optype_Zv },
-    { "PUSH", NULL, optype_Zv },
-    { "PUSH", NULL, optype_Zv },
-    { "PUSH", NULL, optype_Zv },
-    { "PUSH", NULL, optype_Zv },
-    { "POP", NULL, optype_Zv },
-    { "POP", NULL, optype_Zv },
-    { "POP", NULL, optype_Zv },
-    { "POP", NULL, optype_Zv },
-    { "POP", NULL, optype_Zv },
-    { "POP", NULL, optype_Zv },
-    { "POP", NULL, optype_Zv },
-    { "POP", NULL, optype_Zv },
-    { "PUSHA", "PUSHAD", optype_implied },
-    { "POPA", "POPAD", optype_implied },
-    { "BOUNDS", NULL, optype_GvM },
-    { "ARPL", NULL, optype_EwGw },
-    { "FS:", NULL, optype_prefix },
-    { "GS:", NULL, optype_prefix },
-    { NULL, NULL, optype_prefix66 },
-    { NULL, NULL, optype_prefix67 },
-    { "PUSH", NULL, optype_Iz },
-    { "IMUL", NULL, optype_GvEvIz },
-    { "PUSH", NULL, optype_Ib },
-    { "IMUL", NULL, optype_GvEvIb },
-    { "INSB", NULL, optype_string },
-    { "INSW", "INSD", optype_string },
-    { "OUTSB", NULL, optype_string },
-    { "OUTSW", "OUTSD", optype_string },
-    { "JO", NULL, optype_Jb },
-    { "JNO", NULL, optype_Jb },
-    { "JB", NULL, optype_Jb },
-    { "JNB", NULL, optype_Jb },
-    { "JZ", NULL, optype_Jb },
-    { "JNZ", NULL, optype_Jb },
-    { "JNA", NULL, optype_Jb },
-    { "JA", NULL, optype_Jb },
-    { "JS", NULL, optype_Jb },
-    { "JNS", NULL, optype_Jb },
-    { "JP", NULL, optype_Jb },
-    { "JNP", NULL, optype_Jb },
-    { "JL", NULL, optype_Jb },
-    { "JNL", NULL, optype_Jb },
-    { "JNG", NULL, optype_Jb },
-    { "JG", NULL, optype_Jb },
-    { NULL, NULL, optype_group, opcode_80 },
-    { NULL, NULL, optype_group, opcode_81 },
-    { NULL, NULL, optype_group, opcode_80 },
-    { NULL, NULL, optype_group, opcode_83 },
-    { "TEST", NULL, optype_GbEb },
-    { "TEST", NULL, optype_GvEv },
-    { "XCHG", NULL, optype_GbEb },
-    { "XCHG", NULL, optype_GvEv },
-    { "MOV", NULL, optype_GbEb },
-    { "MOV", NULL, optype_GvEv },
-    { "MOV", NULL, optype_EbGb },
-    { "MOV", NULL, optype_EvGv },
-    { "MOV", NULL, optype_EwSw },
-    { "LEA", NULL, optype_GvM },
-    { "MOV", NULL, optype_SwEw },
-    { NULL, NULL, optype_group, opcode_8F },
-    { "NOP", NULL, optype_nop },
-    { "XCHG", NULL, optype_Zv, NULL, 1, "AX" },
-    { "XCHG", NULL, optype_Zv, NULL, 1, "AX" },
-    { "XCHG", NULL, optype_Zv, NULL, 1, "AX" },
-    { "XCHG", NULL, optype_Zv, NULL, 1, "AX" },
-    { "XCHG", NULL, optype_Zv, NULL, 1, "AX" },
-    { "XCHG", NULL, optype_Zv, NULL, 1, "AX" },
-    { "XCHG", NULL, optype_Zv, NULL, 1, "AX" },
-    { "CBW", "CWDE", optype_implied },
-    { "CWD", "CDQ", optype_implied },
-    { "CALL", NULL, optype_Ap },
-    { "FWAIT", NULL, optype_implied },
-    { "PUSHF", "PUSHFD", optype_implied },
-    { "POPF", "POPFD", optype_implied },
-    { "SAHF", NULL, optype_implied },
-    { "LAHF", NULL, optype_implied },
-    { "MOV", NULL, optype_ALOb },
-    { "MOV", NULL, optype_AXOv },
-    { "MOV", NULL, optype_ObAL },
-    { "MOV", NULL, optype_OvAX },
-    { "MOVSB", NULL, optype_string },
-    { "MOVSW", "MOVSD", optype_string },
-    { "CMPSB", NULL, optype_string },
-    { "CMPSW", "CMPSD", optype_string },
-    { "TEST", NULL, optype_ALIb },
-    { "TEST", NULL, optype_AXIz },
-    { "STOSB", NULL, optype_string },
-    { "STOSW", "STOSD", optype_string },
-    { "LODSB", NULL, optype_string },
-    { "LODSW", "LODSD", optype_string },
-    { "SCASB", NULL, optype_string },
-    { "SCASW", "SCASD", optype_string },
-    { "MOV", NULL, optype_ZbIb },
-    { "MOV", NULL, optype_ZbIb },
-    { "MOV", NULL, optype_ZbIb },
-    { "MOV", NULL, optype_ZbIb },
-    { "MOV", NULL, optype_ZbIb },
-    { "MOV", NULL, optype_ZbIb },
-    { "MOV", NULL, optype_ZbIb },
-    { "MOV", NULL, optype_ZbIb },
-    { "MOV", NULL, optype_ZvIv },
-    { "MOV", NULL, optype_ZvIv },
-    { "MOV", NULL, optype_ZvIv },
-    { "MOV", NULL, optype_ZvIv },
-    { "MOV", NULL, optype_ZvIv },
-    { "MOV", NULL, optype_ZvIv },
-    { "MOV", NULL, optype_ZvIv },
-    { "MOV", NULL, optype_ZvIv },
-    { NULL, NULL, optype_shEbIb, },
-    { NULL, NULL, optype_shEvIb, },
-    { "RET", NULL, optype_Iw },
-    { "RET", NULL, optype_implied },
-    { "LES", NULL, optype_GvM, NULL, 1, "ES" },
-    { "LDS", NULL, optype_GvM, NULL, 1, "DS" },
-    { "MOV", NULL, optype_EbIb },
-    { "MOV", NULL, optype_EvIv },
-    { "ENTER", NULL, optype_IwIb },
-    { "LEAVE", NULL, optype_implied },
-    { "RETF", NULL, optype_Iw },
-    { "RETF", NULL, optype_implied },
-    { "INT3", NULL, optype_implied },
-    { "INT", NULL, optype_Ib },
-    { "INTO", NULL, optype_implied },
-    { "IRET", "IRETD", optype_implied },
-    { NULL, NULL, optype_shEb, NULL, 2, "1" },
-    { NULL, NULL, optype_shEv, NULL, 2, "1" },
-    { NULL, NULL, optype_shEb, NULL, 2, "CL" },
-    { NULL, NULL, optype_shEv, NULL, 2, "CL" },
-    { "AAM", NULL, optype_Ib },
-    { "AAD", NULL, optype_Ib },
-    { "SALC", NULL, optype_implied },
-    { "XLAT", NULL, optype_implied },
-    { NULL, NULL, optype_fpu },
-    { NULL, NULL, optype_fpu },
-    { NULL, NULL, optype_fpu },
-    { NULL, NULL, optype_fpu },
-    { NULL, NULL, optype_fpu },
-    { NULL, NULL, optype_fpu },
-    { NULL, NULL, optype_fpu },
-    { NULL, NULL, optype_fpu },
-    { "LOOPNZ", NULL, optype_Jb },
-    { "LOOPZ", NULL, optype_Jb },
-    { "LOOP", NULL, optype_Jb },
-    { "JCXZ", "JECXZ", optype_Jb },
-    { "IN", NULL, optype_ALIb },
-    { "IN", NULL, optype_AXIb },
-    { "OUT", NULL, optype_IbAL },
-    { "OUT", NULL, optype_IbAX },
-    { "CALL", NULL, optype_Jz },
-    { "JMP", NULL, optype_Jz },
-    { "JMP", NULL, optype_Ap },
-    { "JMP", NULL, optype_Jb },
-    { "IN", NULL, optype_implied, NULL, 3, "AL", "DX" },
-    { "IN", NULL, optype_implied, NULL, 3, "AX", "DX" },
-    { "OUT", NULL, optype_implied, NULL, 3, "DX", "AL" },
-    { "OUT", NULL, optype_implied, NULL, 3, "DX", "AX" },
-    { "LOCK", NULL, optype_prefix },
-    { "ICEBP", NULL, optype_implied },
-    { "REPZ", NULL, optype_prefix },
-    { "REPNZ", NULL, optype_prefix },
-    { "HLT", NULL, optype_implied },
-    { "CMC", NULL, optype_implied },
-    { NULL, NULL, optype_group, opcode_F6 },
-    { NULL, NULL, optype_group, opcode_F7 },
-    { "CLC", NULL, optype_implied },
-    { "STC", NULL, optype_implied },
-    { "CLI", NULL, optype_implied },
-    { "STI", NULL, optype_implied },
-    { "CLD", NULL, optype_implied },
-    { "STD", NULL, optype_implied },
-    { NULL, NULL, optype_group, opcode_FE },
-    { NULL, NULL, optype_group, opcode_FF },
-};
-
-opmap_t opcode2[256] = {
-    { NULL, NULL, optype_group, opcode_0F00 },
-    { NULL, NULL, optype_group, opcode_0F01 },
-    { "LAR", NULL, optype_GvM },
-    { "LSL", NULL, optype_GvM },
-    { NULL, NULL, optype_undefined },
-    { "LOADALL286", NULL, optype_implied },
-    { "CLTS", NULL, optype_implied },
-    { "LOADALL386", NULL, optype_implied },
-    { "INVD", NULL, optype_implied },
-    { "WBINVD", NULL, optype_implied },
-    { NULL, NULL, optype_undefined },
-    { "UD2", NULL, optype_undefined },
-    { NULL, NULL, optype_undefined },
-    { "NOP", NULL, optype_Ev },
-    { NULL, NULL, optype_undefined },
-    { NULL, NULL, optype_undefined },
-
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-
-    { "MOV", NULL, optype_RdCd },
-    { "MOV", NULL, optype_RdDd },
-    { "MOV", NULL, optype_DdRd },
-    { "MOV", NULL, optype_CdRd },
-    { NULL, NULL, optype_undefined },
-    { NULL, NULL, optype_undefined },
-    { NULL, NULL, optype_undefined },
-    { NULL, NULL, optype_undefined },
-
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-
-    { "WRMSR", NULL, optype_implied },
-    { "RDTSC", NULL, optype_implied },
-    { "RDMSR", NULL, optype_implied },
-    { "RDPMC", NULL, optype_implied },
-    { "SYSENTER", NULL, optype_implied },
-    { "SYSEXIT", NULL, optype_implied },
-    { NULL, NULL, optype_undefined },
-    { NULL, NULL, optype_undefined },
-
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-
-    { "CMOVO", NULL, optype_GvEv },
-    { "CMOVNO", NULL, optype_GvEv },
-    { "CMOVC", NULL, optype_GvEv },
-    { "CMOVNC", NULL, optype_GvEv },
-    { "CMOVZ", NULL, optype_GvEv },
-    { "CMOVNZ", NULL, optype_GvEv },
-    { "CMOVNA", NULL, optype_GvEv },
-    { "CMOVA", NULL, optype_GvEv },
-    { "CMOVS", NULL, optype_GvEv },
-    { "CMOVNS", NULL, optype_GvEv },
-    { "CMOVPE", NULL, optype_GvEv },
-    { "CMOVPO", NULL, optype_GvEv },
-    { "CMOVL", NULL, optype_GvEv },
-    { "CMOVNL", NULL, optype_GvEv },
-    { "CMOVNG", NULL, optype_GvEv },
-    { "CMOVG", NULL, optype_GvEv },
-
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-
-    { "JO", NULL, optype_Jz },
-    { "JNO", NULL, optype_Jz },
-    { "JB", NULL, optype_Jz },
-    { "JNB", NULL, optype_Jz },
-    { "JZ", NULL, optype_Jz },
-    { "JNZ", NULL, optype_Jz },
-    { "JNA", NULL, optype_Jz },
-    { "JA", NULL, optype_Jz },
-    { "JS", NULL, optype_Jz },
-    { "JNS", NULL, optype_Jz },
-    { "JP", NULL, optype_Jz },
-    { "JNP", NULL, optype_Jz },
-    { "JL", NULL, optype_Jz },
-    { "JNL", NULL, optype_Jz },
-    { "JNG", NULL, optype_Jz },
-    { "JG", NULL, optype_Jz },
-
-    { "SETO", NULL, optype_Eb },
-    { "SETNO", NULL, optype_Eb },
-    { "SETB", NULL, optype_Eb },
-    { "SETNB", NULL, optype_Eb },
-    { "SETZ", NULL, optype_Eb },
-    { "SETNZ", NULL, optype_Eb },
-    { "SETNA", NULL, optype_Eb },
-    { "SETA", NULL, optype_Eb },
-    { "SETS", NULL, optype_Eb },
-    { "SETNS", NULL, optype_Eb },
-    { "SETP", NULL, optype_Eb },
-    { "SETNP", NULL, optype_Eb },
-    { "SETL", NULL, optype_Eb },
-    { "SETNL", NULL, optype_Eb },
-    { "SETNG", NULL, optype_Eb },
-    { "SETG", NULL, optype_Eb },
-
-    { "PUSH", NULL, optype_implied, NULL, 1, "FS" },
-    { "POP", NULL, optype_implied, NULL, 1, "FS" },
-    { "CPUID", NULL, optype_implied },
-    { "BT", NULL, optype_EvGv },
-    { "SHLD", NULL, optype_EvGvIb },
-    { "SHLD", NULL, optype_EvGv, NULL, 2, "CL" },
-    { NULL, NULL, optype_undefined },
-    { NULL, NULL, optype_undefined },
-
-    { "PUSH", NULL, optype_implied, NULL, 1, "GS" },
-    { "POP", NULL, optype_implied, NULL, 1, "GS" },
-    { "RSM", NULL, optype_implied },
-    { "BTS", NULL, optype_EvGv },
-    { "SHRD", NULL, optype_EvGvIb },
-    { "SHRD", NULL, optype_EvGv, NULL, 1, "CL" },
-    { NULL, NULL, optype_group, opcode_0FAE },
-    { "IMUL", NULL, optype_GvEv },
-
-    { "CMPXCHG", NULL, optype_EbGb, NULL, 1 , "AL" },
-    { "CMPXCHG", NULL, optype_EvGv, NULL, 1 , "AX" },
-    { "LSS", NULL, optype_GvM },
-    { "BTR", NULL, optype_EvGv },
-    { "LFS", NULL, optype_GvM },
-    { "LGS", NULL, optype_GvM },
-    { "MOVZX", NULL, optype_GvEb },
-    { "MOVZX", NULL, optype_GvEw },
-
-    { NULL, NULL, optype_undefined },
-    { NULL, NULL, optype_undefined },
-    { NULL, NULL, optype_group, opcode_0FBA },
-    { "BTC", NULL, optype_EvGv },
-    { "BSF", NULL, optype_GvEv },
-    { "BSR", NULL, optype_GvEv },
-    { "MOVSX", NULL, optype_GvEb },
-    { "MOVSX", NULL, optype_GvEw },
-
-    { "XADD", NULL, optype_EbGb },
-    { "XADD", NULL, optype_EvGv },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-    { NULL, NULL, optype_simd },
-
-    { "BSWAP", NULL, optype_Zv },
-    { "BSWAP", NULL, optype_Zv },
-    { "BSWAP", NULL, optype_Zv },
-    { "BSWAP", NULL, optype_Zv },
-    { "BSWAP", NULL, optype_Zv },
-    { "BSWAP", NULL, optype_Zv },
-    { "BSWAP", NULL, optype_Zv },
-    { "BSWAP", NULL, optype_Zv },
-
-};
+#include "disasm.h"
 
 
 void *memset(void *p, int v, size_t n) {
@@ -1447,6 +667,79 @@ static int LOAD_DESC(cpu_state *cpu, desc_t *desc, uint16_t value, uint32_t type
     }
 }
 
+typedef struct {
+    union {
+        uint16_t link;
+        uint32_t _reserved;
+    };
+    uint32_t ESP0;
+    uint32_t SS0;
+    uint32_t ESP1;
+    uint32_t SS1;
+    uint32_t ESP2;
+    uint32_t SS2;
+    uint32_t CR3;
+    uint32_t EIP, eflags, EAX, ECX, EDX, EBX, ESP, EBP, ESI, EDI;
+    uint32_t ES, CS, SS, DS, FS, GS;
+    uint32_t LDT;
+    uint16_t _reserved64;
+    uint16_t IOPB;
+} tss_t;
+
+static int tss_context_switch(cpu_state *cpu, desc_t *new_tss, int link) {
+    tss_t *current = (tss_t *)(mem + cpu->TSS.base);
+    tss_t *next = (tss_t *)(mem + new_tss->base);
+
+    current->CR3 = cpu->CR3;
+    current->EIP = cpu->EIP;
+    current->eflags = cpu->eflags;
+    current->EAX = cpu->EAX;
+    current->ECX = cpu->ECX;
+    current->EDX = cpu->EDX;
+    current->EBX = cpu->EBX;
+    current->ESP = cpu->ESP;
+    current->EBP = cpu->EBP;
+    current->ESI = cpu->ESI;
+    current->EDI = cpu->EDI;
+    current->ES = cpu->ES.sel;
+    current->CS = cpu->CS.sel;
+    current->SS = cpu->SS.sel;
+    current->DS = cpu->DS.sel;
+    current->FS = cpu->FS.sel;
+    current->GS = cpu->GS.sel;
+    current->LDT = cpu->LDT.sel;
+
+    if (link) {
+        next->link = cpu->TSS.sel;
+    }
+    cpu->TSS = *new_tss;
+
+    cpu->EIP = next->EIP;
+    cpu->eflags = next->eflags;
+    cpu->EAX = next->EAX;
+    cpu->ECX = next->ECX;
+    cpu->EDX = next->EDX;
+    cpu->EBX = next->EBX;
+    cpu->ESP = next->ESP;
+    cpu->EBP = next->EBP;
+    cpu->ESI = next->ESI;
+    cpu->EDI = next->EDI;
+    LOAD_DESC(cpu, &cpu->LDT, next->LDT, -1);
+    LOAD_SEL(cpu, &cpu->ES, next->ES);
+    LOAD_SEL(cpu, &cpu->CS, next->CS);
+    LOAD_SEL(cpu, &cpu->SS, next->SS);
+    LOAD_SEL(cpu, &cpu->DS, next->DS);
+    LOAD_SEL(cpu, &cpu->FS, next->FS);
+    LOAD_SEL(cpu, &cpu->GS, next->GS);
+
+    if (link) {
+        cpu->NT = 1;
+    }
+    cpu->CR0.TS = 1;
+
+    return 0;
+}
+
 static int FAR_CALL(cpu_state *cpu, uint16_t new_sel, uint32_t new_eip) {
     uint32_t old_cs = cpu->CS.sel;
     uint32_t old_eip = cpu->EIP;
@@ -1461,20 +754,41 @@ static int FAR_CALL(cpu_state *cpu, uint16_t new_sel, uint32_t new_eip) {
 
 static int FAR_JUMP(cpu_state *cpu, uint16_t new_sel, uint32_t new_eip) {
     int status = LOAD_SEL(cpu, &cpu->CS, new_sel);
-    if (status) return status;
-    cpu->EIP = new_eip;
-    if (new_sel == 0 && new_eip == 0) return cpu_status_gpf;
-    return CS_LIMIT_CHECK(cpu, 0);
+    if (status == 0) {
+        cpu->EIP = new_eip;
+        if (new_sel == 0 && new_eip == 0) return cpu_status_gpf;
+        return CS_LIMIT_CHECK(cpu, 0);
+    } else { // TSS
+        desc_t temp_desc;
+        status = LOAD_DESC(cpu, &temp_desc, new_sel, 0x0200);
+        if (status == 0) {
+            status = tss_context_switch(cpu, &temp_desc, 0);
+        }
+        // return RAISE_INVALID_TSS(new_sel);
+        return status;
+    }
 }
 
 static int RETF(cpu_state *cpu, uint16_t n) {
-    uint32_t new_eip = POPW(cpu);
-    uint16_t new_sel = POPW(cpu);
+    int old_rpl = cpu->CS.sel & 3;
+    int has_to_switch_esp = 0;
+
+    uint32_t new_esp, new_eip = POPW(cpu);
+    uint16_t new_ssel, new_csel = POPW(cpu);
+    if (cpu->CR0.PE && old_rpl < (new_csel & 3)) {
+        has_to_switch_esp = 1;
+        new_esp = POPW(cpu);
+        new_ssel = POPW(cpu);
+    }
     cpu->SP += n;
-    int status = LOAD_SEL(cpu, &cpu->CS, new_sel);
+    int status = LOAD_SEL(cpu, &cpu->CS, new_csel);
     if (status) return status;
     cpu->EIP = new_eip;
-    if (new_sel == 0 && new_eip == 0) return cpu_status_gpf;
+    if (has_to_switch_esp) {
+        LOAD_SEL(cpu, &cpu->SS, new_ssel);
+        cpu->ESP = new_esp;
+    }
+    if (new_csel == 0 && new_eip == 0) return cpu_status_gpf;
     return CS_LIMIT_CHECK(cpu, 0);
 }
 
@@ -1487,35 +801,60 @@ typedef enum {
 static int INVOKE_INT(cpu_state *cpu, int n, int_cause_t cause) {
     uint32_t errcode = (n << 3) | 2;
     if (cause == external) errcode |= 1;
-    uint16_t new_sel;
-    uint32_t new_eip;
+
+    uint16_t old_csel = cpu->CS.sel, old_ssel = cpu->SS.sel;
+    uint32_t old_eip = cpu->EIP, old_esp = cpu->ESP;
+
+    uint16_t new_csel, new_ssel;
+    uint32_t new_eip, new_esp;
+    int has_to_switch_esp = 0, has_to_disable_irq = (cause == external);
+
     if (cpu->CR0.PE) {
+        int old_rpl = cpu->CS.sel & 3;
         uint32_t chk_limit = (n << 3) | 7;
         if (chk_limit > cpu->IDT.limit) return RAISE_GPF(errcode);
         gate_desc_t *idt = (gate_desc_t *)(mem + cpu->IDT.base);
         gate_desc_t gate = idt[n];
         if ((gate.attr_type != type_trap_gate32) && (gate.attr_type != type_intr_gate32))
             return RAISE_GPF(errcode);
-        new_sel = gate.sel;
+        if (gate.attr_type == type_intr_gate32)
+            has_to_disable_irq = 1;
+
+        new_csel = gate.sel;
         new_eip = gate.offset_1 | (gate.offset_2 << 16);
+        int new_rpl = new_csel & 3;
+        if (old_rpl > new_rpl) {
+            tss_t *tss = (tss_t *)(mem + cpu->TSS.base);
+            new_esp = tss->ESP0;
+            new_ssel = tss->SS0;
+            has_to_switch_esp = 1;
+        }
     } else {
         int idt_offset = cpu->IDT.base + n * 4;
-        new_sel = READ_LE16(mem + idt_offset + 2);
         new_eip = READ_LE16(mem + idt_offset);
+        new_csel = READ_LE16(mem + idt_offset + 2);
     }
-    if (new_sel == 0 && new_eip == 0) return RAISE_GPF(errcode);
-    uint32_t old_cs = cpu->CS.sel;
-    uint32_t old_eip = cpu->EIP;
-    int status = LOAD_SEL(cpu, &cpu->CS, new_sel);
+    if (new_csel == 0 && new_eip == 0) return RAISE_GPF(errcode);
+    int status = LOAD_SEL(cpu, &cpu->CS, new_csel);
     if (status) return status;
     cpu->EIP = new_eip;
+    if (has_to_switch_esp) {
+        LOAD_SEL(cpu, &cpu->SS, new_ssel);
+        cpu->ESP = new_esp;
+        PUSHW(cpu, old_ssel);
+        PUSHW(cpu, old_esp);
+    }
     PUSHW(cpu, cpu->eflags);
-    PUSHW(cpu, old_cs);
+    PUSHW(cpu, old_csel);
     PUSHW(cpu, old_eip);
-    cpu->TF = 0;
-    if (cause == external) {
+    // TODO: refactoring
+    if (has_to_disable_irq) {
         cpu->IF = 0;
     }
+    cpu->TF = 0;
+    cpu->VM = 0;
+    cpu->RF = 0;
+    cpu->NT = 0;
     return CS_LIMIT_CHECK(cpu, 0);
 }
 
@@ -1525,14 +864,25 @@ static void LOAD_FLAGS(cpu_state *cpu, int value, uint32_t preserve_mask) {
 }
 
 static int IRET(cpu_state *cpu) {
+    int rpl = cpu->CS.sel & 3;
+    uint32_t new_ssel = 0, new_esp = 0, has_to_switch_esp = 0;
     uint32_t new_eip = POPW(cpu);
-    uint32_t new_sel = POPW(cpu);
+    uint32_t new_csel = POPW(cpu);
     uint32_t new_fl = POPW(cpu);
-    int status = LOAD_SEL(cpu, &cpu->CS, new_sel);
+    if (cpu->CR0.PE && rpl < (new_csel & 3)) {
+        has_to_switch_esp = 1;
+        new_esp = POPW(cpu);
+        new_ssel = POPW(cpu);
+    }
+    int status = LOAD_SEL(cpu, &cpu->CS, new_csel);
     if (status) return status;
     cpu->EIP = new_eip;
     LOAD_FLAGS(cpu, new_fl, 0);
-    if (new_sel == 0 && new_eip == 0) return cpu_status_gpf;
+    if (has_to_switch_esp) {
+        LOAD_SEL(cpu, &cpu->SS, new_ssel);
+        cpu->ESP = new_esp;
+    }
+    if (new_csel == 0 && new_eip == 0) return cpu_status_gpf;
     return CS_LIMIT_CHECK(cpu, cpu_status_inta);
 }
 
@@ -2352,18 +1702,18 @@ static void SHLD(cpu_state *cpu, operand_set *set, int shift) {
     switch (set->size) {
         case 1:
         {
-            uint32_t value = (cpu->gpr[set->opr2] & UINT16_MAX) | (READ_LE16(set->opr1) << 16);
+            uint32_t value = (READ_LE16(set->opr1) << 16) | (cpu->gpr[set->opr2] & UINT16_MAX);
             value <<= (shift - 1);
             WRITE_LE16(set->opr1, SETF16(cpu, value >> 15));
-            cpu->CF = value & 0x80000000;
+            cpu->CF = !!(value & 0x80000000);
             return;
         }
         case 2:
         {
-            uint64_t value = ((uint64_t)(cpu->gpr[set->opr2])) | ((uint64_t)READ_LE32(set->opr1) << 32);
+            uint64_t value = ((uint64_t)READ_LE32(set->opr1) << 32) | ((uint64_t)(cpu->gpr[set->opr2]));
             value <<= (shift - 1);
             WRITE_LE32(set->opr1, SETF32(cpu, value >> 31));
-            cpu->CF = value & 0x8000000000000000ULL;
+            cpu->CF = !!(value & 0x8000000000000000ULL);
             return;
         }
     }
@@ -2375,7 +1725,7 @@ static void SHRD(cpu_state *cpu, operand_set *set, int shift) {
     switch (set->size) {
         case 1:
         {
-            uint32_t value = (cpu->gpr[set->opr2] << 16) | READ_LE16(set->opr1);
+            uint32_t value = (READ_LE16(set->opr1) << 16) | (cpu->gpr[set->opr2] & UINT16_MAX);
             value >>= (shift - 1);
             WRITE_LE16(set->opr1, SETF16(cpu, value >> 1));
             cpu->CF = value & 1;
@@ -2383,7 +1733,7 @@ static void SHRD(cpu_state *cpu, operand_set *set, int shift) {
         }
         case 2:
         {
-            uint64_t value = ((uint64_t)(cpu->gpr[set->opr2]) << 32) | READ_LE32(set->opr1);
+            uint64_t value = ((uint64_t)READ_LE32(set->opr1) << 32) | ((uint64_t)(cpu->gpr[set->opr2]));
             value >>= (shift - 1);
             WRITE_LE32(set->opr1, SETF32(cpu, value >> 1));
             cpu->CF = value & 1;
@@ -2395,7 +1745,7 @@ static void SHRD(cpu_state *cpu, operand_set *set, int shift) {
 static void IMUL3(cpu_state *cpu, operand_set *set, int imm) {
     if ((cpu->cpu_context & CPU_CTX_DATA32)) {
         int src = READ_LE32(set->opr1);
-        int64_t dst = src * imm;
+        int64_t dst = MOVSXD(src) * MOVSXD(imm);
         cpu->gpr[set->opr2] = dst;
         cpu->OF = cpu->CF = (dst != (int32_t)dst);
     } else {
@@ -3206,6 +2556,7 @@ static int cpu_step(cpu_state *cpu) {
                 int rep = prefix & (PREFIX_REPZ | PREFIX_REPNZ);
                 sreg_t *_seg = SEGMENT(&cpu->DS);
                 uint32_t count, si, di, index_mask;
+                int increment = (cpu->DF) ? -1 : 1;
                 if (cpu->cpu_context & CPU_CTX_ADDR32) {
                     index_mask = UINT32_MAX;
                     count = cpu->ECX;
@@ -3226,13 +2577,8 @@ static int cpu_step(cpu_state *cpu) {
                 } else {
                     do {
                         WRITE_MEM8(&cpu->ES, di & index_mask, READ_MEM8(_seg, si & index_mask));
-                        if (cpu->DF) {
-                            si--;
-                            di--;
-                        } else {
-                            si++;
-                            di++;
-                        }
+                        si += increment;
+                        di += increment;
                     } while (rep && --count);
                 }
                 if (cpu->cpu_context & CPU_CTX_ADDR32) {
@@ -3252,6 +2598,7 @@ static int cpu_step(cpu_state *cpu) {
                 int rep = prefix & (PREFIX_REPZ | PREFIX_REPNZ);
                 sreg_t *_seg = SEGMENT(&cpu->DS);
                 uint32_t count, si, di, index_mask;
+                int increment;
                 if (cpu->cpu_context & CPU_CTX_ADDR32) {
                     index_mask = UINT32_MAX;
                     count = cpu->ECX;
@@ -3263,28 +2610,24 @@ static int cpu_step(cpu_state *cpu) {
                     si = cpu->SI;
                     di = cpu->DI;
                 }
+                if (cpu->cpu_context & CPU_CTX_DATA32) {
+                    increment = (cpu->DF) ? -4 : 4;
+                } else {
+                    increment = (cpu->DF) ? -2 : 2;
+                }
+
                 if (rep && count == 0) return 0;
                 if (cpu->cpu_context & CPU_CTX_DATA32) {
                     do {
                         WRITE_MEM32(&cpu->ES, di & index_mask, READ_MEM32(_seg, si & index_mask));
-                        if (cpu->DF) {
-                            si -= 4;
-                            di -= 4;
-                        } else {
-                            si += 4;
-                            di += 4;
-                        }
+                        si += increment;
+                        di += increment;
                     } while (rep && --count);
                 } else {
                     do {
                         WRITE_MEM16(&cpu->ES, di & index_mask, READ_MEM16(_seg, si & index_mask));
-                        if (cpu->DF) {
-                            si -= 2;
-                            di -= 2;
-                        } else {
-                            si += 2;
-                            di += 2;
-                        }
+                        si += increment;
+                        di += increment;
                     } while (rep && --count);
                 }
                 if (cpu->cpu_context & CPU_CTX_ADDR32) {
@@ -3591,25 +2934,45 @@ static int cpu_step(cpu_state *cpu) {
 
             case 0xAE: // SCASB
             {
-                if (cpu->cpu_context & (CPU_CTX_DATA32 | CPU_CTX_ADDR32)) return cpu_status_ud;
+                // if (cpu->cpu_context & (CPU_CTX_DATA32 | CPU_CTX_ADDR32)) return cpu_status_ud;
                 sreg_t *_seg = SEGMENT(&cpu->ES);
                 int repz = prefix & PREFIX_REPZ;
                 int repnz = prefix & PREFIX_REPNZ;
                 int rep = repz | repnz;
-                if (rep && cpu->CX == 0) return 0;
+                size_t count;
+                uint32_t index, index_mask, increment;
+                if (cpu->cpu_context & CPU_CTX_ADDR32) {
+                    index_mask = UINT32_MAX;
+                    count = cpu->ECX;
+                    index = cpu->EDI;
+                } else {
+                    index_mask = UINT16_MAX;
+                    count = cpu->CX;
+                    index = cpu->DI;
+                }
+                if (cpu->DF) {
+                    increment = -1;
+                } else {
+                    increment = +1;
+                }
+                if (rep && count == 0) return 0;
+                int acc = MOVSXB(cpu->AL);
                 do {
-                    int dst = MOVSXB(cpu->AL);
-                    int src = MOVSXB(READ_MEM8(_seg, cpu->DI));
-                    int value = dst - src;
-                    cpu->AF = (dst & 15) - (src & 15) < 0;
-                    cpu->CF = dst < src;
+                    int src = MOVSXB(READ_MEM8(_seg, index & index_mask));
+                    int value = acc - src;
+                    cpu->AF = (acc & 15) - (src & 15) < 0;
+                    cpu->CF = acc < src;
                     SETF8(cpu, value);
-                    if (cpu->DF) {
-                        cpu->DI--;
-                    } else {
-                        cpu->DI++;
-                    }
-                } while (rep && --cpu->CX && ((repnz && !cpu->ZF) || (repz && cpu->ZF)));
+                    index = index + increment;
+                } while (rep && --count && ((repnz && !cpu->ZF) || (repz && cpu->ZF)));
+
+                if (cpu->cpu_context & CPU_CTX_ADDR32) {
+                    cpu->EDI = index;
+                    if (rep) cpu->ECX = count;
+                } else {
+                    cpu->DI = index;
+                    if (rep) cpu->CX = count;
+                }
                 return 0;
             }
 
@@ -4046,41 +3409,76 @@ static int cpu_step(cpu_state *cpu) {
                     }
                     case 4: // MUL ax, r/m16
                     {
-                        uint32_t value = cpu->AX * READ_LE16(set.opr1);
-                        cpu->AX = value;
-                        cpu->DX = value >> 16;
-                        cpu->OF = cpu->CF = (cpu->DX != 0);
+                        if (set.size == 1) {
+                            uint32_t value = cpu->AX * READ_LE16(set.opr1);
+                            cpu->AX = value;
+                            cpu->DX = value >> 16;
+                            cpu->OF = cpu->CF = (cpu->DX != 0);
+                        } else {
+                            uint64_t value = cpu->EAX * READ_LE32(set.opr1);
+                            cpu->EAX = value;
+                            cpu->EDX = value >> 32;
+                            cpu->OF = cpu->CF = (cpu->EDX != 0);
+                        }
                         return 0;
                     }
                     case 5: // IMUL al, r/m16
                     {
-                        int value = MOVSXW(cpu->AX) * MOVSXW(READ_LE16(set.opr1));
-                        cpu->AX = value;
-                        cpu->DX = value >> 16;
-                        int check = cpu->AX + (cpu->DX << 16);
-                        cpu->OF = cpu->CF = (MOVSXW(cpu->AX) != check);
+                        if (set.size == 1) {
+                            int value = MOVSXW(cpu->AX) * MOVSXW(READ_LE16(set.opr1));
+                            cpu->AX = value;
+                            cpu->DX = value >> 16;
+                            int check = cpu->AX + (cpu->DX << 16);
+                            cpu->OF = cpu->CF = (MOVSXW(cpu->AX) != check);
+                        } else {
+                            int64_t value = MOVSXD(cpu->EAX) * MOVSXD(READ_LE32(set.opr1));
+                            cpu->EAX = value;
+                            cpu->EDX = value >> 32;
+                            int64_t check = MOVSXD(cpu->EAX) + (MOVSXD(cpu->EDX) << 32);
+                            cpu->OF = cpu->CF = (MOVSXD(cpu->EAX) != check);
+                        }
                         return 0;
                     }
                     case 6: // DIV ax, r/m16
                     {
-                        uint32_t dst = (cpu->DX << 16) | cpu->AX;
-                        uint32_t src = READ_LE16(set.opr1);
-                        if (src == 0) return cpu_status_div;
-                        uint32_t value = dst / src;
-                        if (value > 0x10000) return cpu_status_div;
-                        cpu->AX = value;
-                        cpu->DX = dst % src;
+                        if (set.size == 1) {
+                            uint32_t dst = (cpu->DX << 16) | cpu->AX;
+                            uint32_t src = READ_LE16(set.opr1);
+                            if (src == 0) return cpu_status_div;
+                            uint32_t value = dst / src;
+                            if (value > 0x10000) return cpu_status_div;
+                            cpu->AX = value;
+                            cpu->DX = dst % src;
+                        } else {
+                            uint64_t dst = ((uint64_t)(cpu->EDX) << 32) | (uint64_t)cpu->EAX;
+                            uint64_t src = READ_LE32(set.opr1);
+                            if (src == 0) return cpu_status_div;
+                            uint64_t value = dst / src;
+                            if (value > 0x100000000ULL) return cpu_status_div;
+                            cpu->EAX = value;
+                            cpu->EDX = dst % src;
+                        }
                         return 0;
                     }
                     case 7: // IDIV ax, r/m16
                     {
-                        int dst = (cpu->DX << 16) | cpu->AX;
-                        int src = MOVSXW(READ_LE16(set.opr1));
-                        if (src == 0) return cpu_status_div;
-                        int value = dst / src;
-                        if (value != MOVSXW(value)) return cpu_status_div;
-                        cpu->AX = value;
-                        cpu->DX = dst % src;
+                        if (set.size == 1) {
+                            int dst = (cpu->DX << 16) | cpu->AX;
+                            int src = MOVSXW(READ_LE16(set.opr1));
+                            if (src == 0) return cpu_status_div;
+                            int value = dst / src;
+                            if (value != MOVSXW(value)) return cpu_status_div;
+                            cpu->AX = value;
+                            cpu->DX = dst % src;
+                        } else {
+                            int64_t dst = ((uint64_t)(cpu->EDX) << 32) | (uint64_t)cpu->EAX;
+                            int64_t src = MOVSXD(READ_LE32(set.opr1));
+                            if (src == 0) return cpu_status_div;
+                            int64_t value = dst / src;
+                            if (value != MOVSXD(value)) return cpu_status_div;
+                            cpu->EAX = value;
+                            cpu->EDX = dst % src;
+                        }
                         return 0;
                     }
                 }
@@ -4467,7 +3865,7 @@ static int cpu_step(cpu_state *cpu) {
                             {
                                 int src = cpu->gpr[set.opr2];
                                 int dst = READ_LE32(set.opr1);
-                                int64_t value = src * dst;
+                                int64_t value = MOVSXD(src) * MOVSXD(dst);
                                 cpu->gpr[set.opr2] = value;
                                 cpu->OF = cpu->CF = (value != (int32_t)value);
                                 return 0;
@@ -4709,15 +4107,15 @@ void dump_regs(cpu_state *cpu, uint32_t eip) {
         p = dump16(p, esp);
     }
 
-    for (int i = 0; i < 8; i++) {
-        if (cpu->CS.base + eip + i < max_mem) {
-            *p++ = ' ';
-            p = dump8(p, READ_MEM8(&cpu->CS, eip + i));
-        } else {
-            p = dump_string(p, " **");
-            break;
-        }
-    }
+    // for (int i = 0; i < 8; i++) {
+    //     if (cpu->CS.base + eip + i < max_mem) {
+    //         *p++ = ' ';
+    //         p = dump8(p, READ_MEM8(&cpu->CS, eip + i));
+    //     } else {
+    //         p = dump_string(p, " **");
+    //         break;
+    //     }
+    // }
 
     if (use32) {
         p = dump_string(p, "\nAX ");
@@ -4910,9 +4308,6 @@ static int cpu_block(cpu_state *cpu) {
                 status = check_irq(cpu);
                 if (status) return status;
                 continue;
-            case cpu_status_icebp:
-                dump_regs(cpu, cpu->EIP);
-                continue;
             case cpu_status_div:
                 if (cpu->cpu_gen >= cpu_gen_80286) {
                     cpu->EIP = last_known_eip;
@@ -4923,6 +4318,7 @@ static int cpu_block(cpu_state *cpu) {
             case cpu_status_fpu:
                 continue;
             case cpu_status_halt:
+            case cpu_status_icebp:
                 return status;
             case cpu_status_ud:
             default:
@@ -4951,6 +4347,7 @@ WASM_EXPORT int run(cpu_state *cpu) {
         case cpu_status_periodic:
         case cpu_status_significant:
         case cpu_status_exit:
+        case cpu_status_icebp:
             return status;
         case cpu_status_halt:
             if (cpu->IF) {
@@ -5205,7 +4602,7 @@ static inline char *disasm_dump_Gx(char *p, int *n_opl, modrm_t modrm, optype_t 
         {
             int type_Ox = optype & opa_Omask;
             switch (type_Ox) {
-                case opa_EwSw:
+                case opa_Sw:
                     p = disasm_reg(p, n_opl, modrm.reg, reg_type_sreg);
                     break;
                 case opa_RdCd:
@@ -5306,6 +4703,7 @@ static inline char *disasm_main(char * p, uint16_t sel, uint32_t eip, uint32_t r
 
             switch (map1.optype) {
                 case optype_implied:
+                case optype_string:
                     break;
 
                 case optype_Zb:
@@ -5345,6 +4743,16 @@ static inline char *disasm_main(char * p, uint16_t sel, uint32_t eip, uint32_t r
                     break;
 
                 case optype_Iz:
+                    p = disasm_Iz(p, &n_oplands, rip, &len, use32 & CPU_CTX_DATA32);
+                    break;
+
+                case optype_IwIb:
+                    p = disasm_Iw(p, &n_oplands, rip, &len);
+                    p = disasm_Ib(p, &n_oplands, rip, &len);
+                    break;
+
+                case optype_AXIz:
+                    p = disasm_reg(p, &n_oplands, index_AX, reg_type_ax + !!(use32 & CPU_CTX_DATA32));
                     p = disasm_Iz(p, &n_oplands, rip, &len, use32 & CPU_CTX_DATA32);
                     break;
 
@@ -5450,7 +4858,7 @@ static inline char *disasm_main(char * p, uint16_t sel, uint32_t eip, uint32_t r
                     if (map1.optype >= optype_modrm_) {
                         int reverse = map1.optype & opa_reverse;
 
-                        if (reverse == 0) {
+                        if (reverse != 0) {
                             p = disasm_dump_Gx(p, &n_oplands, modrm, map1.optype, use32);
                         }
 
@@ -5527,7 +4935,7 @@ static inline char *disasm_main(char * p, uint16_t sel, uint32_t eip, uint32_t r
 
                         }
 
-                        if (reverse != 0) {
+                        if (reverse == 0) {
                             p = disasm_dump_Gx(p, &n_oplands, modrm, map1.optype, use32);
                         }
 

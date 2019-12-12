@@ -162,6 +162,9 @@ export class RuntimeEnvironment {
         this.cont();
     }
     public cont(): void {
+        const STATUS_MODE_CHANGE = 1;
+        const STATUS_ICEBP = 4;
+        const STATUS_HALT = 0x1000;
         const STATUS_EXCEPTION = 0x10000;
         if (this.period > 0) {
             const now = new Date().valueOf();
@@ -182,19 +185,20 @@ export class RuntimeEnvironment {
         if (status >= STATUS_EXCEPTION) {
             this.isRunning = false;
             console.log(`CPU enters to shutdown (${status.toString(16)})`);
-        } else if (this.isDebugging) {
-            this.instance.exports.debug_dump(this.cpu);
+        } else if (this.isDebugging || status == STATUS_ICEBP) {
+            this.isRunning = false;
             this.isPausing = true;
+            this.instance.exports.debug_dump(this.cpu);
         } else {
             let timer = 1;
             switch (status) {
-                case 0x1000:
+                case STATUS_HALT:
                     const now = new Date().valueOf();
                     const expected = this.lastTick + this.period;
                     timer = expected - now;
                     if (timer < 0) timer = 0;
                     break;
-                case 1:
+                case STATUS_MODE_CHANGE:
                     const cr0 = this.getReg('CR0');
                     let mode: string[] = [];
                     if (cr0 & 0x80000000) {
@@ -206,6 +210,7 @@ export class RuntimeEnvironment {
                         mode.push('Real Mode')
                     }
                     console.log(`CPU Mode Change: ${('00000000' + cr0.toString(16)).slice(-8)} ${mode.join(' ')}`);
+                    break;
                 default:
                     // timer = 1;
             }
