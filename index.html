@@ -663,6 +663,11 @@ const unicodeMap = [
                     worker.postMessage({command: 'disasm', range: [$('#inputAddress2').value || "cs:eip", 10]});
                 }
             });
+            $('#buttonContinue').addEventListener('click', e => {
+                if (window.worker) {
+                    worker.postMessage({command: 'cont'});
+                }
+            });
 
             $('#buttonLocal').addEventListener('click', e => {
                 $('#fileLocal').click();
@@ -739,6 +744,7 @@ const unicodeMap = [
                 <option value=""></option>
                 <option value="./bin/fdos.img" selected>FreeDOS</option>
                 <option value="./bin/floppybird.img">Floppy Bird</option>
+                <option value="./bin/haribote.img">Haribote OS</option>
                 <option value="./bin/osz.img">osz</option>
             </select>
             <input id="fileLocal" type="file" style="position: absolute; width:0px; height:0px; z-index: -1;">
@@ -746,15 +752,14 @@ const unicodeMap = [
                 <a id="buttonLocal" class="buttonFace">file:</a>
                 <input id="labelLocal" type="text" readonly="readonly">
             </label>
+            <label id="volumeControl">
+                &#x1F50A;<input id="inputVolume" type="range" min="0" max="10" step="1" value="5" style="width: 5em;">
+            </label>
         </span>
 
         <details>
             <summary class="buttonFace activeButton">Option</summary>
             <article>
-
-                <label id="volumeControl" class="controlFrame">
-                    &#x1F64A;<input id="inputVolume" type="range" min="0" max="10" step="1" value="5">&#x1F649;
-                </label>
 
                 <div class="controlFrame">
 
@@ -794,10 +799,11 @@ const unicodeMap = [
                         <summary class="buttonFace">DevTool</summary>
                         <a id="buttonNMI" class="buttonFace">Step</a>
                         <a id="buttonDevCLS" class="buttonFace destructiveButton">&#x1f5d1;</a>
-                        <input id="inputAddress" type="text" value="" placeholder="0000:0000" size="9">
+                        <input id="inputAddress" type="text" value="" placeholder="0000:0000" size="8">
                         <a id="buttonDump" class="buttonFace">Dump</a>
-                        <input id="inputAddress2" type="text" value="" placeholder="0000:0000" size="9">
+                        <input id="inputAddress2" type="text" value="" placeholder="0000:0000" size="8">
                         <a id="buttonDisAsm" class="buttonFace">DisAsm</a>
+                        <a id="buttonContinue" class="buttonFace">Cont</a>
                         <br>
                         <textarea id="devTerminal" cols="80" rows="20" readonly></textarea>
                     </details>

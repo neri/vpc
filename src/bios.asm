@@ -1226,6 +1226,7 @@ _int19:
     jc .fail
 ;    cmp word [es:bx+0x01FE], 0xAA55
 ;    jnz .fail
+    ; db 0xF1
     call 0:0x7C00
 .fail:
 _int18:

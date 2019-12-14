@@ -83,6 +83,9 @@ onmessage = e => {
         case 'nmi':
             env.nmi();
             break;
+        case 'cont':
+            env.debugContinue();
+            break;
         case 'dump':
             wi.postCommand('devWrite', env.dump(e.data.address));
             break;

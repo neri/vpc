@@ -8,7 +8,6 @@
         --system-gray2: rgb(174, 174, 178);
         --system-gray5: rgb(229, 229, 234);
         --system-gray6: rgb(242, 242, 247);
-        --shadow-color: rgba(0, 0, 0, 0.125);
     }
 }
 
@@ -22,7 +21,6 @@
         --system-gray2: rgb(99, 99, 102);
         --system-gray5: rgb(44, 44, 46);
         --system-gray6: rgb(28, 28, 30);
-        --shadow-color: rgba(195, 195, 195, 0.125);
     }
 
     img.dimOnDarkMode {
@@ -32,6 +30,7 @@
 }
 
 :root {
+    --shadow-color: rgba(0, 0, 0, 0.125);
     --main-screen-width: 640px;
     --main-screen-height: 400px;
 }
@@ -165,7 +164,7 @@ address {
 
 .buttonFace {
     display: inline-block;
-    padding: 0 12px;
+    padding: 0 8px;
     min-height: 16px;
     vertical-align: middle;
     font-size: 12px;

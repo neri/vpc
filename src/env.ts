@@ -29,7 +29,6 @@ export class RuntimeEnvironment {
     private bios: Uint8Array = new Uint8Array(0);
     private memoryConfig: Uint16Array = new Uint16Array(2);
     isDebugging: boolean = false;
-    isPausing: boolean = false;
     isRunning: boolean = false;
 
     constructor(worker: WorkerInterface) {
@@ -147,7 +146,6 @@ export class RuntimeEnvironment {
         console.log(`CPU restarted (${gen})`);
         this.loadBIOS();
         this.instance.exports.reset(this.cpu, gen);
-        this.isPausing = false;
         if (!this.isRunning || this.isDebugging) {
             this.isDebugging = false;
             this.isRunning = true;
@@ -161,7 +159,7 @@ export class RuntimeEnvironment {
         this.isRunning = true;
         this.cont();
     }
-    public cont(): void {
+    private cont(): void {
         const STATUS_MODE_CHANGE = 1;
         const STATUS_ICEBP = 4;
         const STATUS_HALT = 0x1000;
@@ -187,7 +185,7 @@ export class RuntimeEnvironment {
             console.log(`CPU enters to shutdown (${status.toString(16)})`);
         } else if (this.isDebugging || status == STATUS_ICEBP) {
             this.isRunning = false;
-            this.isPausing = true;
+            this.isDebugging = true;
             this.instance.exports.debug_dump(this.cpu);
         } else {
             let timer = 1;
@@ -224,13 +222,20 @@ export class RuntimeEnvironment {
         }
     }
     public nmi(): void {
-        if (!this.isRunning || this.isPausing) {
+        if (!this.isRunning) {
             this.instance.exports.step(this.cpu);
             this.instance.exports.debug_dump(this.cpu);
         } else {
             this.isDebugging = true;
         }
         this.dequeueUART();
+    }
+    public debugContinue(): void {
+        if (this.isDebugging) {
+            this.isRunning = true;
+            this.isDebugging = false;
+            this.cont();
+        }
     }
     public setReg(regName: string, value: number) {
         const reg: number = this.regmap[regName];
@@ -268,7 +273,7 @@ export class RuntimeEnvironment {
     }
     private reg_or_value(_token: string): number {
         let token = _token.toUpperCase();
-        if (token.length === 3 && token[0] === 'E') {
+        if (token.length === 3 && token[0] === 'E' && Object.keys(this.regmap).indexOf(token.substr(1)) >= 0) {
             token = token.substr(1);
         };
         if (Object.keys(this.regmap).indexOf(token) >= 0) {
@@ -284,7 +289,7 @@ export class RuntimeEnvironment {
             seg = this.reg_or_value(a[0]);
             off = this.reg_or_value(a[1]);
         } else {
-            seg = 0;
+            seg = this.getReg('CS');
             off = this.reg_or_value(a[0]);
         }
         this.instance.exports.disasm(this.cpu, seg, off, count);
