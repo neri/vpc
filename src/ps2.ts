@@ -37,6 +37,7 @@ const codeTable: { [key: string]: number } = {
     'Comma': 0x33,
     'Period': 0x34,
     'Slash': 0x35,
+    'Space': 0x39,
     'F1': 0x3B,
     'F2': 0x3C,
     'F3': 0x3D,
@@ -130,7 +131,7 @@ export class PS2 {
     }
     private data(data: number): void {
         // console.log(`ps2: data ${data.toString(16)}`);
-        this.postKeyData(0xFA);
+        // this.postKeyData(0xFA);
     }
     private postKeyData(data: number): void {
         this.o_fifo.push(data);
@@ -139,16 +140,13 @@ export class PS2 {
     onKey(e: any): void {
         const { type, key, code, keyCode, ctrlKey, altKey } = e;
         let prefix: number = 0;
-        let scancode: number = codeTable[code];
-        if (!scancode) {
-            scancode = scanTable[keyCode];
-        }
+        let scancode: number = codeTable[code] || scanTable[keyCode] || 0;
         if (scancode > 0x100) {
             prefix = scancode >> 8;
             scancode &= 0x7F;
         }
-        let ascii: number = (key.length == 1) ? key.charCodeAt(0) : 0;
-        if (ascii == 0xA5) ascii = 0x5C; // IntlYen
+        let ascii: number = (key.length === 1) ? key.charCodeAt(0) : 0;
+        if (ascii === 0xA5) ascii = 0x5C; // IntlYen
         if (ascii >= 0x80) ascii = 0;
         if (ctrlKey && ascii >= 0x40 && ascii <= 0x80) {
             ascii &= 0x1F;
@@ -169,7 +167,7 @@ export class PS2 {
             scancode &= 0x7F;
         }
 
-        if (scancode == 0 && ascii != 0) {
+        if (scancode === 0 && ascii !== 0) {
             scancode = SCAN_DUMMY;
         }
 

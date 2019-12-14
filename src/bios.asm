@@ -934,102 +934,27 @@ i1A04:
 
 _INIT:
     cli
-    xor ax, ax
-    mov ss, ax
+    xor di, di
+    mov ss, di
     mov sp, 0x0400
     mov cx, cs
     mov ds, cx
-    mov es, ax
-    push ax
+    mov es, di
+    push di
     popf
 
-    xor di, di
-    mov cx, 256
+    mov cx, 0x200
     rep stosw
 
     ;; Install IRQ and BIOS services
-__set_irq:
-    mov di, 4 * 5
-    mov ax, _iret
-    stosw
-    mov ax, cs
-    stosw
-    mov ax, _iret
-    stosw
-    mov ax, cs
-    stosw
-    mov ax, _iret
-    stosw
-    mov ax, cs
-    stosw
-    mov ax, _irq0
-    stosw
-    mov ax, cs
-    stosw
-    mov ax, _irq1
-    stosw
-    mov ax, cs
-    stosw
-    mov cx, 6
+    mov di, 4
+    mov si, _isr_table
+    mov cx, (_end_isr_table - _isr_table) / 2
 .loop:
-    mov ax, _irq_dummy
-    stosw
+    movsw
     mov ax, cs
     stosw
     loop .loop
-
-    mov ax, _int10
-    stosw
-    mov ax, cs
-    stosw
-    mov ax, _int11
-    stosw
-    mov ax, cs
-    stosw
-    mov ax, _int12
-    stosw
-    mov ax, cs
-    stosw
-    mov ax, _int13
-    stosw
-    mov ax, cs
-    stosw
-    mov ax, _int14
-    stosw
-    mov ax, cs
-    stosw
-    mov ax, _int15
-    stosw
-    mov ax, cs
-    stosw
-    mov ax, _int16
-    stosw
-    mov ax, cs
-    stosw
-    mov ax, _int17
-    stosw
-    mov ax, cs
-    stosw
-    mov ax, _int18
-    stosw
-    mov ax, cs
-    stosw
-    mov ax, _int19
-    stosw
-    mov ax, cs
-    stosw
-    mov ax, _int1A
-    stosw
-    mov ax, cs
-    stosw
-    mov ax, _iret
-    stosw
-    mov ax, cs
-    stosw
-    mov ax, _iret
-    stosw
-    mov ax, cs
-    stosw
 
     ;; BIOS Data Area
     mov di, 0x0400
@@ -1230,7 +1155,7 @@ _int19:
     call 0:0x7C00
 .fail:
 _int18:
-    db 0xF1
+    ; db 0xF1
 _repl:
     cli
     xor ax, ax
@@ -1405,10 +1330,16 @@ boot_fail_msg:
     db 10, "Operating System not found", 10, 0
 
     alignb 2
+_isr_table:
+    dw _iret, _iret, _iret, _iret, _iret, _iret, _iret
+    dw _irq0, _irq1, _irq_dummy, _irq_dummy, _irq_dummy, _irq_dummy, _irq_dummy, _irq_dummy
+    dw _int10, _int11, _int12, _int13, _int14, _int15, _int16, _int17
+    dw _int18, _int19, _int1A, _iret, _iret
+_end_isr_table:
+
 _boot_sound_data:
     dw 2000, 100, 1000, 100
     dw 0xFFFF
-
 
 _palette_data:
     db 0x00,0x00,0x00, 0x00,0x00,0x2a, 0x00,0x2a,0x00, 0x00,0x2a,0x2a,

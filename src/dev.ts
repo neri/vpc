@@ -72,8 +72,8 @@ export class VPIC {
         return this.IMR[port];
     }
     private enqueue(port: number): void {
+        if (this.phase[port] != PIC_PHASE_MAX) return;
         for (let i = 0; i < 8; i++) {
-            if (this.phase[port] != PIC_PHASE_MAX) return;
             if (this.irq.length) return;
             const global_irq = port * 8 + i;
             const mask = (1 << i);
@@ -91,6 +91,7 @@ export class VPIC {
         }
     }
     public raiseIRQ(n: number): void {
+        // if (n) console.log('raise', n, this.irq.length);
         this.intCount[n]++;
         this.enqueue(0);
     }
@@ -105,6 +106,7 @@ export class VPIC {
             const mask = 1 << local_irq;
             this.ISR[port] |= mask;
             const vector = (this.ICW[port * PIC_PHASE_MAX + 1] & 0xF8) | local_irq;
+            // if (global_irq) console.log('dequeue', global_irq, vector, this.irq.length);
             return vector;
         } else {
             return 0;

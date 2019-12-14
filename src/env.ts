@@ -28,8 +28,8 @@ export class RuntimeEnvironment {
     private regmap: { [key: string]: number } = {};
     private bios: Uint8Array = new Uint8Array(0);
     private memoryConfig: Uint16Array = new Uint16Array(2);
-    isDebugging: boolean = false;
-    isRunning: boolean = false;
+    private isDebugging: boolean = false;
+    private isRunning: boolean = false;
 
     constructor(worker: WorkerInterface) {
         this.worker = worker;
@@ -160,9 +160,7 @@ export class RuntimeEnvironment {
         this.cont();
     }
     private cont(): void {
-        const STATUS_MODE_CHANGE = 1;
         const STATUS_ICEBP = 4;
-        const STATUS_HALT = 0x1000;
         const STATUS_EXCEPTION = 0x10000;
         if (this.period > 0) {
             const now = new Date().valueOf();
@@ -183,31 +181,23 @@ export class RuntimeEnvironment {
         if (status >= STATUS_EXCEPTION) {
             this.isRunning = false;
             console.log(`CPU enters to shutdown (${status.toString(16)})`);
-        } else if (this.isDebugging || status == STATUS_ICEBP) {
+        } else if (this.isDebugging) {
             this.isRunning = false;
             this.isDebugging = true;
             this.instance.exports.debug_dump(this.cpu);
         } else {
             let timer = 1;
             switch (status) {
-                case STATUS_HALT:
+                case 0x1000:
                     const now = new Date().valueOf();
                     const expected = this.lastTick + this.period;
                     timer = expected - now;
                     if (timer < 0) timer = 0;
                     break;
-                case STATUS_MODE_CHANGE:
-                    const cr0 = this.getReg('CR0');
-                    let mode: string[] = [];
-                    if (cr0 & 0x80000000) {
-                        mode.push('Paged');
-                    }
-                    if (cr0 & 0x00000001) {
-                        mode.push('Protected Mode')
-                    } else {
-                        mode.push('Real Mode')
-                    }
-                    console.log(`CPU Mode Change: ${('00000000' + cr0.toString(16)).slice(-8)} ${mode.join(' ')}`);
+                case STATUS_ICEBP:
+                    this.isRunning = false;
+                    this.isDebugging = true;
+                    this.instance.exports.debug_dump(this.cpu);
                     break;
                 default:
                     // timer = 1;
@@ -249,28 +239,6 @@ export class RuntimeEnvironment {
         let a = new Uint32Array(this.env.memory.buffer, reg, 1);
         return a[0];
     }
-    public dump(base: number): string {
-        const addrToHex = (n: number) => ('00000000' + n.toString(16)).substr(-8);
-        const toHex = (n: number) => ('00' + n.toString(16)).substr(-2);
-        let lines: string[] = [];
-        for (let i = 0; i < 16; i++) {
-            const offset = base + i * 16;
-            let line = [addrToHex(offset)];
-            let chars: string[] = [];
-            for (let j = 0; j < 16; j++) {
-                const c = this._memory[this.vmem + offset + j];
-                line.push(toHex(c));
-                if (c >= 0x20 && c < 0x7F) {
-                    chars.push(String.fromCharCode(c));
-                } else {
-                    chars.push('.');
-                }
-            }
-            line.push(chars.join(''));
-            lines.push(line.join(' '));
-        }
-        return lines.join('\n');
-    }
     private reg_or_value(_token: string): number {
         let token = _token.toUpperCase();
         if (token.length === 3 && token[0] === 'E' && Object.keys(this.regmap).indexOf(token.substr(1)) >= 0) {
@@ -293,6 +261,38 @@ export class RuntimeEnvironment {
             off = this.reg_or_value(a[0]);
         }
         this.instance.exports.disasm(this.cpu, seg, off, count);
+    }
+    public dump(seg_off: string): string {
+        const a = seg_off.split(/:/);
+        let seg: number, off: number;
+        if (a.length == 2) {
+            seg = this.reg_or_value(a[0]);
+            off = this.reg_or_value(a[1]);
+        } else {
+            seg = this.getReg('DS');
+            off = this.reg_or_value(a[0]);
+        }
+        const base: number = this.instance.exports.debug_get_segment_base(this.cpu, seg) + off;
+        const addrToHex = (n: number) => ('00000000' + n.toString(16)).substr(-8);
+        const toHex = (n: number) => ('00' + n.toString(16)).substr(-2);
+        let lines: string[] = [];
+        for (let i = 0; i < 16; i++) {
+            const offset = base + i * 16;
+            let line = [addrToHex(offset)];
+            let chars: string[] = [];
+            for (let j = 0; j < 16; j++) {
+                const c = this._memory[this.vmem + offset + j];
+                line.push(toHex(c));
+                if (c >= 0x20 && c < 0x7F) {
+                    chars.push(String.fromCharCode(c));
+                } else {
+                    chars.push('.');
+                }
+            }
+            line.push(chars.join(''));
+            lines.push(line.join(' '));
+        }
+        return lines.join('\n');
     }
     public get_vram_signature(base: number, size: number): number {
         return this.instance.exports.get_vram_signature(base, size);

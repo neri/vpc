@@ -646,16 +646,8 @@ const unicodeMap = [
                 }
             });
             $('#buttonDump').addEventListener('click', e => {
-                const rawValue = $('#inputAddress').value;
-                let address = 0;
-                if (rawValue.indexOf(':') > 0) {
-                    const pair = rawValue.split(':');
-                    address = (parseInt(`0x0${pair[0]}`) << 4) + (parseInt(`0x0${pair[1]}`));
-                } else {
-                    address = parseInt(`0x0${rawValue}`);
-                }
                 if (window.worker) {
-                    worker.postMessage({command: 'dump', address: address});
+                    worker.postMessage({command: 'dump', address: $('#inputAddress').value});
                 }
             });
             $('#buttonDisAsm').addEventListener('click', e => {
@@ -718,6 +710,10 @@ const unicodeMap = [
                 });
                 reader.readAsArrayBuffer(file);
             }, false);
+
+            window.addEventListener('mousemove', e => {
+                ;
+            });
 
             $('#buttonDevCLS').addEventListener('click', e => {
                 $('#devTerminal').value = '';
