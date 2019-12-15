@@ -20,7 +20,6 @@ A PC Emulator implemented by WebAssembly.
 
 - IBM PC compatible
 - CPU: 486SX
-  - Some features are missing such as 16bit protected mode
 - Memory: 640KB ought to be enough for anybody.
 - I/O:
   - **i8259** PIC
@@ -31,6 +30,21 @@ A PC Emulator implemented by WebAssembly.
   - **VGA** - mode 03 and 13 only
   - **FDC** (non standard interface)
     - Supported: 160KB, 360KB, 640KB, 720KB, 1.2MB, 1.4MB and 512 bytes (Boot Sector Only)
+
+|Feature|Status|
+|-|-|
+|Real Mode| :ok: |
+|FPU / MMX / SSE| - |
+|Protected Mode| :ok: |
+|Segmentation| Partially |
+|Segment Limit| Partially |
+|TSS|32bit Only|
+|LDT| :ok: |
+|Task Gate| - |
+|Interrupt / Trap Gate|32bit Only|
+|Call Gate| - |
+|Virtual 8086 Mode| WIP |
+|Paging| - |
 
 ### How to detect this software in the virtual machine
 
