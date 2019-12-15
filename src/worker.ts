@@ -87,7 +87,7 @@ onmessage = e => {
             env.debugContinue();
             break;
         case 'dump':
-            wi.postCommand('devWrite', env.dump(e.data.address));
+            env.dump(e.data.address);
             break;
         case 'disasm':
             env.disasm(e.data.range[0], e.data.range[1]);

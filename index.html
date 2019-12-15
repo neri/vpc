@@ -53,8 +53,8 @@
             $('#selDiskImage').disabled = true;
 
             if (window.beep) {
-                window.beep.createAudioContext();
-            }
+                window.beep.createAudioContext(); // IMPORTANT!
+        }
 
             const term = $('#terminal');
             term.write = function (message) {
@@ -711,10 +711,6 @@ const unicodeMap = [
                 reader.readAsArrayBuffer(file);
             }, false);
 
-            window.addEventListener('mousemove', e => {
-                ;
-            });
-
             $('#buttonDevCLS').addEventListener('click', e => {
                 $('#devTerminal').value = '';
             });
@@ -773,15 +769,13 @@ const unicodeMap = [
                     <label>
                         Memory:
                         <select id="selMemory">
-                            <option value="64">64KB</option>
+                            <!-- <option value="64">64KB</option>
                             <option value="128">128KB</option>
                             <option value="256">256KB</option>
                             <option value="384">384KB</option>
-                            <option value="512">512KB</option>
+                            <option value="512">512KB</option> -->
                             <option value="640">640KB</option>
-                            <option value="2048">2MB</option>
                             <option value="4096">4MB</option>
-                            <option value="8192">8MB</option>
                             <option value="16384" selected>16MB</option>
                         </select>
                     </label>
@@ -795,7 +789,7 @@ const unicodeMap = [
                         <summary class="buttonFace">DevTool</summary>
                         <a id="buttonNMI" class="buttonFace">Step</a>
                         <a id="buttonDevCLS" class="buttonFace destructiveButton">&#x1f5d1;</a>
-                        <input id="inputAddress" type="text" value="" placeholder="0000:0000" size="8">
+                        <input id="inputAddress" type="text" value="" placeholder="0000000" size="8">
                         <a id="buttonDump" class="buttonFace">Dump</a>
                         <input id="inputAddress2" type="text" value="" placeholder="0000:0000" size="8">
                         <a id="buttonDisAsm" class="buttonFace">DisAsm</a>

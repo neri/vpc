@@ -1,4 +1,4 @@
-// System devices
+// Minimal PC's devices
 
 import { RuntimeEnvironment } from './env';
 import { IOManager } from './iomgr';
@@ -218,7 +218,7 @@ export class UART {
     private fifo_o: number[];
     private fifo_i: number[];
     private irq: number;
-    private IER: number;
+    private IER: number = 0;
 
     constructor (env: RuntimeEnvironment, base: number, irq: number) {
         this.env = env;
@@ -248,7 +248,7 @@ export class UART {
  * Real Time Clock
  */
 export class RTC {
-    public index: number;
+    public index: number = 0;
     private ram: Uint8Array;
 
     constructor (env: RuntimeEnvironment) {
@@ -287,7 +287,7 @@ export class RTC {
         case 9:
             return toBCD(now.getFullYear() % 100);
         case 0x32:
-                return toBCD((now.getFullYear() / 100) | 0);
+                return toBCD(Math.floor(now.getFullYear() / 100));
         default:
             return this.ram[this.index];
         }
