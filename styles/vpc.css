@@ -1,14 +1,17 @@
-@media (prefers-color-scheme: light) {
-    :root {
-        --bg-color: rgb(255, 255, 255);
-        --fg-color: #555;
-        --system-blue: rgb(0, 122, 255);
-        --system-red:  rgb(255, 59, 48);
-        --system-gray1: rgb(142, 142, 147);
-        --system-gray2: rgb(174, 174, 178);
-        --system-gray5: rgb(229, 229, 234);
-        --system-gray6: rgb(242, 242, 247);
-    }
+
+:root {
+    --main-screen-width: 640px;
+    --main-screen-height: 400px;
+    --shadow-color: rgba(0, 0, 0, 0.125);
+
+    --bg-color: rgb(255, 255, 255);
+    --fg-color: #555;
+    --system-blue: rgb(0, 122, 255);
+    --system-red:  rgb(255, 59, 48);
+    --system-gray1: rgb(142, 142, 147);
+    --system-gray2: rgb(174, 174, 178);
+    --system-gray5: rgb(229, 229, 234);
+    --system-gray6: rgb(242, 242, 247);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -21,6 +24,7 @@
         --system-gray2: rgb(99, 99, 102);
         --system-gray5: rgb(44, 44, 46);
         --system-gray6: rgb(28, 28, 30);
+        --shadow-color: rgba(195, 195, 195, 0.125);
     }
 
     img.dimOnDarkMode {
@@ -29,17 +33,12 @@
 
 }
 
-:root {
-    --shadow-color: rgba(0, 0, 0, 0.125);
-    --main-screen-width: 640px;
-    --main-screen-height: 400px;
-}
 html, body {
     padding: 0;
     margin: 0;
     font-family: sans-serif;
     -webkit-user-select: none;
-    background: var(--bg-color);
+    background: var(--system-gray6);
     color: var(--fg-color);
 }
 #screen_container {
@@ -188,13 +187,35 @@ address {
     background: var(--system-red);
 }
 
-input[type=text], textarea, select {
+select {
+    -webkit-appearance: none;
+    appearance: none;
+    border-radius: 4px;
+    padding: 4px 12px 4px 4px;
+    line-height: 1em;
+    border: none;
+    box-shadow: 1px 1px 4px 2px var(--shadow-color);
+
+    background: transparent;
+    color: var(--fg-color);
+}
+select::before {
+    content: "-";
+}
+
+select[disabled] {
+    box-shadow: none;
+}
+
+input[type=text], textarea {
+    -webkit-appearance: none;
+    appearance: none;
     border: var(--fg-color) solid 1px;
     background: var(--bg-color);
     color: var(--fg-color);
 }
 
-input[readonly], select[disabled] {
+input[readonly] {
     border: var(--system-gray2) dashed 1px;
     background: transparent;
     color: var(--system-gray1);

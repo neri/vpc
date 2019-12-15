@@ -29,22 +29,22 @@ type Size = [number, number];
 
 export class VGA {
 
-    private timer: NodeJS.Timeout | null;
+    private timer: NodeJS.Timeout | undefined;
     private pal_u32: Uint32Array;
     private pal_u8: Uint8Array;
-    private pal_index: number;
-    private pal_read_index: number;
+    private pal_index: number = 0;
+    private pal_read_index: number = 0;
     private env: RuntimeEnvironment;
-    private bgaIndex: number;
+    private bgaIndex: number = 0;
     private bgaData: Uint16Array;
-    private crtcIndex: number;
+    private crtcIndex: number = 0;
     private crtcData: Uint8Array;
-    private attrIndex: number;
+    private attrIndex: number = 0;
     private attrData: Uint8Array;
 
-    private vram_base: number;
-    private vram_size: number;
-    private vram_sign: number;
+    private vram_base: number = 0;
+    private vram_size: number = 0;
+    private vram_sign: number = 0;
     private _vtrace: number;
 
     constructor (env: RuntimeEnvironment) {
@@ -224,7 +224,7 @@ export class VGA {
     clearTimer() {
         if (this.timer) {
             clearInterval(this.timer);
-            this.timer = null;
+            this.timer = undefined;
         }
     }
     transferVGA() {

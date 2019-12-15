@@ -9,6 +9,7 @@ export interface WorkerInterface {
     hasClass(className: string): boolean;
 }
 
+const STATUS_EXCEPTION = 0x10000;
 export class RuntimeEnvironment {
 
     public worker: WorkerInterface;
@@ -22,7 +23,7 @@ export class RuntimeEnvironment {
     private lastTick: number;
     private env: any;
     private _memory: Uint8Array;
-    private instance: WebAssembly.Instance;
+    private instance: WebAssembly.Instance | undefined;
     private vmem: number = 0;
     private cpu: number = 0;
     private regmap: { [key: string]: number } = {};
@@ -80,6 +81,7 @@ export class RuntimeEnvironment {
         this.bios = bios;
     }
     public initMemory(size: number) {
+        if (!this.instance) throw new Error('Instance not initialized');
         console.log(`Memory: ${size}KB OK`);
         if (size < 1024) {
             this.memoryConfig = new Uint16Array([size, 0]);
@@ -153,6 +155,7 @@ export class RuntimeEnvironment {
         }
     }
     public run(gen: number): void {
+        if (!this.instance) throw new Error('Instance not initialized');
         this.cpu = this.instance.exports.alloc_cpu(gen);
         this.regmap = JSON.parse(this.getCString(this.instance.exports.debug_get_register_map(this.cpu)));
         console.log(`CPU started (${gen})`);
@@ -160,8 +163,8 @@ export class RuntimeEnvironment {
         this.cont();
     }
     private cont(): void {
+        if (!this.instance) return;
         const STATUS_ICEBP = 4;
-        const STATUS_EXCEPTION = 0x10000;
         if (this.period > 0) {
             const now = new Date().valueOf();
             for (let expected = this.lastTick + this.period; now >= expected; expected += this.period) {
@@ -181,7 +184,7 @@ export class RuntimeEnvironment {
         if (status >= STATUS_EXCEPTION) {
             this.isRunning = false;
             console.log(`CPU enters to shutdown (${status.toString(16)})`);
-        } else if (this.isDebugging) {
+        } else if (this.isDebugging || status == STATUS_ICEBP) {
             this.isRunning = false;
             this.isDebugging = true;
             this.instance.exports.debug_dump(this.cpu);
@@ -194,10 +197,18 @@ export class RuntimeEnvironment {
                     timer = expected - now;
                     if (timer < 0) timer = 0;
                     break;
-                case STATUS_ICEBP:
-                    this.isRunning = false;
-                    this.isDebugging = true;
-                    this.instance.exports.debug_dump(this.cpu);
+                case 1:
+                    const cr0 = this.getReg('CR0');
+                    let mode: string[] = [];
+                    if (cr0 & 0x80000000) {
+                        mode.push('Paged');
+                    }
+                    if (cr0 & 0x00000001) {
+                        mode.push('Protected Mode');
+                    } else {
+                        mode.push('Real Mode');
+                    }
+                    console.log(`CPU Mode Change: ${('00000000' + cr0.toString(16)).slice(-8)} ${mode.join(' ')}`);
                     break;
                 default:
                     // timer = 1;
@@ -212,8 +223,12 @@ export class RuntimeEnvironment {
         }
     }
     public nmi(): void {
+        if (!this.instance) return;
         if (!this.isRunning) {
-            this.instance.exports.step(this.cpu);
+            let status: number = this.instance.exports.step(this.cpu);
+            if (status >= STATUS_EXCEPTION) {
+                this.worker.print(`#### Exception Occurred (${status.toString(16)})`);
+            }
             this.instance.exports.debug_dump(this.cpu);
         } else {
             this.isDebugging = true;
@@ -229,28 +244,28 @@ export class RuntimeEnvironment {
     }
     public setReg(regName: string, value: number) {
         const reg: number = this.regmap[regName];
-        if (!reg) throw new Error(`Unexpected Regsiter Name: ${regName}`);
+        if (!reg) throw new Error(`Unexpected Register Name: ${regName}`);
         let a = new Uint32Array(this.env.memory.buffer, reg, 1);
         a[0] = value;
     }
     public getReg(regName: string): number {
         const reg: number = this.regmap[regName];
-        if (!reg) throw new Error(`Unexpected Regsiter Name: ${regName}`);
+        if (!reg) throw new Error(`Unexpected Register Name: ${regName}`);
         let a = new Uint32Array(this.env.memory.buffer, reg, 1);
         return a[0];
     }
     private reg_or_value(_token: string): number {
         let token = _token.toUpperCase();
-        if (token.length === 3 && token[0] === 'E' && Object.keys(this.regmap).indexOf(token.substr(1)) >= 0) {
-            token = token.substr(1);
-        };
         if (Object.keys(this.regmap).indexOf(token) >= 0) {
             return this.getReg(token);
+        } else if (token[0] === 'E' && Object.keys(this.regmap).indexOf(token.substr(1)) >= 0) {
+            return this.getReg(token.substr(1));
         } else {
-            return parseInt(`0x0${token}`);
+            return parseInt(`0x0${token}`) | 0;
         }
     }
     public disasm(seg_off: string, count: number): void {
+        if (!this.instance) return;
         const a = seg_off.split(/:/);
         let seg: number, off: number;
         if (a.length == 2) {
@@ -262,14 +277,15 @@ export class RuntimeEnvironment {
         }
         this.instance.exports.disasm(this.cpu, seg, off, count);
     }
-    public dump(seg_off: string): string {
+    public dump(seg_off: string): void {
+        if (!this.instance) return;
         const a = seg_off.split(/:/);
         let seg: number, off: number;
         if (a.length == 2) {
             seg = this.reg_or_value(a[0]);
             off = this.reg_or_value(a[1]);
         } else {
-            seg = this.getReg('DS');
+            seg = 0;
             off = this.reg_or_value(a[0]);
         }
         const base: number = this.instance.exports.debug_get_segment_base(this.cpu, seg) + off;
@@ -292,9 +308,10 @@ export class RuntimeEnvironment {
             line.push(chars.join(''));
             lines.push(line.join(' '));
         }
-        return lines.join('\n');
+        this.worker.print(lines.join('\n'));
     }
     public get_vram_signature(base: number, size: number): number {
+        if (!this.instance) return 0;
         return this.instance.exports.get_vram_signature(base, size);
     }
 }
