@@ -396,8 +396,11 @@ i101A:
 i1000: ;; SET VIDEO MODE
     cmp al, 0x03
     jbe .mode_03
+    cmp al, 0x11
+    jz .mode_11
     cmp al, 0x13
     jz .mode_13
+    ; db 0xf1
     xor al, al
     ret
 
@@ -427,6 +430,16 @@ i1000: ;; SET VIDEO MODE
     mov cx, 320 * 200 /2
     rep stosw
     mov ax, 0x13
+    jmp .set_mode
+
+.mode_11:
+    mov ax, 0xA000
+    mov es, ax
+    xor di, di
+    xor ax, ax
+    mov cx, 320 * 200 /2
+    rep stosw
+    mov ax, 0x11
     jmp .set_mode
 
 

@@ -444,7 +444,11 @@
                 });
                 devmgr.onCommand('vga', e => {
                     if (this.grapihicsMode) {
-                        this.renderMode13(e);
+                        if (this.bpp == 1) {
+                            this.renderMode11(e);
+                        } else {
+                            this.renderMode13(e);
+                        }
                     } else {
                         this.renderMode03(e);
                     }
@@ -620,6 +624,20 @@ const unicodeMap = [
                 let dst = new Uint32Array(image.data.buffer);
                 for (let i = 0; i < size; i++) {
                     dst[i] = this.pal[src[i]];
+                }
+                ctx.putImageData(image, 0, 0);
+            }
+            renderMode11(src) {
+                const { ctx, scale } = this;
+                const size = this.canvas.width * this.canvas.height / 8;
+                const image = this.gvram;
+                let dst = new Uint32Array(image.data.buffer);
+                let j = 0;
+                for (let i = 0; i < size; i++) {
+                    const c = src[i];
+                    for (let k = 128 | 0; k != 0; k >>= 1) {
+                        dst[j++] = (c & k) ? 0xFFFFFFFF : 0xFF000000;
+                    }
                 }
                 ctx.putImageData(image, 0, 0);
             }

@@ -4443,6 +4443,8 @@ check:
                 return status;
         }
     }
+    // status = check_irq(cpu);
+    // if (status) return status;
     if (has_to_trace) {
         INVOKE_INT(cpu, 1, exception);
     }

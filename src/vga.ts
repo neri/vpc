@@ -123,6 +123,11 @@ export class VGA {
                 this.vram_size = 80 * 25 * 2;
                 this.setMode([640, 400], [640, 400], 4, 0);
                 break;
+            case 0x11:
+                this.vram_base = SEGMENT_A000;
+                this.vram_size = 640 * 480 / 8;
+                this.setMode([640, 480], [640, 480], 1, GRAPHICS_MODE);
+                break;
             case 0x13:
                 this.vram_base = SEGMENT_A000;
                 this.vram_size = 320 * 200;
