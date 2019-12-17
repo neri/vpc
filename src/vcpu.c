@@ -324,7 +324,7 @@ typedef struct cpu_state {
         };
     };
 
-    uint32_t flags_mask, flags_mask1, flags_preserve_popf, flags_preserve_iret3;
+    uint32_t flags_mask, flags_mask1, flags_preserve_popf, flags_preserve_iret3, flags_mask_intrm;
     int cpu_gen;
     uint32_t cpu_context, default_context;
     uint32_t cr0_valid, cr4_valid;
@@ -839,11 +839,8 @@ static int INVOKE_INT(cpu_state *cpu, int n, int_cause_t cause) {
 
         LOAD_SEL(cpu, &cpu->CS, new_csel);
         cpu->EIP = new_eip;
+        cpu->eflags &= cpu->flags_mask_intrm;
 
-        if (cause == external) {
-            cpu->IF = 0;
-        }
-        cpu->TF = 0;
         if (new_csel == 0 && new_eip == 0) return RAISE_GPF(0);
         return CS_LIMIT_CHECK(cpu, 0);
     }
@@ -856,7 +853,7 @@ static int INVOKE_INT(cpu_state *cpu, int n, int_cause_t cause) {
 
     uint16_t new_csel, new_ssel;
     uint32_t new_eip, new_esp;
-    int has_to_switch_esp = 0, has_to_disable_irq = (cause == external);
+    int has_to_switch_esp = 0, has_to_disable_irq = 0;
 
     unsigned old_rpl = cpu->CS.rpl;
 
@@ -1965,7 +1962,8 @@ static int MOV_CR(cpu_state *cpu, int cr, uint32_t value) {
             uint32_t set_changed = value & changed;
             if (set_changed & ~cpu->cr0_valid) return cpu_status_gpf;
             cpu->CR[cr] = value;
-            if (changed & 0x80000001) return cpu_status_significant;
+            if (value & 0x80000000) return cpu_status_gpf;
+            // if (changed & 0x80000001) return cpu_status_significant;
             return 0;
         }
         case 3:
@@ -3191,8 +3189,8 @@ static int cpu_step(cpu_state *cpu) {
             case 0xD5: // AAD
             {
                 int param = FETCH8(cpu);
-                uint8_t ax = cpu->AL + cpu->AH * param;
-                cpu->EAX = ax;
+                cpu->AL = SETF8(cpu, cpu->AL + cpu->AH * param);
+                cpu->AH = 0;
                 return 0;
             }
 
@@ -3786,7 +3784,7 @@ static int cpu_step(cpu_state *cpu) {
                     case 0x22: // MOV Cr, reg
                     {
                         if (cpu->cpu_gen < cpu_gen_80386) return cpu_status_ud;
-                        if (!is_kernel(cpu)) return RAISE_GPF(0);
+                        // if (!is_kernel(cpu)) return RAISE_GPF(0);
                         modrm_t modrm;
                         if (!MODRM(cpu, NULL, &modrm)) return cpu_status_ud;
                         if ((1 << modrm.reg) & 0xFEE2) return cpu_status_gpf;
@@ -3797,6 +3795,22 @@ static int cpu_step(cpu_state *cpu) {
                         }
                         return 0;
                     }
+
+                    // case 0x21: // MOV reg, Dr
+                    // case 0x23: // MOV Dr, reg
+                    // {
+                    //     // TODO:
+                    //     if (cpu->cpu_gen < cpu_gen_80386) return cpu_status_ud;
+                    //     if (!is_kernel(cpu)) return RAISE_GPF(0);
+                    //     modrm_t modrm;
+                    //     if (!MODRM(cpu, NULL, &modrm)) return cpu_status_ud;
+                    //     if (inst & 2) {
+                    //         // DO NOTHING
+                    //     } else {
+                    //         cpu->gpr[modrm.rm] = 0;
+                    //     }
+                    //     return 0;
+                    // }
 
                     case 0x30: // WRMSR
                     // case 0x31: // RDTSC
@@ -4330,6 +4344,7 @@ void cpu_reset(cpu_state *cpu, int gen) {
             cpu->flags_mask &= 0x0027FFFF;
             break;
     }
+    cpu->flags_mask_intrm = 0xFFFFFCFF;
     cpu->flags_preserve_iret3 = 0x001B7200;
     cpu->flags_preserve_popf = 0;
     LOAD_FLAGS(cpu, 0, 0);
@@ -4395,15 +4410,16 @@ static int cpu_block(cpu_state *cpu) {
             status = check_irq(cpu);
             if (status) return status;
             if (cpu->TF) {
+                last_known_eip = cpu->EIP;
                 status = cpu_step(cpu);
-                if (status) return status;
+                if (status) goto check;
                 has_to_trace = 0;
                 status = INVOKE_INT(cpu, 1, exception);
                 if (status) return status;
             }
             continue;
         }
-
+check:
         switch (status) {
             // case cpu_status_periodic:
             //     continue;
@@ -4801,8 +4817,7 @@ static inline char *disasm_main(char * p, uint16_t sel, uint32_t eip, uint32_t r
             if (name_ptr) {
                 p = dump_string(p, name_ptr);
             } else {
-                p = dump_string(p, "db 0x");
-                p = dump8(p, opcode);
+                p = dump_string(p, "???");
             }
 
             int n_oplands = 0;

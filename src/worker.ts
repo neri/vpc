@@ -30,7 +30,6 @@ let midi: MPU401;
 (self as any).ps2 = ps2;
 
 (async function() {
-    // wi.print('Loading CPU...\n');
     console.log('Loading CPU...');
     await fetch('./vcpu.wasm')
         .then(res => {
@@ -40,7 +39,6 @@ let midi: MPU401;
         .then(buffer => WebAssembly.instantiate(buffer, env as any))
         .then(wasm => env.loadCPU(wasm.instance))
     
-    // wi.print('Loading BIOS...\n');
     console.log('Loading BIOS...');
     await fetch('./bios.bin')
         .then(res => {

@@ -35,7 +35,12 @@
                     });
                 })
                 .then(buffer => {
-                    $('#labelLocal').value = imageName.slice(1 + imageName.lastIndexOf('/'));
+                    let name = imageName.slice(1 + imageName.lastIndexOf('/'));
+                    const pos = name.indexOf('?');
+                    if (pos > 0) {
+                        name = name.slice(0, pos);
+                    }
+                    $('#labelLocal').value = name;
                     target.removeAttribute('disabled');
                     callback(buffer);
                 })
@@ -734,7 +739,7 @@ const unicodeMap = [
             <a id="buttonReset" class="buttonFace destructiveButton">RESET</a>
             <select id="selDiskImage">
                 <option value=""></option>
-                <option value="./bin/fdos.img" selected>FreeDOS</option>
+                <option value="./bin/fdos.img?123" selected>FreeDOS</option>
                 <option value="./bin/floppybird.img">Floppy Bird</option>
                 <option value="./bin/haribote.img">Haribote OS</option>
                 <option value="./bin/osz.img">osz</option>

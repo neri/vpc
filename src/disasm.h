@@ -590,8 +590,8 @@ opmap_t opcode2[256] = {
 
     { "MOV", NULL, optype_RdCd },
     { "MOV", NULL, optype_RdDd },
-    { "MOV", NULL, optype_DdRd },
     { "MOV", NULL, optype_CdRd },
+    { "MOV", NULL, optype_DdRd },
     { NULL, NULL, optype_undefined },
     { NULL, NULL, optype_undefined },
     { NULL, NULL, optype_undefined },

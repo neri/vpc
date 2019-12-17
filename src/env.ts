@@ -197,19 +197,19 @@ export class RuntimeEnvironment {
                     timer = expected - now;
                     if (timer < 0) timer = 0;
                     break;
-                case 1:
-                    const cr0 = this.getReg('CR0');
-                    let mode: string[] = [];
-                    if (cr0 & 0x80000000) {
-                        mode.push('Paged');
-                    }
-                    if (cr0 & 0x00000001) {
-                        mode.push('Protected Mode');
-                    } else {
-                        mode.push('Real Mode');
-                    }
-                    console.log(`CPU Mode Change: ${('00000000' + cr0.toString(16)).slice(-8)} ${mode.join(' ')}`);
-                    break;
+                // case 1:
+                //     const cr0 = this.getReg('CR0');
+                //     let mode: string[] = [];
+                //     if (cr0 & 0x80000000) {
+                //         mode.push('Paged');
+                //     }
+                //     if (cr0 & 0x00000001) {
+                //         mode.push('Protected Mode');
+                //     } else {
+                //         mode.push('Real Mode');
+                //     }
+                //     console.log(`CPU Mode Change: ${('00000000' + cr0.toString(16)).slice(-8)} ${mode.join(' ')}`);
+                //     break;
                 default:
                     // timer = 1;
             }
