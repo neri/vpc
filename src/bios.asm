@@ -40,6 +40,7 @@
 %define CRTC_PORT           0x3B4
 
 %define VPC_MEM_PORT        0xFC00
+%define VPC_VGA_PORT        0xFC04
 %define VPC_FD_PORT         0xFD00
 
 %define BDA_SEG             0x0040
@@ -80,6 +81,10 @@ _int10_ftbl:
     dw i1010, i1011, i1012, i1013, i1014, i1015, i1016, i1017
     dw i1018, i1019, i101A, i101B, i101C, i101D, i101E, i101F
 _int10_etbl:
+
+_int104F_ftbl:
+    dw i104F00, i104F01, i104F02
+_int104F_etbl:
 
 _int16_ftbl:
     dw i1600, i1601, i1602
@@ -294,7 +299,14 @@ _int10:
     mov si, _int10_ftbl
     jmp bios_invoker
 .not_supported:
-    ; db 0xF1
+    cmp ah, 0x4F
+    jnz .no_vbe
+    cmp al, (_int104F_etbl - _int104F_ftbl) / 2
+    jae .no_vbe
+    mov ah, al
+    mov si, _int104F_ftbl
+    jmp bios_invoker
+.no_vbe:
     jmp bios_exit
 
 
@@ -390,41 +402,31 @@ i1000: ;; SET VIDEO MODE
     ret
 
 .mode_03:
-    mov dx, 0x3C0
-    mov al, 0x10
-    out dx, al
-    inc dx
-    xor al, al
-    out dx, al
     mov ax, 0xB800
     mov es, ax
     xor di, di
     mov ax, 0x0720
     mov cx, 80 * 25
     rep stosw
-    mov al, 3
+    mov ax, 3
 .set_mode:
     mov cx, BDA_SEG
     mov ds, cx
     mov [BDA_VGA_CURRENT_MODE], al
+    mov dx, VPC_VGA_PORT
+    out dx, ax
     xor dx, dx
     call i1002
     ret
 
 .mode_13:
-    mov dx, 0x3C0
-    mov al, 0x10
-    out dx, al
-    inc dx
-    mov al, 0x41
-    out dx, al
     mov ax, 0xA000
     mov es, ax
     xor di, di
     xor ax, ax
     mov cx, 320 * 200 /2
     rep stosw
-    mov al, 0x13
+    mov ax, 0x13
     jmp .set_mode
 
 
@@ -982,6 +984,78 @@ i1A04:
     mov [bp + STK_CX], cx
     and byte [bp + STK_FLAGS], 0xFE
     ret
+
+
+;; Minimal VBE for haribote OS
+[CPU 386]
+i104F00: ;; GET SuperVGA INFORMATION
+    mov eax, "VESA"
+    stosd
+    mov ax, 0x200
+    stosw
+    mov ax, 0x004F
+    mov [bp + STK_AX], ax
+    ret
+
+i104F01: ;; GET SuperVGA MODE INFORMATION
+    and cx, 0x1FF
+    cmp cx, 0x100
+    jz .mode100
+    cmp cx, 0x101
+    jz .mode101
+    mov ax, 0x014F
+    mov [bp + STK_AX], ax
+    ret
+.mode100:
+    mov edx, 640 + 400 * 0x10000
+    jmp .fill_info
+.mode101:
+    mov edx, 640 + 480 * 0x10000
+;    jmp .fill_info
+.fill_info:
+    xor ax, ax
+    mov cx, 128
+    rep stosw
+    sub di, 256
+    mov ax, 0x00FB
+    stosw
+    xor ax, ax
+    add di, 14
+    mov eax, edx
+    stosw
+    stosd
+    add di, 3
+    mov al, 8
+    stosb
+    xor al, al
+    stosb
+    mov al, 4
+    stosb
+    add di, 12
+    mov eax, 0x000A0000
+    stosd
+
+    mov ax, 0x004F
+    mov [bp + STK_AX], ax
+    ret
+
+i104F02: ;; SET SuperVGA VIDEO MODE
+    mov ax, bx
+    and ax, 0x01FF
+    cmp ax, 0x100
+    jz .mode_ok
+    cmp ax, 0x101
+    jz .mode_ok
+    mov ax, 0x014F
+    mov [bp + STK_AX], ax
+    ret
+.mode_ok:
+    mov dx, VPC_VGA_PORT
+    out dx, ax
+    mov ax, 0x004F
+    mov [bp + STK_AX], ax
+    ret
+[CPU 8086]
 
 
 

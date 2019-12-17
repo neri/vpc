@@ -34,6 +34,7 @@ A PC Emulator implemented by WebAssembly.
 |Feature|Status|
 |-|-|
 |Real Mode| :ok: |
+|A20|Always ON|
 |FPU / MMX / SSE| - |
 |Protected Mode| :ok: |
 |Segmentation| Partially |

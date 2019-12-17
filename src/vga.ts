@@ -9,22 +9,6 @@ const GRAPHICS_MODE = 0x01;
 const SEGMENT_A000 = 0xA0000;
 const SEGMENT_B800 = 0xB8000;
 
-const VBE_DISPI_ID0 = 0xB0C0;
-const VBE_DISPI_ID1 = 0xB0C1;
-
-const VBE_DISPI_INDEX_ID = 0x0;
-const VBE_DISPI_INDEX_XRES = 0x1;
-const VBE_DISPI_INDEX_YRES = 0x2;
-const VBE_DISPI_INDEX_BPP = 0x3;
-const VBE_DISPI_INDEX_ENABLE = 0x4;
-const VBE_DISPI_INDEX_BANK = 0x5;
-const VBE_DISPI_INDEX_VIRT_WIDTH = 0x6;
-const VBE_DISPI_INDEX_VIRT_HEIGHT = 0x7;
-const VBE_DISPI_INDEX_X_OFFSET = 0x8;
-const VBE_DISPI_INDEX_Y_OFFSET = 0x9;
-
-const VBE_DISPI_ENABLED = 0x01;
-
 type Size = [number, number];
 
 export class VGA {
@@ -35,8 +19,6 @@ export class VGA {
     private pal_index: number = 0;
     private pal_read_index: number = 0;
     private env: RuntimeEnvironment;
-    private bgaIndex: number = 0;
-    private bgaData: Uint16Array;
     private crtcIndex: number = 0;
     private crtcData: Uint8Array;
     private attrIndex: number = 0;
@@ -56,8 +38,6 @@ export class VGA {
         }
         this.crtcData = new Uint8Array(24);
         this.attrData = new Uint8Array(32);
-        this.bgaData = new Uint16Array(10);
-        this.bgaData[0] = VBE_DISPI_ID1;
         this._vtrace = 0;
 
         // CRTC
@@ -108,44 +88,8 @@ export class VGA {
             return result;
         });
 
-        // Bochs Graphics Adaptor
-        env.iomgr.onw(0x01CE, (_, data) => this.bgaIndex = data, (_) => this.bgaIndex);
-        env.iomgr.onw(0x01CF, (_, data) => {
-            switch (this.bgaIndex) {
-                case VBE_DISPI_INDEX_ID:
-                    break;
-                case VBE_DISPI_INDEX_XRES:
-                case VBE_DISPI_INDEX_YRES:
-                case VBE_DISPI_INDEX_BPP:
-                case VBE_DISPI_INDEX_VIRT_WIDTH:
-                case VBE_DISPI_INDEX_VIRT_HEIGHT:
-                    this.bgaData[this.bgaIndex] = data;
-                    break;
-                case VBE_DISPI_INDEX_ENABLE:
-                    this.bgaData[this.bgaIndex] = this.bgaSetEnabled(data);
-                    break;
-                case VBE_DISPI_INDEX_BANK:
-                    // TODO:
-                default:
-                    break;
-            }
-        }, (_) => {
-            switch (this.bgaIndex) {
-                case VBE_DISPI_INDEX_ID:
-                case VBE_DISPI_INDEX_XRES:
-                case VBE_DISPI_INDEX_YRES:
-                case VBE_DISPI_INDEX_BPP:
-                case VBE_DISPI_INDEX_ENABLE:
-                case VBE_DISPI_INDEX_BANK:
-                case VBE_DISPI_INDEX_VIRT_WIDTH:
-                case VBE_DISPI_INDEX_VIRT_HEIGHT:
-                case VBE_DISPI_INDEX_X_OFFSET:
-                case VBE_DISPI_INDEX_Y_OFFSET:
-                    return this.bgaData[this.bgaIndex];
-                default:
-                    return 0xFFFF;
-            }
-        });
+        env.iomgr.onw(0xFC04, (_, data) => this.setVGAMode(data));
+
     }
     vtrace(): number {
         this._vtrace ^= 0x08;
@@ -172,38 +116,28 @@ export class VGA {
         }
         return value;
     }
-    bgaSetEnabled(value: number): number {
-        if (value == VBE_DISPI_ENABLED) {
-            this.clearTimer();
-            const xres = this.bgaData[VBE_DISPI_INDEX_XRES];
-            const yres = this.bgaData[VBE_DISPI_INDEX_YRES];
-            const vw = this.bgaData[VBE_DISPI_INDEX_VIRT_WIDTH];
-            const vh = this.bgaData[VBE_DISPI_INDEX_VIRT_HEIGHT];
-            const bpp = this.bgaData[VBE_DISPI_INDEX_BPP];
-            let activated = false;
-            switch (this.packedMode(xres, yres, bpp)) {
-                case this.packedMode(320, 200, 8):
-                    this.vram_base = SEGMENT_A000;
-                    this.vram_size = 320 * 200;
-                    activated = true;
-                    break;
-                case this.packedMode(640, 400, 8):
-                    this.vram_base = SEGMENT_A000;
-                    this.vram_size = 0x10000;
-                    activated = true;
-                    break;
-                default:
-                    break;
-            }
-            if (!activated) {
-                return 0;
-            }
-            this.setMode([xres, yres], [vh, vw], bpp, GRAPHICS_MODE);
-            return 1;
-        } else {
-            this.clearTimer();
-            this.vram_sign = NaN;
-            return 0;
+    setVGAMode(value: number) {
+        switch (value) {
+            case 0x03:
+                this.vram_base = SEGMENT_B800;
+                this.vram_size = 80 * 25 * 2;
+                this.setMode([640, 400], [640, 400], 4, 0);
+                break;
+            case 0x13:
+                this.vram_base = SEGMENT_A000;
+                this.vram_size = 320 * 200;
+                this.setMode([320, 200], [640, 400], 8, GRAPHICS_MODE);
+                break;
+            case 0x100:
+                this.vram_base = SEGMENT_A000;
+                this.vram_size = 640 * 400;
+                this.setMode([640, 400], [640, 400], 8, GRAPHICS_MODE);
+                break;
+            case 0x101:
+                this.vram_base = SEGMENT_A000;
+                this.vram_size = 640 * 480;
+                this.setMode([640, 480], [640, 480], 8, GRAPHICS_MODE);
+                break;
         }
     }
     updateCursor(): void {
