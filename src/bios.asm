@@ -35,6 +35,8 @@
 %define	STK_CS              20
 %define	STK_FLAGS           22
 
+%define FLAGS_ZF            0x40
+
 %define CRTC_PORT           0x3B4
 
 %define VPC_MEM_PORT        0xFC00
@@ -65,12 +67,27 @@ _HEAD:
 
     alignb 2
 
+_isr_table:
+    dw _iret, _iret, _iret, _iret, _iret, _iret, _iret
+    dw _irq0, _irq1, _irq_dummy, _irq_dummy, _irq_dummy, _irq_dummy, _irq_dummy, _irq_dummy
+    dw _int10, _int11, _int12, _int13, _int14, _int15, _int16, _int17
+    dw _int18, _int19, _int1A, _iret, _iret
+_end_isr_table:
+
 _int10_ftbl:
     dw i1000, i1001, i1002, i1003, i1004, i1005, i1006, i1007
     dw i1008, i1009, i100A, i100B, i100C, i100D, i100E, i100F
     dw i1010, i1011, i1012, i1013, i1014, i1015, i1016, i1017
     dw i1018, i1019, i101A, i101B, i101C, i101D, i101E, i101F
 _int10_etbl:
+
+_int16_ftbl:
+    dw i1600, i1601, i1602
+_int16_etbl:
+
+_int1A_ftbl:
+    dw i1A00, _ret, i1A02, _ret, i1A04
+_int1A_etbl:
 
 
 
@@ -233,6 +250,32 @@ _iret:
     iret
 
 
+__invoke:
+    cld
+    mov bl, ah
+    xor bh, bh
+    add bx, bx
+    push word [cs: bx + si]
+    mov bx, [bp + STK_BX]
+    mov si, [bp + STK_SI]
+_ret:
+    ret
+
+bios_invoker:
+    call __invoke
+bios_exit:
+    pop ax
+    pop cx
+    pop dx
+    pop bx
+    pop si
+    pop di
+    pop bp
+    pop ds
+    pop es
+    iret
+
+
 ;; VIDEO BIOS
 _int10:
     push es
@@ -245,36 +288,67 @@ _int10:
     push cx
     push ax
     mov bp, sp
-    cld
-    push cs
-    pop ds
 
     cmp ah, (_int10_etbl - _int10_ftbl) / 2
-    ja .not_supported
-    call i10_caller
-.end:
-    pop ax
-    pop cx
-    pop dx
-    pop bx
-    pop si
-    pop di
-    pop bp
-    pop ds
-    pop es
-    iret
+    jae .not_supported
+    mov si, _int10_ftbl
+    jmp bios_invoker
 .not_supported:
     ; db 0xF1
-    jmp .end
+    jmp bios_exit
 
-i10_caller:
-    mov bl, ah
-    xor bh, bh
-    add bx, bx
-    mov bx, [_int10_ftbl + bx]
+
+;; Keyboard BIOS
+_int16:
+    push es
+    push ds
+    push bp
+    push di
+    push si
     push bx
-    mov bx, [bp + STK_BX]
-    ret
+    push dx
+    push cx
+    push ax
+    mov bp, sp
+
+    mov bx, BDA_SEG
+    mov ds, bx
+
+    cmp ah, (_int16_etbl - _int16_ftbl) / 2
+    jae .not_supported
+    mov si, _int16_ftbl
+    jmp bios_invoker
+.not_supported:
+    xor ax, ax
+    mov [bp + STK_AX],  ax
+    jmp bios_exit
+
+
+;; Clock BIOS
+_int1A:
+    push es
+    push ds
+    push bp
+    push di
+    push si
+    push bx
+    push dx
+    push cx
+    push ax
+    mov bp, sp
+
+    ; mov bx, BDA_SEG
+    ; mov ds, bx
+
+    cmp ah, (_int1A_etbl - _int1A_ftbl) / 2
+    jae .not_supported
+    mov si, _int1A_ftbl
+    jmp bios_invoker
+.not_supported:
+    or byte [bp + STK_AX], 0x01
+    jmp bios_exit
+
+
 
 
 i1004:
@@ -782,34 +856,25 @@ _int14:
 _int15:
     cmp ah, 0x88
     jz i1588
-    stc
-    retf 2
+    push bp
+    mov bp, sp
+    or byte [bp + 6], 0x01
+    pop bp
+    iret
+
 i1588:
     push dx
     mov dx, VPC_MEM_PORT + 2
     in ax, dx
     pop dx
-    clc
-    retf
-
-
-;; Keyboard BIOS
-_int16:
-    cmp ah, 0
-    jz i1600
-    cmp ah, 1
-    jz i1601
-    cmp ah, 2
-    jz i1602
-    xor ax, ax
+    push bp
+    mov bp, sp
+    and byte [bp + 6], 0xFE
+    pop bp
     iret
 
+
 i1600:
-    push ds
-    push bx
-    push cx
-    mov ax, BDA_SEG
-    mov ds, ax
 .loop:
     mov bx, [BDA_KBD_BUFF_HEAD]
     mov ax, [BDA_KBD_BUFF_TAIL]
@@ -824,33 +889,28 @@ i1600:
     and cx, BDA_KBD_BUFF_MASK
     add cx, BDA_KBD_BUFF_BEGIN
     mov [BDA_KBD_BUFF_HEAD], cx
-    pop cx
-    pop bx
-    pop ds
-    iret
+    mov [bp + STK_AX], ax
+    ret
 
 i1601:
-    push ds
-    push bx
-    mov ax, BDA_SEG
-    mov ds, ax
     mov ax, [BDA_KBD_BUFF_TAIL]
     mov bx, [BDA_KBD_BUFF_HEAD]
     sub ax, bx
-    jz .end
+    jz .zero
     mov ax, [bx]
+    xor cl, cl
+    jmp .end
+.zero:
+    mov cl, FLAGS_ZF
 .end:
-    pop bx
-    pop ds
-    retf 2
+    mov [bp + STK_AX], ax
+    mov [bp + STK_FLAGS], cl
+    ret
 
 i1602:
-    push ds
-    mov ax, BDA_SEG
-    mov ds, ax
     mov al, [BDA_KBD_SHIFT]
-    pop ds
-    iret
+    mov [bp + STK_AX], al
+    ret
 
 
 ;; Printer BIOS
@@ -858,28 +918,17 @@ _int17:
     iret
 
 
-;; Clock BIOS
-_int1A:
-    or ah, ah
-    jz i1A00
-    cmp ah, 2
-    jz i1A02
-    cmp ah, 4
-    jz i1A04
-    xor ax, ax
-    stc
-    retf 2
 i1A00:
-    cli
-    push ds
     xor cx, cx
     mov ds, cx
     mov dx, [0x046C]
     mov cx, [0x046E]
     xor al, al
     xchg al, [0x0470]
-    pop ds
-    iret
+    mov [bp + STK_DX], dx
+    mov [bp + STK_CX], cx
+    mov [bp + STK_AX], al
+    ret
 
 i1A02:
 .loop:
@@ -901,8 +950,10 @@ i1A02:
     cmp dh, al
     jnz .loop
     xor dl, dl
-    clc
-    retf 2
+    mov [bp + STK_DX], dx
+    mov [bp + STK_CX], cx
+    and byte [bp + STK_FLAGS], 0xFE
+    ret
 
 i1A04:
 .loop:
@@ -927,23 +978,27 @@ i1A04:
     in al, 0x71
     cmp al, dl
     jnz .loop
-    clc
-    retf 2
+    mov [bp + STK_DX], dx
+    mov [bp + STK_CX], cx
+    and byte [bp + STK_FLAGS], 0xFE
+    ret
+
 
 
 
 _INIT:
     cli
-    xor di, di
-    mov ss, di
+    xor ax, ax
+    mov ss, ax
     mov sp, 0x0400
     mov cx, cs
     mov ds, cx
-    mov es, di
-    push di
+    mov es, ax
+    push ax
     popf
 
     mov cx, 0x200
+    xor di, di
     rep stosw
 
     ;; Install IRQ and BIOS services
@@ -1330,13 +1385,6 @@ boot_fail_msg:
     db 10, "Operating System not found", 10, 0
 
     alignb 2
-_isr_table:
-    dw _iret, _iret, _iret, _iret, _iret, _iret, _iret
-    dw _irq0, _irq1, _irq_dummy, _irq_dummy, _irq_dummy, _irq_dummy, _irq_dummy, _irq_dummy
-    dw _int10, _int11, _int12, _int13, _int14, _int15, _int16, _int17
-    dw _int18, _int19, _int1A, _iret, _iret
-_end_isr_table:
-
 _boot_sound_data:
     dw 2000, 100, 1000, 100
     dw 0xFFFF
