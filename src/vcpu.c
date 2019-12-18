@@ -325,10 +325,9 @@ typedef struct cpu_state {
     };
 
     uint32_t flags_mask, flags_mask1, flags_preserve_popf, flags_preserve_iret3, flags_mask_intrm;
-    int cpu_gen;
-    uint32_t cpu_context, default_context;
     uint32_t cr0_valid, cr4_valid;
     uint32_t cpuid_model_id;
+    unsigned cpu_gen, cpu_context, default_context;
 
 } cpu_state;
 
@@ -677,6 +676,22 @@ static int LOAD_SEL(cpu_state *cpu, sreg_t *sreg, uint16_t value) {
     return 0;
 }
 
+static POP_SEG(cpu_state *cpu, desc_t *desc) {
+    uint32_t old_esp = cpu->ESP;
+    uint16_t sel = POPW(cpu);
+    int status = LOAD_SEL(cpu, desc, sel);
+    if (status >= cpu_status_exception) {
+        if (sel > 3) {
+            cpu->ESP = old_esp;
+        } else {
+            LOAD_SEL8086(cpu, desc, 0);
+            return 0;
+        }
+    }
+    return status;
+}
+
+
 static int LOAD_DESC(cpu_state *cpu, desc_t *desc, uint16_t value, uint32_t type_bitmap) {
     if (cpu->CR0.PE && cpu->VM == 0) {
         uint32_t errcode = value & 0xFFFC;
@@ -782,7 +797,7 @@ static int TSS_switch_context(cpu_state *cpu, desc_t *new_tss, int link) {
     }
     cpu->CR0.TS = 1;
 
-    return 0;
+    return cpu_status_inta;
 }
 
 static int FAR_CALL(cpu_state *cpu, uint16_t new_csel, uint32_t new_eip) {
@@ -2350,7 +2365,7 @@ static int cpu_step(cpu_state *cpu) {
                 return 0;
 
             case 0x07: // POP ES
-                return LOAD_SEL(cpu, &cpu->ES, POPW(cpu));
+                return POP_SEG(cpu, &cpu->ES);
 
             case 0x08: // OR r/m, reg8
             case 0x09:
@@ -2381,7 +2396,7 @@ static int cpu_step(cpu_state *cpu) {
                 return 0;
 
             case 0x17: // POP SS
-                return LOAD_SEL(cpu, &cpu->SS, POPW(cpu));
+                return POP_SEG(cpu, &cpu->SS);
 
             case 0x18: // SBB r/m, reg8
             case 0x19:
@@ -2398,7 +2413,7 @@ static int cpu_step(cpu_state *cpu) {
                 return 0;
 
             case 0x1F: // POP DS
-                return LOAD_SEL(cpu, &cpu->DS, POPW(cpu));
+                return POP_SEG(cpu, &cpu->DS);
 
             case 0x20: // AND r/m, reg8
             case 0x21:
@@ -3902,7 +3917,7 @@ static int cpu_step(cpu_state *cpu) {
                         return 0;
 
                     case 0xA1: // POP FS
-                        return LOAD_SEL(cpu, &cpu->FS, POPW(cpu));
+                        return POP_SEG(cpu, &cpu->FS);
 
                     case 0xA2: // CPUID
                     {
@@ -3934,7 +3949,7 @@ static int cpu_step(cpu_state *cpu) {
                         return 0;
 
                     case 0xA9: // POP GS
-                        return LOAD_SEL(cpu, &cpu->GS, POPW(cpu));
+                        return POP_SEG(cpu, &cpu->GS);
 
                     case 0xAB: // BTS r/m, reg
                     {

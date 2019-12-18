@@ -57,7 +57,7 @@
 %define BDA_KBD_MODE_TYPE   0x0096
 
 %define KBD_MODE_CLEAR_MASK 0xFC
-%define KBD_MODE_LAST_E1    0x02
+%define KBD_MODE_LAST_E1    0x01
 %define KBD_MODE_LAST_E0    0x02
 %define KBD_TYPE_ENHANCED   0x10
 
@@ -257,6 +257,8 @@ _iret:
 
 __invoke:
     cld
+    mov bx, BDA_SEG
+    mov ds, bx
     mov bl, ah
     xor bh, bh
     add bx, bx
@@ -323,9 +325,6 @@ _int16:
     push ax
     mov bp, sp
 
-    mov bx, BDA_SEG
-    mov ds, bx
-
     cmp ah, (_int16_etbl - _int16_ftbl) / 2
     jae .not_supported
     mov si, _int16_ftbl
@@ -348,9 +347,6 @@ _int1A:
     push cx
     push ax
     mov bp, sp
-
-    ; mov bx, BDA_SEG
-    ; mov ds, bx
 
     cmp ah, (_int1A_etbl - _int1A_ftbl) / 2
     jae .not_supported
@@ -396,10 +392,12 @@ i101A:
 i1000: ;; SET VIDEO MODE
     cmp al, 0x03
     jbe .mode_03
+    cmp al, 0x06
+    jz .mode_cga
     cmp al, 0x11
-    jz .mode_11
+    jz .mode_graph
     cmp al, 0x13
-    jz .mode_13
+    jz .mode_graph
     ; db 0xf1
     xor al, al
     ret
@@ -413,8 +411,6 @@ i1000: ;; SET VIDEO MODE
     rep stosw
     mov ax, 3
 .set_mode:
-    mov cx, BDA_SEG
-    mov ds, cx
     mov [BDA_VGA_CURRENT_MODE], al
     mov dx, VPC_VGA_PORT
     out dx, ax
@@ -422,30 +418,29 @@ i1000: ;; SET VIDEO MODE
     call i1002
     ret
 
-.mode_13:
+.mode_cga:
+    push ax
+    mov ax, 0xB800
+    mov es, ax
+    xor di, di
+    xor ax, ax
+    mov cx, 0x2000
+    rep stosw
+    pop ax
+    jmp .set_mode
+
+.mode_graph:
+    push ax
     mov ax, 0xA000
     mov es, ax
     xor di, di
     xor ax, ax
-    mov cx, 320 * 200 /2
+    mov cx, 0x8000
     rep stosw
-    mov ax, 0x13
+    pop ax
     jmp .set_mode
-
-.mode_11:
-    mov ax, 0xA000
-    mov es, ax
-    xor di, di
-    xor ax, ax
-    mov cx, 320 * 200 /2
-    rep stosw
-    mov ax, 0x11
-    jmp .set_mode
-
 
 i100F:
-    mov ax, BDA_SEG
-    mov ds, ax
     mov al, [BDA_VGA_CURRENT_MODE]
     mov [bp+STK_AX], al
     ret
@@ -490,15 +485,11 @@ i1001:
 
 
 i1002:
-    mov ax, BDA_SEG
-    mov ds, ax
     mov [BDA_VGA_CURSOR], dx
     call _bios_set_cursor
     ret
 
 i1003:
-    mov ax, BDA_SEG
-    mov ds, ax
     mov ax, [BDA_VGA_CURSOR]
     mov [bp+STK_DX], ax
     ret
@@ -534,12 +525,8 @@ i1008:
 
 
 i1009:
-    mov cx, BDA_SEG
-    mov ds, cx
     jmp i100E.cont
 i100E:
-    mov cx, BDA_SEG
-    mov ds, cx
     cmp al, 8
     jz .bs
     cmp al, 10
@@ -547,6 +534,8 @@ i100E:
     cmp al, 13
     jz .cr
 .cont:
+    cmp byte [BDA_VGA_CURRENT_MODE], 3
+    ja .end
     call _chk_scroll
     mov dx, [BDA_VGA_CURSOR]
     call _bios_write_char
@@ -1000,43 +989,63 @@ i1A04:
 
 
 ;; Minimal VBE for haribote OS
-[CPU 386]
+    alignb 2
+vesa_info:
+    db "VESA"
+    dw 0x0200
+end_vesa_info:
+
+%define MODE_SIZE   4
+mode_dat:
+    dw 0x100, 640, 400
+    dw 0x101, 640, 480
+    dw 0
+
 i104F00: ;; GET SuperVGA INFORMATION
-    mov eax, "VESA"
-    stosd
-    mov ax, 0x200
-    stosw
+    push cs
+    pop ds
+    mov cx, (end_vesa_info - vesa_info) / 2
+    mov si, vesa_info
+    rep movsw
+
     mov ax, 0x004F
     mov [bp + STK_AX], ax
     ret
 
 i104F01: ;; GET SuperVGA MODE INFORMATION
+    push cs
+    pop ds
     and cx, 0x1FF
-    cmp cx, 0x100
-    jz .mode100
-    cmp cx, 0x101
-    jz .mode101
+    mov si, mode_dat
+.loop:
+    lodsw
+    or ax, ax
+    jz .end
+    cmp ax, cx
+    jz .mode_found
+    add si, MODE_SIZE
+    jmp .loop
+.end:
     mov ax, 0x014F
     mov [bp + STK_AX], ax
     ret
-.mode100:
-    mov edx, 640 + 400 * 0x10000
-    jmp .fill_info
-.mode101:
-    mov edx, 640 + 480 * 0x10000
-;    jmp .fill_info
-.fill_info:
+
+.mode_found:
+
     xor ax, ax
     mov cx, 128
     rep stosw
     sub di, 256
+
     mov ax, 0x00FB
     stosw
     xor ax, ax
     add di, 14
-    mov eax, edx
+    lodsw
     stosw
-    stosd
+    stosw
+    lodsw
+    stosw
     add di, 3
     mov al, 8
     stosb
@@ -1044,31 +1053,37 @@ i104F01: ;; GET SuperVGA MODE INFORMATION
     stosb
     mov al, 4
     stosb
-    add di, 12
-    mov eax, 0x000A0000
-    stosd
+    add di, 14
+    mov ax, 0x000A
+    stosw
 
     mov ax, 0x004F
     mov [bp + STK_AX], ax
     ret
 
 i104F02: ;; SET SuperVGA VIDEO MODE
-    mov ax, bx
-    and ax, 0x01FF
-    cmp ax, 0x100
-    jz .mode_ok
-    cmp ax, 0x101
-    jz .mode_ok
+    push cs
+    pop ds
+    and bx, 0x01FF
+    mov si, mode_dat
+.loop:
+    lodsw
+    or ax, ax
+    jz .end
+    cmp ax, bx
+    jz .mode_found
+    add si, MODE_SIZE
+    jmp .loop
+.end:
     mov ax, 0x014F
     mov [bp + STK_AX], ax
     ret
-.mode_ok:
+.mode_found:
     mov dx, VPC_VGA_PORT
     out dx, ax
     mov ax, 0x004F
     mov [bp + STK_AX], ax
     ret
-[CPU 8086]
 
 
 
@@ -1129,6 +1144,44 @@ _INIT:
     mov di, 0x400 + BDA_VGA_CONSOLE_ROWSm1
     mov al, 24
     stosb
+
+
+    ;; CLEAR MEMORY
+_clear_memory:
+    mov dx, VPC_MEM_PORT
+    in ax, dx
+    mov cl, 6
+    shl ax, cl
+    mov bp, ax
+    xor dx, dx
+    mov di, 0x500
+.loop:
+    mov es, dx
+    xor ax, ax
+    mov cx, di
+    not cx
+    shr cx, 1
+    inc cx
+    rep stosw
+    mov bx, 0x1000
+    add dx, bx
+    sub bp, bx
+    ja .loop
+
+_clear_vram:
+    mov dx, 0xA000
+.loop0:
+    mov es, dx
+    mov cx, 0x8000
+.loop
+    in ax, 0
+    stosw
+    loop .loop
+    mov bx, 0x1000
+    add dx, bx
+    cmp dx, 0xF000
+    jb .loop0
+
 
     ;; init PIC
     mov al, 0xFF
@@ -1206,29 +1259,6 @@ _INIT:
     mov al, 0x01
     out dx, al
     sti
-
-
-    ;; CLEAR MEMORY
-_clear_memory:
-    mov dx, VPC_MEM_PORT
-    in ax, dx
-    mov cl, 6
-    shl ax, cl
-    mov bp, ax
-    xor dx, dx
-    mov di, 0x500
-.loop:
-    mov es, dx
-    xor ax, ax
-    mov cx, di
-    not cx
-    shr cx, 1
-    inc cx
-    rep stosw
-    mov bx, 0x1000
-    add dx, bx
-    sub bp, bx
-    ja .loop
 
 
     ;; INIT VIDEO

@@ -6,6 +6,7 @@ import { WorkerInterface, RuntimeEnvironment } from './env';
 const FPS = 1000 / 10;
 
 const GRAPHICS_MODE = 0x01;
+const CGA_MODE = 0x02;
 const SEGMENT_A000 = 0xA0000;
 const SEGMENT_B800 = 0xB8000;
 
@@ -122,6 +123,11 @@ export class VGA {
                 this.vram_base = SEGMENT_B800;
                 this.vram_size = 80 * 25 * 2;
                 this.setMode([640, 400], [640, 400], 4, 0);
+                break;
+            case 0x06:
+                this.vram_base = SEGMENT_B800;
+                this.vram_size = 0x4000;
+                this.setMode([640, 200], [640, 400], 1, CGA_MODE);
                 break;
             case 0x11:
                 this.vram_base = SEGMENT_A000;
