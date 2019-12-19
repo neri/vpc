@@ -66,8 +66,6 @@
 _HEAD:
     dw SEG_BIOS, SIZE_BIOS
 
-    alignb 2
-
 _isr_table:
     dw _iret, _iret, _iret, _iret, _iret, _iret, _iret
     dw _irq0, _irq1, _irq_dummy, _irq_dummy, _irq_dummy, _irq_dummy, _irq_dummy, _irq_dummy
@@ -93,6 +91,7 @@ _int16_etbl:
 _int1A_ftbl:
     dw i1A00, _ret, i1A02, _ret, i1A04
 _int1A_etbl:
+
 
 
 
@@ -1113,6 +1112,14 @@ _INIT:
     stosw
     loop .loop
 
+    mov cx, 3
+.loop3:
+    xor ax, ax
+    stosw
+    mov ax, 0xF000
+    stosw
+    loop .loop3
+
     ;; BIOS Data Area
     mov di, 0x0400
     mov ax, 0x3F8
@@ -1173,7 +1180,7 @@ _clear_vram:
 .loop0:
     mov es, dx
     mov cx, 0x8000
-.loop
+.loop:
     in ax, 0
     stosw
     loop .loop

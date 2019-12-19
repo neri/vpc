@@ -66,7 +66,7 @@ export class RuntimeEnvironment {
         this.pic = new VPIC(this.iomgr);
         this.pit = new VPIT(this);
         this.rtc = new RTC(this);
-        this.uart = new UART(this, 0x3F8, 4);
+        // this.uart = new UART(this, 0x3F8, 4);
 
         this.iomgr.onw(0x0000, undefined, (_) => Math.random() * 65535);
         this.iomgr.on(0x0CF9, (_port, _data) => this.reset(-1));
@@ -217,9 +217,11 @@ export class RuntimeEnvironment {
         }
     }
     public dequeueUART(): void {
-        const cout = this.uart.dequeueTX();
-        if (cout.length > 0) {
-            this.worker.print(String.fromCharCode(...cout));
+        if (this.uart) {
+            const cout = this.uart.dequeueTX();
+            if (cout.length > 0) {
+                this.worker.print(String.fromCharCode(...cout));
+            }
         }
     }
     public nmi(): void {

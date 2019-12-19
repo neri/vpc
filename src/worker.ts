@@ -28,6 +28,7 @@ const vga = new VGA(env);
 let midi: MPU401;
 (self as any).env = env;
 (self as any).ps2 = ps2;
+(self as any).vga = vga;
 
 (async function() {
     console.log('Loading CPU...');

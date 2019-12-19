@@ -69,8 +69,8 @@ typedef enum cpu_status_t {
     cpu_status_exception = 0x10000,
     cpu_status_exit,
     cpu_status_div,
-    cpu_status_ud = 0x60000,
     cpu_status_exception_base,
+    cpu_status_ud = 0x60000,
     cpu_status_fpu = 0x70000,
     cpu_status_double = 0x80000,
     cpu_status_invalid_tss = 0xA0000,
@@ -118,6 +118,9 @@ typedef struct {
     uint8_t base_2;
     union {
         uint8_t attr_1;
+        struct {
+            uint8_t attr_type5:5;
+        };
         struct {
             uint8_t attr_type:4;
             uint8_t attr_S:1;
@@ -176,14 +179,14 @@ enum {
     SEG_CTX_DEFAULT_ADDR32 = 0x00000020,
 };
 
-enum {
+typedef enum {
     type_bitmap_TSS32       = 0x00000200,
     type_bitmap_LDT         = 0x00000004,
     type_bitmap_INT_GATE    = 0x0000C000,
-    type_bitmap_SEG_ALL     = 0xFFFF0000,
+    type_bitmap_SEG_ALL     = 0xFF0F0000,
     type_bitmap_SEG_EXEC    = 0xFF000000,
-    type_bitmap_SEG_READ    = 0xCCFF0000,
-    type_bitmap_SEG_WRITE   = 0x00CC0000,
+    type_bitmap_SEG_READ    = 0xCC0F0000,
+    type_bitmap_SEG_WRITE   = 0x000C0000,
 } desc_type_bitmap_t;
 
 
@@ -626,105 +629,80 @@ static int is_kernel(cpu_state *cpu) {
 static int LOAD_SEL8086(cpu_state *cpu, sreg_t *sreg, uint16_t value) {
     sreg->sel = value;
     sreg->base = value << 4;
-    sreg->limit = 0xFFFF;
+    sreg->limit = UINT16_MAX;
     sreg->attrs = 0x0093;
     return 0;
 }
 
-// static int LOAD_DESCRIPTOR(cpu_state *cpu, desc_t *target, uint16_t selector, uint32_t type_bitmap, seg_desc_t *table) {
-//     return 0;
-// }
-
-static int LOAD_SEL(cpu_state *cpu, sreg_t *sreg, uint16_t value) {
+static int LOAD_DESCRIPTOR(cpu_state *cpu, desc_t *target, uint16_t selector, desc_type_bitmap_t type_bitmap, int allow_null, seg_desc_t *table) {
     if (!cpu->CR0.PE || cpu->VM) {
-        sreg->sel = value;
-        sreg->base = value << 4;
+        // Real mode or Virtual Mode
+        target->sel = selector;
+        target->base = selector << 4;
+    } else if (selector < 4) {
+        // Null Selector
+        if (allow_null) {
+            target->sel = selector;
+            target->base = 0;
+            target->limit = UINT16_MAX;
+        } else {
+            return RAISE_GPF(0);
+        }
     } else {
-        uint32_t errcode = value & 0xFFFC;
-        unsigned index = value >> 3;
-        unsigned rpl = value & 3;
-        desc_t desc_table = (value & 0x0004) ? cpu->LDT : cpu->GDT;
 
-        // NULL SELECTOR
-        if ((value & 0xFFFC) == 0) return RAISE_GPF(errcode);
+        uint32_t errcode = selector & 0xFFFC;
+        unsigned index = selector >> 3;
+        desc_t desc_table = (selector & 0x0004) ? cpu->LDT : cpu->GDT;
 
-        // Descriptor Table Limit
-        uint32_t chk_limit = value | 7;
-        if (chk_limit > desc_table.limit) return RAISE_GPF(errcode);
+        // Descriptor Table Limit check
+        if ((selector | 7) > desc_table.limit) {
+            return RAISE_GPF(errcode);
+        }
 
         seg_desc_t *xdt = (seg_desc_t *)(mem + desc_table.base);
         seg_desc_t new_desc = xdt[index];
-        if (new_desc.attr_P == 0) return RAISE_NOT_PRESENT(errcode);
-        if (new_desc.attr_S == 0) return RAISE_GPF(errcode);
-        // if (new_desc.attr_DPL != rpl) return RAISE_GPF(errcode);
 
-        xdt[index].attr_1 |= 1;
-        sreg->attrs = new_desc.attr_1 | (new_desc.attr_2 << 8);
-        sreg->base = new_desc.base_1 + (new_desc.base_2 << 16) + (new_desc.base_3 << 24);
+        // Type and Present Check
+        if (type_bitmap) {
+            if (((1 << new_desc.attr_type5) & type_bitmap) == 0) return RAISE_GPF(errcode);
+        }
+        if (new_desc.attr_P == 0) return RAISE_NOT_PRESENT(errcode);
+
+        // Accessed (Segment)
+        if (new_desc.attr_S) {
+            xdt[index].attr_1 |= 1;
+        }
+
+        // Load
+        target->attrs = new_desc.attr_1 | (new_desc.attr_2 << 8);
+        target->base = new_desc.base_1 + (new_desc.base_2 << 16) + (new_desc.base_3 << 24);
         uint32_t limit = new_desc.limit_1 + (new_desc.limit_2 << 16);
         if (new_desc.attr_G) {
             limit = (limit << 12) | 0x00000FFF;
         }
-        sreg->limit = limit;
-        sreg->sel = value;
+        target->limit = limit;
+        target->sel = selector;
     }
-    if (sreg == &cpu->CS) {
-        set_flag_to(&cpu->default_context,
-        CPU_CTX_ADDR32 | CPU_CTX_DATA32 | SEG_CTX_DEFAULT_ADDR32 | SEG_CTX_DEFAULT_DATA32,
-        cpu->CS.attr_D);
+    if (target == &cpu->CS) {
+        if (cpu->VM) {
+            cpu->default_context = 0;
+        } else {
+            set_flag_to(&cpu->default_context,
+            CPU_CTX_ADDR32 | CPU_CTX_DATA32 | SEG_CTX_DEFAULT_ADDR32 | SEG_CTX_DEFAULT_DATA32,
+            cpu->CS.attr_D);
+        }
     }
     return 0;
 }
 
-static int POP_SEG(cpu_state *cpu, desc_t *desc) {
+static int POP_SEG(cpu_state *cpu, desc_t *desc, desc_type_bitmap_t bitmap, int allow_null) {
     uint32_t old_esp = cpu->ESP;
     uint16_t sel = POPW(cpu);
-    int status = LOAD_SEL(cpu, desc, sel);
+    int status = LOAD_DESCRIPTOR(cpu, desc, sel, bitmap, allow_null, NULL);
     if (status >= cpu_status_exception) {
-        if (sel > 3) {
-            cpu->ESP = old_esp;
-        } else {
-            LOAD_SEL8086(cpu, desc, 0);
-            return 0;
-        }
+        cpu->ESP = old_esp;
     }
     return status;
-}
-
-
-static int LOAD_DESC(cpu_state *cpu, desc_t *desc, uint16_t value, uint32_t type_bitmap) {
-    if (cpu->CR0.PE && cpu->VM == 0) {
-        uint32_t errcode = value & 0xFFFC;
-        desc_t desc_table = (value & 0x0004) ? cpu->LDT : cpu->GDT;
-        // NULL SELECTOR
-        if ((value & 0xFFFC) == 0) return cpu_status_gpf;
-
-        // Descriptor Table Limit
-        uint32_t chk_limit = value | 7;
-        if (chk_limit > desc_table.limit) return RAISE_GPF(errcode);
-
-        uint32_t index = value >> 3;
-        int rpl = value & 3;
-        seg_desc_t *gdt = (seg_desc_t *)(mem + desc_table.base);
-        seg_desc_t new_desc = gdt[index];
-        if (new_desc.attr_P == 0) return RAISE_NOT_PRESENT(errcode);
-        if (new_desc.attr_S != 0) return RAISE_GPF(errcode);
-        if (new_desc.attr_DPL != rpl) return RAISE_GPF(errcode);
-        if (((1 << new_desc.attr_type) & type_bitmap) == 0) return RAISE_GPF(errcode);
-
-        desc->attrs = new_desc.attr_1 | (new_desc.attr_2 << 8);
-        desc->base = new_desc.base_1 + (new_desc.base_2 << 16) + (new_desc.base_3 << 24);
-        uint32_t limit = new_desc.limit_1 + (new_desc.limit_2 << 16);
-        if (new_desc.attr_G) {
-            limit = (limit << 12) | 0x00000FFF;
-        }
-        desc->limit = limit;
-        desc->sel = value;
-
-        return 0;
-    } else {
-        return cpu_status_ud;
-    }
 }
 
 typedef struct {
@@ -784,19 +762,20 @@ static int TSS_switch_context(cpu_state *cpu, desc_t *new_tss, int link) {
     cpu->EBP = next->EBP;
     cpu->ESI = next->ESI;
     cpu->EDI = next->EDI;
-    LOAD_DESC(cpu, &cpu->LDT, next->LDT, type_bitmap_LDT);
-    LOAD_SEL(cpu, &cpu->ES, next->ES);
-    LOAD_SEL(cpu, &cpu->CS, next->CS);
-    LOAD_SEL(cpu, &cpu->SS, next->SS);
-    LOAD_SEL(cpu, &cpu->DS, next->DS);
-    LOAD_SEL(cpu, &cpu->FS, next->FS);
-    LOAD_SEL(cpu, &cpu->GS, next->GS);
+    LOAD_DESCRIPTOR(cpu, &cpu->LDT, next->LDT, type_bitmap_LDT, 1, NULL);
+    LOAD_DESCRIPTOR(cpu, &cpu->ES, next->ES, 0, 1, NULL);
+    LOAD_DESCRIPTOR(cpu, &cpu->CS, next->CS, 0, 0, NULL);
+    LOAD_DESCRIPTOR(cpu, &cpu->SS, next->SS, 0, 0, NULL);
+    LOAD_DESCRIPTOR(cpu, &cpu->DS, next->DS, 0, 1, NULL);
+    LOAD_DESCRIPTOR(cpu, &cpu->FS, next->FS, 0, 1, NULL);
+    LOAD_DESCRIPTOR(cpu, &cpu->GS, next->GS, 0, 1, NULL);
 
     if (link) {
         cpu->NT = 1;
     }
     cpu->CR0.TS = 1;
 
+    // return RAISE_INVALID_TSS(new_tss->sel);
     return cpu_status_inta;
 }
 
@@ -804,15 +783,15 @@ static int FAR_CALL(cpu_state *cpu, uint16_t new_csel, uint32_t new_eip) {
 
     if (new_csel == 0 && new_eip == 0) return cpu_status_gpf;
 
-    if (cpu->CR0.PE) return cpu_status_ud;
+    if (cpu->CR0.PE && !cpu->VM) return cpu_status_ud;
 
     uint32_t old_csel = cpu->CS.sel;
     uint32_t old_eip = cpu->EIP;
     sreg_t new_cs;
-    int status = LOAD_SEL(cpu, &new_cs, new_csel);
+    int status = LOAD_DESCRIPTOR(cpu, &new_cs, new_csel, type_bitmap_SEG_EXEC, 0, NULL);
     if (status) return status;
 
-    LOAD_SEL(cpu, &cpu->CS, new_csel);
+    LOAD_DESCRIPTOR(cpu, &cpu->CS, new_csel, 0, 0, NULL);
     cpu->EIP = new_eip;
     PUSHW(cpu, old_csel);
     PUSHW(cpu, old_eip);
@@ -821,14 +800,14 @@ static int FAR_CALL(cpu_state *cpu, uint16_t new_csel, uint32_t new_eip) {
 }
 
 static int FAR_JUMP(cpu_state *cpu, uint16_t new_sel, uint32_t new_eip) {
-    int status = LOAD_SEL(cpu, &cpu->CS, new_sel);
+    int status = LOAD_DESCRIPTOR(cpu, &cpu->CS, new_sel, type_bitmap_SEG_EXEC, 0, NULL);
     if (status == 0) {
         cpu->EIP = new_eip;
         if (new_sel == 0 && new_eip == 0) return cpu_status_gpf;
         return CS_LIMIT_CHECK(cpu, 0);
     } else { // TSS
         desc_t new_tss;
-        status = LOAD_DESC(cpu, &new_tss, new_sel, type_bitmap_TSS32);
+        status = LOAD_DESCRIPTOR(cpu, &new_tss, new_sel, type_bitmap_TSS32, 0, NULL);
         if (status == 0) {
             status = TSS_switch_context(cpu, &new_tss, 0);
         }
@@ -842,25 +821,8 @@ typedef enum {
     external,
 } int_cause_t;
 
-static int INVOKE_INT(cpu_state *cpu, int n, int_cause_t cause) {
-    if (!cpu->CR0.PE) {
-        int idt_offset = cpu->IDT.base + n * 4;
-        uint32_t new_eip = READ_LE16(mem + idt_offset);
-        uint16_t new_csel = READ_LE16(mem + idt_offset + 2);
-
-        PUSHW(cpu, cpu->eflags);
-        PUSHW(cpu, cpu->CS.sel);
-        PUSHW(cpu, cpu->EIP);
-
-        LOAD_SEL(cpu, &cpu->CS, new_csel);
-        cpu->EIP = new_eip;
-        cpu->eflags &= cpu->flags_mask_intrm;
-
-        if (new_csel == 0 && new_eip == 0) return RAISE_GPF(0);
-        return CS_LIMIT_CHECK(cpu, 0);
-    }
-
-    uint32_t errcode = (n << 3) | 2;
+static inline int INVOKE_INT_MAIN(cpu_state *cpu, int n, int_cause_t cause) {
+    uint32_t errcode = n * 8 + 2;
     if (cause == external) errcode |= 1;
 
     uint16_t old_csel = cpu->CS.sel, old_ssel = cpu->SS.sel;
@@ -868,9 +830,8 @@ static int INVOKE_INT(cpu_state *cpu, int n, int_cause_t cause) {
 
     uint16_t new_csel, new_ssel;
     uint32_t new_eip, new_esp;
-    int has_to_switch_esp = 0, has_to_disable_irq = 0;
-
-    unsigned old_rpl = cpu->CS.rpl;
+    int has_to_switch_esp = 0, has_to_disable_irq = 0, from_vm = cpu->VM;
+    unsigned old_rpl = (from_vm) ? 3 : cpu->CS.rpl;
 
     uint32_t chk_limit = (n << 3) | 7;
     if (chk_limit > cpu->IDT.limit) return RAISE_GPF(errcode);
@@ -881,6 +842,11 @@ static int INVOKE_INT(cpu_state *cpu, int n, int_cause_t cause) {
     if (gate.attr_type == type_intr_gate32)
         has_to_disable_irq = 1;
 
+    if (from_vm && cause == software && gate.attr_DPL != 3) {
+        return RAISE_GPF(errcode);
+    }
+
+    cpu->VM = 0;
     new_csel = gate.sel;
     new_eip = gate.offset_1 | (gate.offset_2 << 16);
     unsigned new_rpl = new_csel & 3;
@@ -889,35 +855,75 @@ static int INVOKE_INT(cpu_state *cpu, int n, int_cause_t cause) {
     }
 
     if (new_csel == 0 && new_eip == 0) return RAISE_GPF(errcode);
-    sreg_t new_cs;
-    int status = LOAD_SEL(cpu, &new_cs, new_csel);
+    int status = LOAD_DESCRIPTOR(cpu, &cpu->CS, new_csel, type_bitmap_SEG_EXEC, 0, NULL);
     if (status) return status;
+    cpu->EIP = new_eip;
 
     if (has_to_switch_esp) {
         tss_t *tss = (tss_t *)(mem + cpu->TSS.base);
         new_esp = tss->ESP0;
         new_ssel = tss->SS0;
-        LOAD_SEL(cpu, &cpu->SS, new_ssel);
+        LOAD_DESCRIPTOR(cpu, &cpu->SS, new_ssel, type_bitmap_SEG_WRITE, 0, NULL);
         cpu->ESP = new_esp;
+        if (from_vm) {
+            PUSHW(cpu, cpu->GS.sel);
+            PUSHW(cpu, cpu->FS.sel);
+            PUSHW(cpu, cpu->DS.sel);
+            PUSHW(cpu, cpu->ES.sel);
+            LOAD_DESCRIPTOR(cpu, &cpu->ES, 0, 0, 1, NULL);
+            LOAD_DESCRIPTOR(cpu, &cpu->DS, 0, 0, 1, NULL);
+            LOAD_DESCRIPTOR(cpu, &cpu->FS, 0, 0, 1, NULL);
+            LOAD_DESCRIPTOR(cpu, &cpu->GS, 0, 0, 1, NULL);
+        }
         PUSHW(cpu, old_ssel);
         PUSHW(cpu, old_esp);
     }
-    PUSHW(cpu, cpu->eflags);
+    PUSHW(cpu, old_eflags);
     PUSHW(cpu, old_csel);
     PUSHW(cpu, old_eip);
-
-    LOAD_SEL(cpu, &cpu->CS, new_csel);
-    cpu->EIP = new_eip;
 
     // TODO: refactoring
     if (has_to_disable_irq) {
         cpu->IF = 0;
     }
     cpu->TF = 0;
-    cpu->VM = 0;
     cpu->RF = 0;
     cpu->NT = 0;
-    return CS_LIMIT_CHECK(cpu, 0);
+
+    return 0;
+}
+
+static int INVOKE_INT(cpu_state *cpu, int n, int_cause_t cause) {
+    if (!cpu->CR0.PE) {
+        int idt_offset = cpu->IDT.base + n * 4;
+        uint32_t new_eip = READ_LE16(mem + idt_offset);
+        uint16_t new_csel = READ_LE16(mem + idt_offset + 2);
+
+        PUSHW(cpu, cpu->eflags);
+        PUSHW(cpu, cpu->CS.sel);
+        PUSHW(cpu, cpu->EIP);
+
+        LOAD_DESCRIPTOR(cpu, &cpu->CS, new_csel, 0, 0, NULL);
+        cpu->EIP = new_eip;
+        cpu->eflags &= cpu->flags_mask_intrm;
+
+        if (new_csel == 0 && new_eip == 0) return RAISE_GPF(0);
+        return CS_LIMIT_CHECK(cpu, 0);
+    }
+
+    uint16_t old_csel = cpu->CS.sel, old_ssel = cpu->SS.sel;
+    uint32_t old_eip = cpu->EIP, old_esp = cpu->ESP, old_eflags = cpu->eflags;
+
+    int status = INVOKE_INT_MAIN(cpu, n, cause);
+    if (status >= cpu_status_exception) {
+        LOAD_DESCRIPTOR(cpu, &cpu->CS, old_csel, 0, 0, NULL);
+        cpu->EIP = old_eip;
+        LOAD_DESCRIPTOR(cpu, &cpu->SS, old_ssel, 0, 0, NULL);
+        cpu->ESP = old_eip;
+        cpu->eflags = old_eflags;
+        return status;
+    }
+    return CS_LIMIT_CHECK(cpu, status);
 }
 
 static int FAR_RETURN(cpu_state *cpu, uint16_t n, int is_iret) {
@@ -927,7 +933,7 @@ static int FAR_RETURN(cpu_state *cpu, uint16_t n, int is_iret) {
         // Real Mode or Virtual 8086 Mode
         new_eip = POPW(cpu);
         new_csel = POPW(cpu);
-        LOAD_SEL(cpu, &cpu->CS, new_csel);
+        LOAD_DESCRIPTOR(cpu, &cpu->CS, new_csel, 0, 0, NULL);
         cpu->EIP = new_eip;
         if (is_iret) {
             uint32_t new_fl = POPW(cpu);
@@ -963,7 +969,7 @@ static int FAR_RETURN(cpu_state *cpu, uint16_t n, int is_iret) {
                 uint16_t new_gsel = POPW(cpu);
 
                 LOAD_FLAGS(cpu, new_fl, 0);
-                LOAD_SEL(cpu, &cpu->CS, new_csel);
+                LOAD_DESCRIPTOR(cpu, &cpu->CS, new_csel, 0, 0, NULL);
                 cpu->EIP = new_eip;
                 LOAD_SEL8086(cpu, &cpu->SS, new_ssel);
                 cpu->ESP = new_esp;
@@ -983,13 +989,13 @@ static int FAR_RETURN(cpu_state *cpu, uint16_t n, int is_iret) {
         }
 
         sreg_t temp;
-        int status = LOAD_SEL(cpu, &temp, new_csel);
+        int status = LOAD_DESCRIPTOR(cpu, &temp, new_csel, type_bitmap_SEG_EXEC, 0, NULL);
         if (status) {
             cpu->ESP = old_esp;
             return status;
         }
         if (has_to_switch_esp) {
-            status = LOAD_SEL(cpu, &cpu->SS, new_ssel);
+            status = LOAD_DESCRIPTOR(cpu, &cpu->SS, new_ssel, type_bitmap_SEG_WRITE, 0, NULL);
             if (status) {
                 cpu->ESP = old_esp;
                 if ((status & cpu_status_exception_mask) == cpu_status_gpf) {
@@ -1002,7 +1008,7 @@ static int FAR_RETURN(cpu_state *cpu, uint16_t n, int is_iret) {
         } else {
             cpu->ESP += n;
         }
-        LOAD_SEL(cpu, &cpu->CS, new_csel);
+        LOAD_DESCRIPTOR(cpu, &cpu->CS, new_csel, 0, 0, NULL);
         cpu->EIP = new_eip;
         if (is_iret) {
             if (old_rpl) {
@@ -1913,7 +1919,7 @@ static int LDS(cpu_state *cpu, sreg_t *seg_ovr, sreg_t *target) {
         offset = READ_LE16(set.opr1);
         new_sel = READ_LE16(set.opr1b + 2);
     }
-    int status = LOAD_SEL(cpu, target, new_sel);
+    int status = LOAD_DESCRIPTOR(cpu, target, new_sel, type_bitmap_SEG_READ, 0, NULL);
     if (status) return status;
     if (set.size == 2) {
         cpu->gpr[set.opr2] = offset;
@@ -2365,7 +2371,7 @@ static int cpu_step(cpu_state *cpu) {
                 return 0;
 
             case 0x07: // POP ES
-                return POP_SEG(cpu, &cpu->ES);
+                return POP_SEG(cpu, &cpu->ES, type_bitmap_SEG_READ, 1);
 
             case 0x08: // OR r/m, reg8
             case 0x09:
@@ -2396,7 +2402,7 @@ static int cpu_step(cpu_state *cpu) {
                 return 0;
 
             case 0x17: // POP SS
-                return POP_SEG(cpu, &cpu->SS);
+                return POP_SEG(cpu, &cpu->SS, type_bitmap_SEG_WRITE, 0);
 
             case 0x18: // SBB r/m, reg8
             case 0x19:
@@ -2413,7 +2419,7 @@ static int cpu_step(cpu_state *cpu) {
                 return 0;
 
             case 0x1F: // POP DS
-                return POP_SEG(cpu, &cpu->DS);
+                return POP_SEG(cpu, &cpu->DS, type_bitmap_SEG_READ, 1);
 
             case 0x20: // AND r/m, reg8
             case 0x21:
@@ -2608,7 +2614,8 @@ static int cpu_step(cpu_state *cpu) {
 
             // case 0x62: // BOUND or EVEX
 
-            // case 0x63: // ARPL or MOVSXD
+            case 0x63: // ARPL or MOVSXD
+                return cpu_status_ud;
 
             case 0x64: // prefix FS:
                 seg = &cpu->FS;
@@ -2849,8 +2856,29 @@ static int cpu_step(cpu_state *cpu) {
             }
 
             case 0x8E: // MOV seg, r/m
-                MODRM_W(cpu, seg, 1, &set);
-                return LOAD_SEL(cpu, &cpu->sregs[set.opr2], READ_LE16(set.opr1));
+                {
+                    desc_type_bitmap_t type;
+                    int allow_null = 1;
+                    MODRM_W(cpu, seg, 1, &set);
+                    switch (set.opr2) {
+                        case index_DS:
+                        case index_ES:
+                        case index_FS:
+                        case index_GS:
+                            type = type_bitmap_SEG_READ;
+                            break;
+
+                        case index_SS:
+                            type = type_bitmap_SEG_WRITE;
+                            allow_null = 0;
+                            break;
+
+                        case index_CS:
+                        default:
+                            return cpu_status_ud;
+                    }
+                    return LOAD_DESCRIPTOR(cpu, &cpu->sregs[set.opr2], READ_LE16(set.opr1), type, allow_null, NULL);
+                }
 
             case 0x8F: // /0 POP r/m
                 MODRM_W(cpu, seg, 1, &set);
@@ -3171,7 +3199,7 @@ static int cpu_step(cpu_state *cpu) {
             }
 
             case 0xCD: // INT
-                return INVOKE_INT(cpu, FETCH8(cpu), exception);
+                return INVOKE_INT(cpu, FETCH8(cpu), software);
 
             case 0xCE: // INTO
                 if (cpu->OF) {
@@ -3492,7 +3520,7 @@ static int cpu_step(cpu_state *cpu) {
                             cpu->DX = value >> 16;
                             cpu->OF = cpu->CF = (cpu->DX != 0);
                         } else {
-                            uint64_t value = cpu->EAX * READ_LE32(set.opr1);
+                            uint64_t value = (uint64_t)cpu->EAX * (uint64_t)READ_LE32(set.opr1);
                             cpu->EAX = value;
                             cpu->EDX = value >> 32;
                             cpu->OF = cpu->CF = (cpu->EDX != 0);
@@ -3689,19 +3717,12 @@ static int cpu_step(cpu_state *cpu) {
                             {
                                 if (!is_kernel(cpu)) return RAISE_GPF(0);
                                 uint16_t new_sel = READ_LE16(set.opr1);
-                                if (new_sel & 0xFFFC) {
-                                    return LOAD_DESC(cpu, &cpu->LDT, new_sel, type_bitmap_LDT);
-                                } else {
-                                    cpu->LDT.attrs = 0;
-                                    cpu->LDT.base = 0;
-                                    cpu->LDT.limit = 0;
-                                    cpu->LDT.sel = new_sel;
-                                    return 0;
-                                }
+                                return LOAD_DESCRIPTOR(cpu, &cpu->LDT, new_sel, type_bitmap_LDT, 1, NULL);
                             }
                             case 3: // LTR
                                 if (!is_kernel(cpu)) return RAISE_GPF(0);
-                                return LOAD_DESC(cpu, &cpu->TSS, READ_LE16(set.opr1), type_bitmap_TSS32);
+                                uint16_t new_sel = READ_LE16(set.opr1);
+                                return LOAD_DESCRIPTOR(cpu, &cpu->TSS, new_sel, type_bitmap_TSS32, 0, NULL);
                             // case 4: // VERR
                             // case 5: // VERW
                         }
@@ -3917,7 +3938,7 @@ static int cpu_step(cpu_state *cpu) {
                         return 0;
 
                     case 0xA1: // POP FS
-                        return POP_SEG(cpu, &cpu->FS);
+                        return POP_SEG(cpu, &cpu->FS, type_bitmap_SEG_READ, 1);
 
                     case 0xA2: // CPUID
                     {
@@ -3949,7 +3970,7 @@ static int cpu_step(cpu_state *cpu) {
                         return 0;
 
                     case 0xA9: // POP GS
-                        return POP_SEG(cpu, &cpu->GS);
+                        return POP_SEG(cpu, &cpu->GS, type_bitmap_SEG_READ, 1);
 
                     case 0xAB: // BTS r/m, reg
                     {
@@ -4498,26 +4519,29 @@ WASM_EXPORT int run(cpu_state *cpu) {
             println("**** DIVIDE ERROR");
             dump_regs(cpu, cpu->EIP);
             return status;
+
         case cpu_status_ud:
-            println("**** PANIC: UNDEFINED INSTRUCTION");
-            dump_regs(cpu, cpu->EIP);
-            return status;
+            if (!cpu->VM) {
+                println("**** PANIC: UNDEFINED INSTRUCTION");
+                dump_regs(cpu, cpu->EIP);
+                return status;
+            }
         default:
-            // if (cpu->CR0.PE && status > cpu_status_exception_base) {
-            //     int status2 = INVOKE_INT(cpu, status >> 16, exception);
-            //     if (status2) { // DOUBLE FAULT
-            //         status2 = INVOKE_INT(cpu, 8, exception);
-            //         if (status2 == 0) {
-            //             PUSHW(cpu, 0);
-            //             return 0;
-            //         }
-            //     } else {
-            //         if (status > cpu_status_ud) {
-            //             PUSHW(cpu, status & UINT16_MAX);
-            //         }
-            //         return 0;
-            //     }
-            // }
+            if (cpu->CR0.PE && status > cpu_status_exception_base) {
+                int status2 = INVOKE_INT(cpu, status >> 16, exception);
+                if (status2) { // DOUBLE FAULT
+                    status2 = INVOKE_INT(cpu, 8, exception);
+                    if (status2 == 0) {
+                        PUSHW(cpu, 0);
+                        return 0;
+                    }
+                } else {
+                    if (status > cpu_status_ud) {
+                        PUSHW(cpu, status & UINT16_MAX);
+                    }
+                    return 0;
+                }
+            }
             println("**** PANIC: TRIPLE FAULT!!!");
             dump_regs(cpu, cpu->EIP);
             return status;
@@ -4579,12 +4603,12 @@ WASM_EXPORT void reset(cpu_state *cpu, int gen) {
  * Load Selector into specified Segment for debugging.
  */
 WASM_EXPORT int debug_load_selector(cpu_state *cpu, sreg_t *seg, uint16_t selector) {
-    return LOAD_SEL(cpu, seg, selector);
+    return LOAD_DESCRIPTOR(cpu, seg, selector, type_bitmap_SEG_ALL, 1, NULL);
 }
 
 WASM_EXPORT uint32_t debug_get_segment_base(cpu_state *cpu, uint16_t selector) {
     sreg_t temp;
-    int status = LOAD_SEL(cpu, &temp, selector);
+    int status = LOAD_DESCRIPTOR(cpu, &temp, selector, type_bitmap_SEG_ALL, 1, NULL);
     if (status) return 0;
     return temp.base;
 }
@@ -5146,7 +5170,7 @@ WASM_EXPORT void disasm(cpu_state *cpu, uint32_t sel, uint32_t offset, int count
     char *p = buff;
     int len;
     sreg_t seg;
-    if (LOAD_SEL(cpu, &seg, sel)) {
+    if (LOAD_DESCRIPTOR(cpu, &seg, sel, type_bitmap_SEG_ALL, 1, NULL)) {
         seg.attr_D = cpu->CS.attr_D;
         seg.base = 0;
     }
