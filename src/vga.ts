@@ -174,7 +174,7 @@ export class VGA {
     }
     transferVGA() {
         this.updateCursor();
-        const sign = this.env.get_vram_signature(this.vram_base, this.vram_size);
+        const sign: number = this.env.get_vram_signature(this.vram_base, this.vram_size);
         if (this.vram_sign != sign) {
             this.vram_sign = sign;
             const vram = this.env.dmaRead(this.vram_base, this.vram_size);

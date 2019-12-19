@@ -828,7 +828,7 @@
                     </label>
 
                 </div>
-    
+
                 <div id="cpMidi"></div>
 
                 <div class="controlFrame">
@@ -841,6 +841,15 @@
                         <input id="inputAddress2" type="text" value="" placeholder="0000:0000" size="8">
                         <a id="buttonDisAsm" class="buttonFace">DisAsm</a>
                         <a id="buttonContinue" class="buttonFace">Cont</a>
+                        <input id="debugCmdline" type="text" list="cmdSuggestion" placeholder="COMMAND">
+                        <datalist id="cmdSuggestion">
+                            <option value="?">Help</option>
+                            <option value="t">Step</option>
+                            <option value="c">Continue</option>
+                            <option value="d">Dump &lt;Range&gt;</option>
+                            <option value="r">Register</option>
+                            <option value="u">DisAssemble &lt;Range&gt;</option>
+                        </datalist>
                         <br>
                         <textarea id="devTerminal" cols="80" rows="20" readonly></textarea>
                     </details>

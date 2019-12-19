@@ -89,8 +89,8 @@ export class VFD {
             const sector = new Uint8Array(this.image.buffer, lba * this.bytesPerSector, this.bytesPerSector);
             this.env.dmaWrite(ptr, sector);
             ptr += this.bytesPerSector;
-            this.PTR[0] = ptr;
-            this.PTR[1] = ptr;
+            this.PTR[0] = ptr & 0xFFFF;
+            this.PTR[1] = ptr >> 16;
             this.CNT = counter;
         }
         this.CNT = counter;
@@ -119,8 +119,8 @@ export class VFD {
                 this.image[offset + i] = buffer[i];
             }
             ptr += this.bytesPerSector;
-            this.PTR[0] = ptr;
-            this.PTR[1] = ptr;
+            this.PTR[0] = ptr & 0xFFFF;
+            this.PTR[1] = ptr >> 16;
             this.CNT = counter;
         }
         this.CNT = counter;

@@ -676,7 +676,7 @@ static int LOAD_SEL(cpu_state *cpu, sreg_t *sreg, uint16_t value) {
     return 0;
 }
 
-static POP_SEG(cpu_state *cpu, desc_t *desc) {
+static int POP_SEG(cpu_state *cpu, desc_t *desc) {
     uint32_t old_esp = cpu->ESP;
     uint16_t sel = POPW(cpu);
     int status = LOAD_SEL(cpu, desc, sel);
@@ -4644,13 +4644,13 @@ WASM_EXPORT const char *debug_get_register_map(cpu_state *cpu) {
  * get vram signature
  */
 WASM_EXPORT uint32_t get_vram_signature(uint32_t base, size_t size) {
-    int shift = 17;
+    int shift = 13;
     uint32_t acc = 0;
     uint32_t *vram = (uint32_t *)(mem + base);
     const uint32_t max_vram = size / 4;
     for (int i = 0; i < max_vram; i++) {
         uint32_t v = vram[i];
-        acc = ((acc >> (32 - shift)) | (acc << shift)) ^ v;
+        acc = ((acc >> (32 - shift)) | (acc << shift)) + v;
     }
     return acc;
 }
