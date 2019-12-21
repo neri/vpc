@@ -93,7 +93,7 @@ export class VGA {
 
     }
     vtrace(): number {
-        this._vtrace ^= 0x08;
+        this._vtrace ^= 0x09;
         return this._vtrace;
     }
     crtcDataWrite(index: number, data: number): void {

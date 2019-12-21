@@ -2,11 +2,11 @@
 
 A PC Emulator implemented by WebAssembly.
 
-<img src="images/ss1.png" width="50%"><img src="images/ss2.png" width="50%">
-<img src="images/ss3.png" width="50%"><img src="images/ss4.png" width="50%">
-
 - [Preview website](https://nerry.jp/vpc/)
 - [Repository](https://github.com/neri/vpc)
+
+<img src="images/ss1.png" width="50%"><img src="images/ss2.png" width="50%">
+<img src="images/ss3.png" width="50%"><img src="images/ss4.png" width="50%">
 
 ## THIS VERSION
 
@@ -24,7 +24,7 @@ A PC Emulator implemented by WebAssembly.
 - I/O:
   - **i8259** PIC
   - **i8254** Timer & Sound
-  - **UART**
+  <!-- - **UART** - DISABLED -->
   - **RTC**
   - **MPU-401** - UART mode Only
   - **VGA** - mode 03 and 13 only
@@ -33,14 +33,14 @@ A PC Emulator implemented by WebAssembly.
 
 |Feature|Status|
 |-|-|
-|Real Mode| :ok: |
+|Real Mode| ☑️ |
 |A20|Always ON|
 |FPU / MMX / SSE| - |
-|Protected Mode| :ok: |
-|Segmentation| Partially |
-|Segment Limit| Partially |
+|Protected Mode| ☑️ |
+|Segmentation| Partial |
+|Segment Limit| Partial |
 |TSS|32bit Only|
-|LDT| :ok: |
+|LDT| ☑️ |
 |Task Gate| - |
 |Interrupt / Trap Gate|32bit Only|
 |Call Gate| - |
@@ -60,9 +60,9 @@ A PC Emulator implemented by WebAssembly.
 |FreeDOS|Kernel|It seems working|
 |haribote OS|System|It seems working|
 |elks|System|failed|
-|BootChess|App|buggy|
-|[Floppy Bird](https://github.com/icebreaker/floppybird)|App|Needs a [patch](https://github.com/neri/floppybird/commit/6db932489afd6bbb5bddcdf0185d9f9051914459)|
-|[Invaders game in 512 bytes](https://github.com/nanochess/Invaders)|App|It seems working|
+|BootChess|Game|buggy|
+|[Floppy Bird](https://github.com/icebreaker/floppybird)|Game|Needs a [patch](https://github.com/neri/floppybird/commit/6db932489afd6bbb5bddcdf0185d9f9051914459)|
+|[Invaders game in 512 bytes](https://github.com/nanochess/Invaders)|Game|It seems working|
 
 ## License
 

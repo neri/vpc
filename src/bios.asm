@@ -360,7 +360,6 @@ _int1A:
 
 i1004:
 i1005:
-i100A:
 i100B:
 i100C:
 i100D:
@@ -449,6 +448,7 @@ i1006:
 i1007:
     or al, al
     jz .cls
+    ; TODO:
     ret
 .cls:
     add dx, 0x0001
@@ -522,9 +522,20 @@ i1008:
     mov [bp+STK_AX], ax
     ret
 
-
 i1009:
-    jmp i100E.cont
+    mov dx, [BDA_VGA_CURSOR]
+.loop:
+    call _bios_write_char2
+    loop .loop
+    ret
+
+i100A:
+    mov dx, [BDA_VGA_CURSOR]
+.loop:
+    call _bios_write_char
+    loop .loop
+    ret
+
 i100E:
     cmp al, 8
     jz .bs
@@ -606,19 +617,37 @@ _bios_cursor_addr:
 
 _bios_write_char:
     push ds
-    push bx
+    push si
     push cx
     push ax
     call _bios_cursor_addr
-    xchg ax, bx
+    xchg ax, si
     pop ax
     mov cx, 0xB800
     mov ds, cx
-    mov [bx], al
+    mov [si], al
     pop cx
-    pop bx
+    pop si
     pop ds
-    inc dx
+    inc dl
+    ret
+
+_bios_write_char2:
+    push ds
+    push si
+    push cx
+    push ax
+    call _bios_cursor_addr
+    xchg ax, si
+    pop ax
+    mov cx, 0xB800
+    mov ds, cx
+    mov [si], al
+    mov [si + 1], bl
+    pop cx
+    pop si
+    pop ds
+    inc dl
     ret
 
 _chk_scroll:
