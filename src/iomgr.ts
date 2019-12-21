@@ -9,36 +9,39 @@ type inputHandler = (port: number) => number;
 * I/O Manager
 */
 export class IOManager {
-    private obHandlers: outputHandler[];
-    private ibHandlers: inputHandler[];
-    private owHandlers: outputHandler[];
-    private iwHandlers: inputHandler[];
-    private odHandlers: outputHandler[];
-    private idHandlers: inputHandler[];
+    private obHandlers: outputHandler[] = [];
+    private ibHandlers: inputHandler[] = [];
+    private owHandlers: outputHandler[] = [];
+    private iwHandlers: inputHandler[] = [];
+    private odHandlers: outputHandler[] = [];
+    private idHandlers: inputHandler[] = [];
     ioRedirectMap: Uint32Array;
     private worker: WorkerInterface;
 
     constructor (worker: WorkerInterface) {
         this.worker = worker;
-        this.obHandlers = [];
-        this.ibHandlers = [];
-        this.owHandlers = [];
-        this.iwHandlers = [];
-        this.odHandlers = [];
-        this.idHandlers = [];
         this.ioRedirectMap = new Uint32Array(2048);
     }
+    private setHandler(array: any|undefined[], index: number, value?: any) {
+        if (value) {
+            if (array[index & 0xFFFF]) {
+                throw new Error(`iomgr: The I/O handler at port 0x${index.toString(16)} is already set`);
+            } else {
+                array[index & 0xFFFF] = value;
+            }
+        }
+    }
     public on(port: number, callback1?: outputHandler, callback2?: inputHandler) {
-        if (callback1 != null) this.obHandlers[port & 0xFFFF] = callback1;
-        if (callback2 != null) this.ibHandlers[port & 0xFFFF] = callback2;
+        this.setHandler(this.obHandlers, port, callback1);
+        this.setHandler(this.ibHandlers, port, callback2);
     }
     public onw(port: number, callback1?: outputHandler, callback2?: inputHandler) {
-        if (callback1 != null) this.owHandlers[port & 0xFFFF] = callback1;
-        if (callback2 != null) this.iwHandlers[port & 0xFFFF] = callback2;
+        this.setHandler(this.owHandlers, port, callback1);
+        this.setHandler(this.iwHandlers, port, callback2);
     }
     public ond(port: number, callback1?: outputHandler, callback2?: inputHandler) {
-        if (callback1 != null) this.odHandlers[port & 0xFFFF] = callback1;
-        if (callback2 != null) this.idHandlers[port & 0xFFFF] = callback2;
+        this.setHandler(this.odHandlers, port, callback1);
+        this.setHandler(this.idHandlers, port, callback2);
     }
     public isRedirectRequired(port: number): boolean {
         return (this.ioRedirectMap[port >> 5] & (1 << (port & 31))) != 0;

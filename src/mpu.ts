@@ -4,14 +4,12 @@ import { RuntimeEnvironment } from './env';
 
 export class MPU401 {
     private lastStatus: number | null;
-    private outputBuffer: number[];
-    private inputBuffer: number[];
+    private outputBuffer: number[] = [];
+    private inputBuffer: number[] = [];
     private env: RuntimeEnvironment;
 
     constructor (env: RuntimeEnvironment, base: number) {
         this.env = env;
-        this.outputBuffer = [];
-        this.inputBuffer = [];
 
         env.iomgr.on(base, (_, data) => this.uartOut(data), (_) => this.inputBuffer.shift() || 0);
         env.iomgr.on(base + 1, (_, data) => {
@@ -23,11 +21,10 @@ export class MPU401 {
                     break;
                 case 0x3F: // Enter UART mode
                     console.log('mpu401: enter to uart mode');
+                    this.inputBuffer.push(0xFE);
                     break;
             }
-        }, (_) => {
-            return (this.inputBuffer.length > 0) ? 0 : 0x80;
-        });
+        }, (_) => (this.inputBuffer.length > 0) ? 0 : 0x80);
     }
     uartOut (data: number): void {
         const isStatus = ((data & 0x80) != 0);

@@ -167,7 +167,11 @@ export class VPIT {
                 }
             }
             return false;
-        }, (_) => this.p0061_data);
+        }, (_) => this.p61());
+    }
+    private p61(): number {
+        this.p0061_data ^= 0x10;
+        return this.p0061_data;
     }
     private outCntReg(counter: number, data: number): void {
         if (this.cntPhases[counter] != 1) {

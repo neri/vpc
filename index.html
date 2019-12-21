@@ -35,7 +35,12 @@
                     });
                 })
                 .then(buffer => {
-                    $('#labelLocal').value = imageName.slice(1 + imageName.lastIndexOf('/'));
+                    let name = imageName.slice(1 + imageName.lastIndexOf('/'));
+                    const pos = name.indexOf('?');
+                    if (pos > 0) {
+                        name = name.slice(0, pos);
+                    }
+                    $('#labelLocal').value = name;
                     target.removeAttribute('disabled');
                     callback(buffer);
                 })
@@ -407,6 +412,8 @@
         // Virtual Video Device
         class VideoDevice {
             constructor (devmgr, dom, scale) {
+                this.BLACK = 0xFF000000;
+                this.WHITE = 0xFFFFFFFF;
                 this.scale = scale;
                 this.fontWidth = 8;
                 this.fontHeight = 16;
@@ -414,14 +421,13 @@
                 this.pal16 = [
                         '#000', '#009', '#090', '#099', '#900', '#909', '#990', '#CCC',
                         '#999', '#00F', '#0F0', '#0FF', '#F00', '#F0F', '#FF0', '#FFF', ];
-
+                this.font = "15px/16px 'TerminalWebFont', 'Menlo', 'Monaco', 'Consolas', 'Courier New', 'Courier', monospace";
+                this.cursor = 0xFFFF;
                 this.pal = new Uint32Array(256);
                 this.canvas = dom;
                 this.ctx = this.canvas.getContext('2d');
                 this.ctx.scale(scale, scale);
                 this.res = [0, 0, 0, 0];
-                this.font = "15px/16px 'TerminalWebFont', 'Menlo', 'Monaco', 'Consolas', 'Courier New', 'Courier', monospace";
-                this.cursor = 0xFFFF;
                 this.mode = 0;
 
                 this.updateFont();
@@ -439,7 +445,15 @@
                 });
                 devmgr.onCommand('vga', e => {
                     if (this.grapihicsMode) {
-                        this.renderMode13(e);
+                        if (this.bpp == 1) {
+                            if (this.grapihicsMode == 1) {
+                                this.renderMode11(e);
+                            } else {
+                                this.renderModeCGA(e);
+                            }
+                        } else {
+                            this.renderMode13(e);
+                        }
                     } else {
                         this.renderMode03(e);
                     }
@@ -505,8 +519,10 @@
                 }
             }
             updateFont() {
-// CP437 to Unicode
-const unicodeMap = [
+                const { fontWidth, fontHeight, lineHeight, scale } = this;
+
+                // CP437 to Unicode
+                const unicodeMap = [
 0x0000, 0x263A, 0x263B, 0x2665, 0x2666, 0x2663, 0x2660, 0x2022, 0x25D8, 0x25CB, 0x25D9, 0x2642, 0x2640, 0x266A, 0x266B, 0x263C,
 0x25BA, 0x25C4, 0x2195, 0x203C, 0x00B6, 0x00A7, 0x25AC, 0x21A8, 0x2191, 0x2193, 0x2192, 0x2190, 0x221F, 0x2194, 0x25B2, 0x25BC,
 0x0020, 0x0021, 0x0022, 0x0023, 0x0024, 0x0025, 0x0026, 0x0027, 0x0028, 0x0029, 0x002A, 0x002B, 0x002C, 0x002D, 0x002E, 0x002F,
@@ -524,7 +540,6 @@ const unicodeMap = [
 0x03B1, 0x00DF, 0x0393, 0x03C0, 0x03A3, 0x03C3, 0x00B5, 0x03C4, 0x03A6, 0x0398, 0x03A9, 0x03B4, 0x221E, 0x03C6, 0x03B5, 0x2229,
 0x2261, 0x00B1, 0x2265, 0x2264, 0x2320, 0x2321, 0x00F7, 0x2248, 0x00B0, 0x2219, 0x00B7, 0x221A, 0x207F, 0x00B2, 0x25A0, 0x00A0,
 ];
-                const { fontWidth, fontHeight, lineHeight, scale } = this;
 
                 this.canvasBG = document.createElement('canvas');
                 do {
@@ -615,6 +630,45 @@ const unicodeMap = [
                 let dst = new Uint32Array(image.data.buffer);
                 for (let i = 0; i < size; i++) {
                     dst[i] = this.pal[src[i]];
+                }
+                ctx.putImageData(image, 0, 0);
+            }
+            renderModeCGA(src) {
+                const { ctx, scale, BLACK, WHITE } = this;
+                const { width, height } = this.canvas;
+                const w8 = width >> 3;
+                const h1 = height >> 1;
+                const image = this.gvram;
+                let dst = new Uint32Array(image.data.buffer);
+                let p = 0, q = 0;
+                for (let i = 0; i < h1; i++) {
+                    let r = p + 0x2000;
+                    for (let j = 0; j < w8; j++) {
+                        const c = src[p++];
+                        for (let k = 128 | 0; k != 0; k >>= 1) {
+                            dst[q++] = (c & k) ? WHITE : BLACK;
+                        }
+                    }
+                    for (let j = 0; j < w8; j++) {
+                        const c = src[r++];
+                        for (let k = 128 | 0; k != 0; k >>= 1) {
+                            dst[q++] = (c & k) ? WHITE : BLACK;
+                        }
+                    }
+                }
+                ctx.putImageData(image, 0, 0);
+            }
+            renderMode11(src) {
+                const { ctx, scale, BLACK, WHITE } = this;
+                const size = this.canvas.width * this.canvas.height / 8;
+                const image = this.gvram;
+                let dst = new Uint32Array(image.data.buffer);
+                let j = 0;
+                for (let i = 0; i < size; i++) {
+                    const c = src[i];
+                    for (let k = 128 | 0; k != 0; k >>= 1) {
+                        dst[j++] = (c & k) ? WHITE : BLACK;
+                    }
                 }
                 ctx.putImageData(image, 0, 0);
             }
@@ -769,19 +823,14 @@ const unicodeMap = [
                     <label>
                         Memory:
                         <select id="selMemory">
-                            <!-- <option value="64">64KB</option>
-                            <option value="128">128KB</option>
-                            <option value="256">256KB</option>
-                            <option value="384">384KB</option>
-                            <option value="512">512KB</option> -->
                             <option value="640">640KB</option>
-                            <option value="4096">4MB</option>
                             <option value="16384" selected>16MB</option>
+                            <option value="65536">64MB</option>
                         </select>
                     </label>
 
                 </div>
-    
+
                 <div id="cpMidi"></div>
 
                 <div class="controlFrame">
@@ -789,6 +838,15 @@ const unicodeMap = [
                         <summary class="buttonFace">DevTool</summary>
                         <a id="buttonNMI" class="buttonFace">Step</a>
                         <a id="buttonDevCLS" class="buttonFace destructiveButton">&#x1f5d1;</a>
+                        <!-- <input id="debugCmdline" type="text" list="cmdSuggestion" placeholder="COMMAND">
+                        <datalist id="cmdSuggestion">
+                            <option value="?">Help</option>
+                            <option value="t">Step</option>
+                            <option value="c">Continue</option>
+                            <option value="d">Dump &lt;Range&gt;</option>
+                            <option value="r">Register</option>
+                            <option value="u">DisAssemble &lt;Range&gt;</option>
+                        </datalist> -->
                         <input id="inputAddress" type="text" value="" placeholder="0000000" size="8">
                         <a id="buttonDump" class="buttonFace">Dump</a>
                         <input id="inputAddress2" type="text" value="" placeholder="0000:0000" size="8">

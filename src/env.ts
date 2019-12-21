@@ -66,7 +66,7 @@ export class RuntimeEnvironment {
         this.pic = new VPIC(this.iomgr);
         this.pit = new VPIT(this);
         this.rtc = new RTC(this);
-        this.uart = new UART(this, 0x3F8, 4);
+        // this.uart = new UART(this, 0x3F8, 4);
 
         this.iomgr.onw(0x0000, undefined, (_) => Math.random() * 65535);
         this.iomgr.on(0x0CF9, (_port, _data) => this.reset(-1));
@@ -197,19 +197,19 @@ export class RuntimeEnvironment {
                     timer = expected - now;
                     if (timer < 0) timer = 0;
                     break;
-                case 1:
-                    const cr0 = this.getReg('CR0');
-                    let mode: string[] = [];
-                    if (cr0 & 0x80000000) {
-                        mode.push('Paged');
-                    }
-                    if (cr0 & 0x00000001) {
-                        mode.push('Protected Mode');
-                    } else {
-                        mode.push('Real Mode');
-                    }
-                    console.log(`CPU Mode Change: ${('00000000' + cr0.toString(16)).slice(-8)} ${mode.join(' ')}`);
-                    break;
+                // case 1:
+                //     const cr0 = this.getReg('CR0');
+                //     let mode: string[] = [];
+                //     if (cr0 & 0x80000000) {
+                //         mode.push('Paged');
+                //     }
+                //     if (cr0 & 0x00000001) {
+                //         mode.push('Protected Mode');
+                //     } else {
+                //         mode.push('Real Mode');
+                //     }
+                //     console.log(`CPU Mode Change: ${('00000000' + cr0.toString(16)).slice(-8)} ${mode.join(' ')}`);
+                //     break;
                 default:
                     // timer = 1;
             }
@@ -217,9 +217,11 @@ export class RuntimeEnvironment {
         }
     }
     public dequeueUART(): void {
-        const cout = this.uart.dequeueTX();
-        if (cout.length > 0) {
-            this.worker.print(String.fromCharCode(...cout));
+        if (this.uart) {
+            const cout = this.uart.dequeueTX();
+            if (cout.length > 0) {
+                this.worker.print(String.fromCharCode(...cout));
+            }
         }
     }
     public nmi(): void {

@@ -35,9 +35,12 @@
 %define	STK_CS              20
 %define	STK_FLAGS           22
 
+%define FLAGS_ZF            0x40
+
 %define CRTC_PORT           0x3B4
 
 %define VPC_MEM_PORT        0xFC00
+%define VPC_VGA_PORT        0xFC04
 %define VPC_FD_PORT         0xFD00
 
 %define BDA_SEG             0x0040
@@ -54,7 +57,7 @@
 %define BDA_KBD_MODE_TYPE   0x0096
 
 %define KBD_MODE_CLEAR_MASK 0xFC
-%define KBD_MODE_LAST_E1    0x02
+%define KBD_MODE_LAST_E1    0x01
 %define KBD_MODE_LAST_E0    0x02
 %define KBD_TYPE_ENHANCED   0x10
 
@@ -63,7 +66,12 @@
 _HEAD:
     dw SEG_BIOS, SIZE_BIOS
 
-    alignb 2
+_isr_table:
+    dw _iret, _iret, _iret, _iret, _iret, _iret, _iret
+    dw _irq0, _irq1, _irq_dummy, _irq_dummy, _irq_dummy, _irq_dummy, _irq_dummy, _irq_dummy
+    dw _int10, _int11, _int12, _int13, _int14, _int15, _int16, _int17
+    dw _int18, _int19, _int1A, _iret, _iret
+_end_isr_table:
 
 _int10_ftbl:
     dw i1000, i1001, i1002, i1003, i1004, i1005, i1006, i1007
@@ -71,6 +79,19 @@ _int10_ftbl:
     dw i1010, i1011, i1012, i1013, i1014, i1015, i1016, i1017
     dw i1018, i1019, i101A, i101B, i101C, i101D, i101E, i101F
 _int10_etbl:
+
+_int104F_ftbl:
+    dw i104F00, i104F01, i104F02
+_int104F_etbl:
+
+_int16_ftbl:
+    dw i1600, i1601, i1602
+_int16_etbl:
+
+_int1A_ftbl:
+    dw i1A00, _ret, i1A02, _ret, i1A04
+_int1A_etbl:
+
 
 
 
@@ -233,6 +254,34 @@ _iret:
     iret
 
 
+__invoke:
+    cld
+    mov bx, BDA_SEG
+    mov ds, bx
+    mov bl, ah
+    xor bh, bh
+    add bx, bx
+    push word [cs: bx + si]
+    mov bx, [bp + STK_BX]
+    mov si, [bp + STK_SI]
+_ret:
+    ret
+
+bios_invoker:
+    call __invoke
+bios_exit:
+    pop ax
+    pop cx
+    pop dx
+    pop bx
+    pop si
+    pop di
+    pop bp
+    pop ds
+    pop es
+    iret
+
+
 ;; VIDEO BIOS
 _int10:
     push es
@@ -245,41 +294,72 @@ _int10:
     push cx
     push ax
     mov bp, sp
-    cld
-    push cs
-    pop ds
 
     cmp ah, (_int10_etbl - _int10_ftbl) / 2
-    ja .not_supported
-    call i10_caller
-.end:
-    pop ax
-    pop cx
-    pop dx
-    pop bx
-    pop si
-    pop di
-    pop bp
-    pop ds
-    pop es
-    iret
+    jae .not_supported
+    mov si, _int10_ftbl
+    jmp bios_invoker
 .not_supported:
-    ; db 0xF1
-    jmp .end
+    cmp ah, 0x4F
+    jnz .no_vbe
+    cmp al, (_int104F_etbl - _int104F_ftbl) / 2
+    jae .no_vbe
+    mov ah, al
+    mov si, _int104F_ftbl
+    jmp bios_invoker
+.no_vbe:
+    jmp bios_exit
 
-i10_caller:
-    mov bl, ah
-    xor bh, bh
-    add bx, bx
-    mov bx, [_int10_ftbl + bx]
+
+;; Keyboard BIOS
+_int16:
+    push es
+    push ds
+    push bp
+    push di
+    push si
     push bx
-    mov bx, [bp + STK_BX]
-    ret
+    push dx
+    push cx
+    push ax
+    mov bp, sp
+
+    cmp ah, (_int16_etbl - _int16_ftbl) / 2
+    jae .not_supported
+    mov si, _int16_ftbl
+    jmp bios_invoker
+.not_supported:
+    xor ax, ax
+    mov [bp + STK_AX],  ax
+    jmp bios_exit
+
+
+;; Clock BIOS
+_int1A:
+    push es
+    push ds
+    push bp
+    push di
+    push si
+    push bx
+    push dx
+    push cx
+    push ax
+    mov bp, sp
+
+    cmp ah, (_int1A_etbl - _int1A_ftbl) / 2
+    jae .not_supported
+    mov si, _int1A_ftbl
+    jmp bios_invoker
+.not_supported:
+    or byte [bp + STK_AX], 0x01
+    jmp bios_exit
+
+
 
 
 i1004:
 i1005:
-i100A:
 i100B:
 i100C:
 i100D:
@@ -310,53 +390,55 @@ i101A:
 i1000: ;; SET VIDEO MODE
     cmp al, 0x03
     jbe .mode_03
+    cmp al, 0x06
+    jz .mode_cga
+    cmp al, 0x11
+    jz .mode_graph
     cmp al, 0x13
-    jz .mode_13
+    jz .mode_graph
+    ; db 0xf1
     xor al, al
     ret
 
 .mode_03:
-    mov dx, 0x3C0
-    mov al, 0x10
-    out dx, al
-    inc dx
-    xor al, al
-    out dx, al
     mov ax, 0xB800
     mov es, ax
     xor di, di
     mov ax, 0x0720
     mov cx, 80 * 25
     rep stosw
-    mov al, 3
+    mov ax, 3
 .set_mode:
-    mov cx, BDA_SEG
-    mov ds, cx
     mov [BDA_VGA_CURRENT_MODE], al
+    mov dx, VPC_VGA_PORT
+    out dx, ax
     xor dx, dx
     call i1002
     ret
 
-.mode_13:
-    mov dx, 0x3C0
-    mov al, 0x10
-    out dx, al
-    inc dx
-    mov al, 0x41
-    out dx, al
+.mode_cga:
+    push ax
+    mov ax, 0xB800
+    mov es, ax
+    xor di, di
+    xor ax, ax
+    mov cx, 0x2000
+    rep stosw
+    pop ax
+    jmp .set_mode
+
+.mode_graph:
+    push ax
     mov ax, 0xA000
     mov es, ax
     xor di, di
     xor ax, ax
-    mov cx, 320 * 200 /2
+    mov cx, 0x8000
     rep stosw
-    mov al, 0x13
+    pop ax
     jmp .set_mode
 
-
 i100F:
-    mov ax, BDA_SEG
-    mov ds, ax
     mov al, [BDA_VGA_CURRENT_MODE]
     mov [bp+STK_AX], al
     ret
@@ -366,6 +448,7 @@ i1006:
 i1007:
     or al, al
     jz .cls
+    ; TODO:
     ret
 .cls:
     add dx, 0x0001
@@ -401,15 +484,11 @@ i1001:
 
 
 i1002:
-    mov ax, BDA_SEG
-    mov ds, ax
     mov [BDA_VGA_CURSOR], dx
     call _bios_set_cursor
     ret
 
 i1003:
-    mov ax, BDA_SEG
-    mov ds, ax
     mov ax, [BDA_VGA_CURSOR]
     mov [bp+STK_DX], ax
     ret
@@ -443,14 +522,21 @@ i1008:
     mov [bp+STK_AX], ax
     ret
 
-
 i1009:
-    mov cx, BDA_SEG
-    mov ds, cx
-    jmp i100E.cont
+    mov dx, [BDA_VGA_CURSOR]
+.loop:
+    call _bios_write_char2
+    loop .loop
+    ret
+
+i100A:
+    mov dx, [BDA_VGA_CURSOR]
+.loop:
+    call _bios_write_char
+    loop .loop
+    ret
+
 i100E:
-    mov cx, BDA_SEG
-    mov ds, cx
     cmp al, 8
     jz .bs
     cmp al, 10
@@ -458,6 +544,8 @@ i100E:
     cmp al, 13
     jz .cr
 .cont:
+    cmp byte [BDA_VGA_CURRENT_MODE], 3
+    ja .end
     call _chk_scroll
     mov dx, [BDA_VGA_CURSOR]
     call _bios_write_char
@@ -529,19 +617,37 @@ _bios_cursor_addr:
 
 _bios_write_char:
     push ds
-    push bx
+    push si
     push cx
     push ax
     call _bios_cursor_addr
-    xchg ax, bx
+    xchg ax, si
     pop ax
     mov cx, 0xB800
     mov ds, cx
-    mov [bx], al
+    mov [si], al
     pop cx
-    pop bx
+    pop si
     pop ds
-    inc dx
+    inc dl
+    ret
+
+_bios_write_char2:
+    push ds
+    push si
+    push cx
+    push ax
+    call _bios_cursor_addr
+    xchg ax, si
+    pop ax
+    mov cx, 0xB800
+    mov ds, cx
+    mov [si], al
+    mov [si + 1], bl
+    pop cx
+    pop si
+    pop ds
+    inc dl
     ret
 
 _chk_scroll:
@@ -782,34 +888,25 @@ _int14:
 _int15:
     cmp ah, 0x88
     jz i1588
-    stc
-    retf 2
+    push bp
+    mov bp, sp
+    or byte [bp + 6], 0x01
+    pop bp
+    iret
+
 i1588:
     push dx
     mov dx, VPC_MEM_PORT + 2
     in ax, dx
     pop dx
-    clc
-    retf
-
-
-;; Keyboard BIOS
-_int16:
-    cmp ah, 0
-    jz i1600
-    cmp ah, 1
-    jz i1601
-    cmp ah, 2
-    jz i1602
-    xor ax, ax
+    push bp
+    mov bp, sp
+    and byte [bp + 6], 0xFE
+    pop bp
     iret
 
+
 i1600:
-    push ds
-    push bx
-    push cx
-    mov ax, BDA_SEG
-    mov ds, ax
 .loop:
     mov bx, [BDA_KBD_BUFF_HEAD]
     mov ax, [BDA_KBD_BUFF_TAIL]
@@ -824,33 +921,28 @@ i1600:
     and cx, BDA_KBD_BUFF_MASK
     add cx, BDA_KBD_BUFF_BEGIN
     mov [BDA_KBD_BUFF_HEAD], cx
-    pop cx
-    pop bx
-    pop ds
-    iret
+    mov [bp + STK_AX], ax
+    ret
 
 i1601:
-    push ds
-    push bx
-    mov ax, BDA_SEG
-    mov ds, ax
     mov ax, [BDA_KBD_BUFF_TAIL]
     mov bx, [BDA_KBD_BUFF_HEAD]
     sub ax, bx
-    jz .end
+    jz .zero
     mov ax, [bx]
+    xor cl, cl
+    jmp .end
+.zero:
+    mov cl, FLAGS_ZF
 .end:
-    pop bx
-    pop ds
-    retf 2
+    mov [bp + STK_AX], ax
+    mov [bp + STK_FLAGS], cl
+    ret
 
 i1602:
-    push ds
-    mov ax, BDA_SEG
-    mov ds, ax
     mov al, [BDA_KBD_SHIFT]
-    pop ds
-    iret
+    mov [bp + STK_AX], al
+    ret
 
 
 ;; Printer BIOS
@@ -858,28 +950,17 @@ _int17:
     iret
 
 
-;; Clock BIOS
-_int1A:
-    or ah, ah
-    jz i1A00
-    cmp ah, 2
-    jz i1A02
-    cmp ah, 4
-    jz i1A04
-    xor ax, ax
-    stc
-    retf 2
 i1A00:
-    cli
-    push ds
     xor cx, cx
     mov ds, cx
     mov dx, [0x046C]
     mov cx, [0x046E]
     xor al, al
     xchg al, [0x0470]
-    pop ds
-    iret
+    mov [bp + STK_DX], dx
+    mov [bp + STK_CX], cx
+    mov [bp + STK_AX], al
+    ret
 
 i1A02:
 .loop:
@@ -901,8 +982,10 @@ i1A02:
     cmp dh, al
     jnz .loop
     xor dl, dl
-    clc
-    retf 2
+    mov [bp + STK_DX], dx
+    mov [bp + STK_CX], cx
+    and byte [bp + STK_FLAGS], 0xFE
+    ret
 
 i1A04:
 .loop:
@@ -927,23 +1010,125 @@ i1A04:
     in al, 0x71
     cmp al, dl
     jnz .loop
-    clc
-    retf 2
+    mov [bp + STK_DX], dx
+    mov [bp + STK_CX], cx
+    and byte [bp + STK_FLAGS], 0xFE
+    ret
+
+
+;; Minimal VBE for haribote OS
+    alignb 2
+vesa_info:
+    db "VESA"
+    dw 0x0200
+end_vesa_info:
+
+%define MODE_SIZE   4
+mode_dat:
+    dw 0x100, 640, 400
+    dw 0x101, 640, 480
+    dw 0
+
+i104F00: ;; GET SuperVGA INFORMATION
+    push cs
+    pop ds
+    mov cx, (end_vesa_info - vesa_info) / 2
+    mov si, vesa_info
+    rep movsw
+
+    mov ax, 0x004F
+    mov [bp + STK_AX], ax
+    ret
+
+i104F01: ;; GET SuperVGA MODE INFORMATION
+    push cs
+    pop ds
+    and cx, 0x1FF
+    mov si, mode_dat
+.loop:
+    lodsw
+    or ax, ax
+    jz .end
+    cmp ax, cx
+    jz .mode_found
+    add si, MODE_SIZE
+    jmp .loop
+.end:
+    mov ax, 0x014F
+    mov [bp + STK_AX], ax
+    ret
+
+.mode_found:
+
+    xor ax, ax
+    mov cx, 128
+    rep stosw
+    sub di, 256
+
+    mov ax, 0x00FB
+    stosw
+    xor ax, ax
+    add di, 14
+    lodsw
+    stosw
+    stosw
+    lodsw
+    stosw
+    add di, 3
+    mov al, 8
+    stosb
+    xor al, al
+    stosb
+    mov al, 4
+    stosb
+    add di, 14
+    mov ax, 0x000A
+    stosw
+
+    mov ax, 0x004F
+    mov [bp + STK_AX], ax
+    ret
+
+i104F02: ;; SET SuperVGA VIDEO MODE
+    push cs
+    pop ds
+    and bx, 0x01FF
+    mov si, mode_dat
+.loop:
+    lodsw
+    or ax, ax
+    jz .end
+    cmp ax, bx
+    jz .mode_found
+    add si, MODE_SIZE
+    jmp .loop
+.end:
+    mov ax, 0x014F
+    mov [bp + STK_AX], ax
+    ret
+.mode_found:
+    mov dx, VPC_VGA_PORT
+    out dx, ax
+    mov ax, 0x004F
+    mov [bp + STK_AX], ax
+    ret
+
 
 
 
 _INIT:
     cli
-    xor di, di
-    mov ss, di
+    xor ax, ax
+    mov ss, ax
     mov sp, 0x0400
     mov cx, cs
     mov ds, cx
-    mov es, di
-    push di
+    mov es, ax
+    push ax
     popf
 
     mov cx, 0x200
+    xor di, di
     rep stosw
 
     ;; Install IRQ and BIOS services
@@ -955,6 +1140,14 @@ _INIT:
     mov ax, cs
     stosw
     loop .loop
+
+    mov cx, 3
+.loop3:
+    xor ax, ax
+    stosw
+    mov ax, 0xF000
+    stosw
+    loop .loop3
 
     ;; BIOS Data Area
     mov di, 0x0400
@@ -987,6 +1180,44 @@ _INIT:
     mov di, 0x400 + BDA_VGA_CONSOLE_ROWSm1
     mov al, 24
     stosb
+
+
+    ;; CLEAR MEMORY
+_clear_memory:
+    mov dx, VPC_MEM_PORT
+    in ax, dx
+    mov cl, 6
+    shl ax, cl
+    mov bp, ax
+    xor dx, dx
+    mov di, 0x500
+.loop:
+    mov es, dx
+    xor ax, ax
+    mov cx, di
+    not cx
+    shr cx, 1
+    inc cx
+    rep stosw
+    mov bx, 0x1000
+    add dx, bx
+    sub bp, bx
+    ja .loop
+
+_clear_vram:
+    mov dx, 0xA000
+.loop0:
+    mov es, dx
+    mov cx, 0x8000
+.loop:
+    in ax, 0
+    stosw
+    loop .loop
+    mov bx, 0x1000
+    add dx, bx
+    cmp dx, 0xF000
+    jb .loop0
+
 
     ;; init PIC
     mov al, 0xFF
@@ -1064,29 +1295,6 @@ _INIT:
     mov al, 0x01
     out dx, al
     sti
-
-
-    ;; CLEAR MEMORY
-_clear_memory:
-    mov dx, VPC_MEM_PORT
-    in ax, dx
-    mov cl, 6
-    shl ax, cl
-    mov bp, ax
-    xor dx, dx
-    mov di, 0x500
-.loop:
-    mov es, dx
-    xor ax, ax
-    mov cx, di
-    not cx
-    shr cx, 1
-    inc cx
-    rep stosw
-    mov bx, 0x1000
-    add dx, bx
-    sub bp, bx
-    ja .loop
 
 
     ;; INIT VIDEO
@@ -1330,13 +1538,6 @@ boot_fail_msg:
     db 10, "Operating System not found", 10, 0
 
     alignb 2
-_isr_table:
-    dw _iret, _iret, _iret, _iret, _iret, _iret, _iret
-    dw _irq0, _irq1, _irq_dummy, _irq_dummy, _irq_dummy, _irq_dummy, _irq_dummy, _irq_dummy
-    dw _int10, _int11, _int12, _int13, _int14, _int15, _int16, _int17
-    dw _int18, _int19, _int1A, _iret, _iret
-_end_isr_table:
-
 _boot_sound_data:
     dw 2000, 100, 1000, 100
     dw 0xFFFF

@@ -13,7 +13,6 @@
 |0064|WORD|RO|NO|PS/2 Data (Native)|
 |0070-0071|BYTE|R/W|YES|RTC/CMOS RAM|
 |00A0-00A1|BYTE|R/W|YES|i8259 PIC #2|
-|01CE-01CF|WORD|R/W|BOCHS|Bochs Graphics|
 |0330-0331|BYTE|R/W|MPU|MPU-401|
 |03B0-03DF|BYTE|VARY|VGA|VGA|
 |03F8-03FF|BYTE|R/W|YES|UART COM1|
@@ -39,6 +38,7 @@
 |-|-|-|-|
 |FC00|WORD|RO|Get Conventional Memory Size in KB|
 |FC02|WORD|RO|Get Extended Memory Size in KB|
+|FC04|WORD|WO|Set Video Mode|
 
 ### FDxx: Floppy Controller
 

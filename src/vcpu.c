@@ -69,8 +69,8 @@ typedef enum cpu_status_t {
     cpu_status_exception = 0x10000,
     cpu_status_exit,
     cpu_status_div,
-    cpu_status_ud = 0x60000,
     cpu_status_exception_base,
+    cpu_status_ud = 0x60000,
     cpu_status_fpu = 0x70000,
     cpu_status_double = 0x80000,
     cpu_status_invalid_tss = 0xA0000,
@@ -88,8 +88,8 @@ typedef struct sreg_t {
         uint16_t sel;
         struct {
             uint16_t rpl:2;
-            uint16_t is_ldt:1;
-            uint16_t sel_index:12;
+            uint16_t ti:1;
+            uint16_t sel_index:13;
         };
     };
     uint32_t limit;
@@ -118,6 +118,9 @@ typedef struct {
     uint8_t base_2;
     union {
         uint8_t attr_1;
+        struct {
+            uint8_t attr_type5:5;
+        };
         struct {
             uint8_t attr_type:4;
             uint8_t attr_S:1;
@@ -176,14 +179,14 @@ enum {
     SEG_CTX_DEFAULT_ADDR32 = 0x00000020,
 };
 
-enum {
+typedef enum {
     type_bitmap_TSS32       = 0x00000200,
     type_bitmap_LDT         = 0x00000004,
     type_bitmap_INT_GATE    = 0x0000C000,
-    type_bitmap_SEG_ALL     = 0xFFFF0000,
+    type_bitmap_SEG_ALL     = 0xFF0F0000,
     type_bitmap_SEG_EXEC    = 0xFF000000,
-    type_bitmap_SEG_READ    = 0xCCFF0000,
-    type_bitmap_SEG_WRITE   = 0x00CC0000,
+    type_bitmap_SEG_READ    = 0xCC0F0000,
+    type_bitmap_SEG_WRITE   = 0x000C0000,
 } desc_type_bitmap_t;
 
 
@@ -324,11 +327,11 @@ typedef struct cpu_state {
         };
     };
 
-    uint32_t flags_mask, flags_mask1, flags_preserve_popf, flags_preserve_iret3;
-    int cpu_gen;
-    uint32_t cpu_context, default_context;
+    uint64_t time_stamp_counter;
+    uint32_t flags_mask, flags_mask1, flags_preserve_popf, flags_preserve_iret3, flags_mask_intrm;
     uint32_t cr0_valid, cr4_valid;
     uint32_t cpuid_model_id;
+    unsigned cpu_gen, cpu_context, default_context;
 
 } cpu_state;
 
@@ -351,7 +354,7 @@ WASM_EXPORT void *_init(uint32_t mb) {
 }
 
 
-static void set_flag_to(uint32_t *word, uint32_t mask, int value) {
+static inline void set_flag_to(uint32_t *word, uint32_t mask, int value) {
     if (value) {
         *word |= mask;
     } else {
@@ -360,19 +363,19 @@ static void set_flag_to(uint32_t *word, uint32_t mask, int value) {
 }
 
 
-static int RAISE_GPF(uint16_t errcode) {
+static inline int RAISE_GPF(uint16_t errcode) {
     return cpu_status_gpf | errcode;
 }
 
-static int RAISE_STACK_FAULT(uint16_t errcode) {
+static inline int RAISE_STACK_FAULT(uint16_t errcode) {
     return cpu_status_stack | errcode;
 }
 
-static int RAISE_NOT_PRESENT(uint16_t errcode) {
+static inline int RAISE_NOT_PRESENT(uint16_t errcode) {
     return cpu_status_not_present | errcode;
 }
 
-static int RAISE_INVALID_TSS(uint16_t errcode) {
+static inline int RAISE_INVALID_TSS(uint16_t errcode) {
     return cpu_status_invalid_tss | errcode;
 }
 
@@ -423,7 +426,7 @@ char *dump_string(char *p, const char *s) {
 // resolve segment override
 #define SEGMENT(def) (seg ? seg : def)
 
-static uint8_t *LEA_REG8(cpu_state *cpu, int index) {
+static inline uint8_t *LEA_REG8(cpu_state *cpu, int index) {
     int i = index & 3;
     uint8_t *p = (uint8_t*)(&cpu->gpr[i]);
     if (index & 4) {
@@ -433,65 +436,39 @@ static uint8_t *LEA_REG8(cpu_state *cpu, int index) {
     }
 }
 
-static void WRITE_REG8(cpu_state *cpu, int index, uint8_t value) {
+static inline void WRITE_REG8(cpu_state *cpu, int index, uint8_t value) {
     *LEA_REG8(cpu, index) = value;
 }
 
-static uint8_t READ_REG8(cpu_state *cpu, int index) {
+static inline uint8_t READ_REG8(cpu_state *cpu, int index) {
     return *LEA_REG8(cpu, index);
 }
 
-static uint16_t READ_LE16(void *la) {
+static inline uint16_t READ_LE16(void *la) {
     if (la == NULL) return UINT16_MAX;
-    if ((uintptr_t)la & 1) {
-        uint8_t *p = la;
-        uint16_t result = p[0] | (p[1] << 8);
-        return result;
-    } else {
-        uint16_t *p = la;
-        return *p;
-    }
+    uint16_t *p = la;
+    return *p;
 }
 
-static uint32_t READ_LE32(void *la) {
+static inline uint32_t READ_LE32(void *la) {
     if (la == NULL) return VOID_MEMORY_VALUE;
-    if ((uintptr_t)la & 3) {
-        uint8_t *p = la;
-        uint32_t result = p[0] | (p[1] << 8) | (p[2] << 16) | (p[3] << 24);
-        return result;
-    } else {
-        uint32_t *p = la;
-        return *p;
-    }
+    uint32_t *p = la;
+    return *p;
 }
 
-static void WRITE_LE16(void *la, uint16_t value) {
+static inline void WRITE_LE16(void *la, uint16_t value) {
     if (la == NULL) return;
-    if ((uintptr_t)la & 1) {
-        uint8_t *p = la;
-        p[0] = value;
-        p[1] = value >> 8;
-    } else {
-        uint16_t *p = la;
-        *p = value;
-    }
+    uint16_t *p = la;
+    *p = value;
 }
 
-static void WRITE_LE32(void *la, uint32_t value) {
+static inline void WRITE_LE32(void *la, uint32_t value) {
     if (la == NULL) return;
-    if ((uintptr_t)la & 3) {
-        uint8_t *p = la;
-        p[0] = value;
-        p[1] = value >> 8;
-        p[2] = value >> 16;
-        p[3] = value >> 24;
-    } else {
-        uint32_t *p = la;
-        *p = value;
-    }
+    uint32_t *p = la;
+    *p = value;
 }
 
-static uint8_t READ_MEM8(sreg_t *sreg, uint32_t offset) {
+static inline uint8_t READ_MEM8(sreg_t *sreg, uint32_t offset) {
     uint32_t linear = sreg->base + offset;
     if (linear < max_mem) {
         return mem[linear];
@@ -500,65 +477,82 @@ static uint8_t READ_MEM8(sreg_t *sreg, uint32_t offset) {
     }
 }
 
-static uint16_t READ_MEM16(sreg_t *sreg, uint32_t offset) {
-    return READ_LE16(mem + sreg->base + offset);
+static inline uint16_t READ_MEM16(sreg_t *sreg, uint32_t offset) {
+    uint32_t linear = sreg->base + offset;
+    if (linear < max_mem) {
+        return READ_LE16(mem + linear);
+    } else {
+        return UINT16_MAX;
+    }
 }
 
-static uint32_t READ_MEM32(sreg_t *sreg, uint32_t offset) {
+static inline uint32_t READ_MEM32(sreg_t *sreg, uint32_t offset) {
     return READ_LE32(mem + sreg->base + offset);
+    uint32_t linear = sreg->base + offset;
+    if (linear < max_mem) {
+        return READ_LE32(mem + linear);
+    } else {
+        return VOID_MEMORY_VALUE;
+    }
 }
 
-static void WRITE_MEM8(sreg_t *sreg, uint32_t offset, int value) {
+static inline void WRITE_MEM8(sreg_t *sreg, uint32_t offset, int value) {
     uint32_t linear = sreg->base + offset;
     if (linear < max_mem) {
         mem[linear] = value;
     }
 }
 
-static void WRITE_MEM16(sreg_t *sreg, uint32_t offset, uint16_t value) {
-    WRITE_LE16(mem + sreg->base + offset, value);
+static inline void WRITE_MEM16(sreg_t *sreg, uint32_t offset, uint16_t value) {
+    uint32_t linear = sreg->base + offset;
+    if (linear < max_mem) {
+        WRITE_LE16(mem + linear, value);
+    }
 }
 
-static void WRITE_MEM32(sreg_t *sreg, uint32_t offset, uint32_t value) {
-    WRITE_LE32(mem + sreg->base + offset, value);
+static inline void WRITE_MEM32(sreg_t *sreg, uint32_t offset, uint32_t value) {
+    uint32_t linear = sreg->base + offset;
+    if (linear < max_mem) {
+        WRITE_LE32(mem + linear, value);
+    }
 }
 
-static int MOVSXB(uint8_t b) {
+static inline int MOVSXB(uint8_t b) {
     return (int)(int8_t)b;
 }
 
-static int MOVSXW(uint16_t w) {
+static inline int MOVSXW(uint16_t w) {
     return (int)(int16_t)w;
 }
 
-static int64_t MOVSXD(uint32_t d) {
+static inline int64_t MOVSXD(uint32_t d) {
     return (int64_t)(int32_t)d;
 }
 
-static int CS_LIMIT_CHECK(cpu_state *cpu, int default_value) {
+static inline int CS_LIMIT_CHECK(cpu_state *cpu, int default_value) {
     if (cpu->EIP > cpu->CS.limit) return cpu_status_gpf;
     return default_value;
 }
 
-static uint8_t FETCH8(cpu_state *cpu) {
+static inline uint8_t FETCH8(cpu_state *cpu) {
     uint8_t result = mem[cpu->CS.base + cpu->EIP];
     cpu->EIP += 1;
     return result;
 }
 
-static uint16_t FETCH16(cpu_state *cpu) {
+static inline uint16_t FETCH16(cpu_state *cpu) {
     uint16_t result = READ_MEM16(&cpu->CS, cpu->EIP);
     cpu->EIP += 2;
     return result;
 }
 
-static uint32_t FETCH32(cpu_state *cpu) {
+static inline uint32_t FETCH32(cpu_state *cpu) {
     uint32_t result = READ_MEM32(&cpu->CS, cpu->EIP);
     cpu->EIP += 4;
     return result;
 }
 
-static uint32_t FETCHW(cpu_state *cpu) {
+static inline uint32_t FETCHW(cpu_state *cpu) {
     if (cpu->cpu_context & CPU_CTX_DATA32) {
         return FETCH32(cpu);
     } else {
@@ -615,101 +609,103 @@ static int _PUSHW(cpu_state *cpu, uint32_t value) {
 }
 #define PUSHW(cpu, v) do { int status = _PUSHW(cpu, v); if (status) return status; } while(0)
 
-static void LOAD_FLAGS(cpu_state *cpu, int value, uint32_t preserve_mask) {
+static inline void LOAD_FLAGS(cpu_state *cpu, int value, uint32_t preserve_mask) {
     cpu->eflags = (cpu->eflags & preserve_mask) | 
         (((value & cpu->flags_mask) | cpu->flags_mask1) & ~preserve_mask);
 }
 
-static int is_kernel(cpu_state *cpu) {
+static inline int is_kernel(cpu_state *cpu) {
     return (!cpu->CR0.PE || (!cpu->VM && (cpu->CS.rpl == 0)));
 }
 
-static int LOAD_SEL8086(cpu_state *cpu, sreg_t *sreg, uint16_t value) {
+static inline int LOAD_SEL8086(cpu_state *cpu, sreg_t *sreg, uint16_t value) {
     sreg->sel = value;
     sreg->base = value << 4;
-    sreg->limit = 0xFFFF;
+    sreg->limit = UINT16_MAX;
     sreg->attrs = 0x0093;
+    if (sreg == &cpu->CS) {
+        cpu->default_context = 0;
+    }
     return 0;
 }
 
-// static int LOAD_DESCRIPTOR(cpu_state *cpu, desc_t *target, uint16_t selector, uint32_t type_bitmap, seg_desc_t *table) {
-//     return 0;
-// }
-
-static int LOAD_SEL(cpu_state *cpu, sreg_t *sreg, uint16_t value) {
+static int LOAD_DESCRIPTOR(cpu_state *cpu, desc_t *target, uint16_t selector, desc_type_bitmap_t type_bitmap, int allow_null, seg_desc_t *table) {
     if (!cpu->CR0.PE || cpu->VM) {
-        sreg->sel = value;
-        sreg->base = value << 4;
+        // Real mode or Virtual Mode
+        target->sel = selector;
+        target->base = selector << 4;
+    } else if (selector < 4) {
+        // Null Selector
+        if (allow_null) {
+            target->sel = selector;
+            target->base = 0;
+            target->limit = UINT16_MAX;
+        } else {
+            return RAISE_GPF(0);
+        }
     } else {
-        uint32_t errcode = value & 0xFFFC;
-        unsigned index = value >> 3;
-        unsigned rpl = value & 3;
-        desc_t desc_table = (value & 0x0004) ? cpu->LDT : cpu->GDT;
 
-        // NULL SELECTOR
-        if ((value & 0xFFFC) == 0) return RAISE_GPF(errcode);
+        uint32_t errcode = selector & 0xFFFC;
+        unsigned index = selector >> 3;
+        desc_t desc_table;
+        if (selector & 0x0004) {
+            desc_table = cpu->LDT;
+            if (!desc_table.sel) {
+                return RAISE_GPF(errcode);
+            }
+        } else {
+            desc_table = cpu->GDT;
+        }
 
-        // Descriptor Table Limit
-        uint32_t chk_limit = value | 7;
-        if (chk_limit > desc_table.limit) return RAISE_GPF(errcode);
+        // Descriptor Table Limit check
+        if ((selector | 7) > desc_table.limit) {
+            return RAISE_GPF(errcode);
+        }
 
         seg_desc_t *xdt = (seg_desc_t *)(mem + desc_table.base);
         seg_desc_t new_desc = xdt[index];
-        if (new_desc.attr_P == 0) return RAISE_NOT_PRESENT(errcode);
-        if (new_desc.attr_S == 0) return RAISE_GPF(errcode);
-        // if (new_desc.attr_DPL != rpl) return RAISE_GPF(errcode);
 
-        xdt[index].attr_1 |= 1;
-        sreg->attrs = new_desc.attr_1 | (new_desc.attr_2 << 8);
-        sreg->base = new_desc.base_1 + (new_desc.base_2 << 16) + (new_desc.base_3 << 24);
+        // Type and Present Check
+        if (type_bitmap) {
+            if (((1 << new_desc.attr_type5) & type_bitmap) == 0) return RAISE_GPF(errcode);
+        }
+        if (new_desc.attr_P == 0) return RAISE_NOT_PRESENT(errcode);
+
+        // Accessed (Segment)
+        if (new_desc.attr_S) {
+            xdt[index].attr_1 |= 1;
+        }
+
+        // Load
+        target->attrs = new_desc.attr_1 | (new_desc.attr_2 << 8);
+        target->base = new_desc.base_1 + (new_desc.base_2 << 16) + (new_desc.base_3 << 24);
         uint32_t limit = new_desc.limit_1 + (new_desc.limit_2 << 16);
         if (new_desc.attr_G) {
             limit = (limit << 12) | 0x00000FFF;
         }
-        sreg->limit = limit;
-        sreg->sel = value;
+        target->limit = limit;
+        target->sel = selector;
     }
-    if (sreg == &cpu->CS) {
-        set_flag_to(&cpu->default_context,
-        CPU_CTX_ADDR32 | CPU_CTX_DATA32 | SEG_CTX_DEFAULT_ADDR32 | SEG_CTX_DEFAULT_DATA32,
-        cpu->CS.attr_D);
+    if (target == &cpu->CS) {
+        if (cpu->VM) {
+            cpu->default_context = 0;
+        } else {
+            set_flag_to(&cpu->default_context,
+            CPU_CTX_ADDR32 | CPU_CTX_DATA32 | SEG_CTX_DEFAULT_ADDR32 | SEG_CTX_DEFAULT_DATA32,
+            cpu->CS.attr_D);
+        }
     }
     return 0;
 }
 
-static int LOAD_DESC(cpu_state *cpu, desc_t *desc, uint16_t value, uint32_t type_bitmap) {
-    if (cpu->CR0.PE && cpu->VM == 0) {
-        uint32_t errcode = value & 0xFFFC;
-        desc_t desc_table = (value & 0x0004) ? cpu->LDT : cpu->GDT;
-        // NULL SELECTOR
-        if ((value & 0xFFFC) == 0) return cpu_status_gpf;
-
-        // Descriptor Table Limit
-        uint32_t chk_limit = value | 7;
-        if (chk_limit > desc_table.limit) return RAISE_GPF(errcode);
-
-        uint32_t index = value >> 3;
-        int rpl = value & 3;
-        seg_desc_t *gdt = (seg_desc_t *)(mem + desc_table.base);
-        seg_desc_t new_desc = gdt[index];
-        if (new_desc.attr_P == 0) return RAISE_NOT_PRESENT(errcode);
-        if (new_desc.attr_S != 0) return RAISE_GPF(errcode);
-        if (new_desc.attr_DPL != rpl) return RAISE_GPF(errcode);
-        if (((1 << new_desc.attr_type) & type_bitmap) == 0) return RAISE_GPF(errcode);
-
-        desc->attrs = new_desc.attr_1 | (new_desc.attr_2 << 8);
-        desc->base = new_desc.base_1 + (new_desc.base_2 << 16) + (new_desc.base_3 << 24);
-        uint32_t limit = new_desc.limit_1 + (new_desc.limit_2 << 16);
-        if (new_desc.attr_G) {
-            limit = (limit << 12) | 0x00000FFF;
-        }
-        desc->limit = limit;
-        desc->sel = value;
-
-        return 0;
-    } else {
-        return cpu_status_ud;
+static int POP_SEG(cpu_state *cpu, desc_t *desc, desc_type_bitmap_t bitmap, int allow_null) {
+    uint32_t old_esp = cpu->ESP;
+    uint16_t sel = POPW(cpu);
+    int status = LOAD_DESCRIPTOR(cpu, desc, sel, bitmap, allow_null, NULL);
+    if (status >= cpu_status_exception) {
+        cpu->ESP = old_esp;
     }
+    return status;
 }
 
 typedef struct {
@@ -734,6 +730,8 @@ typedef struct {
 static int TSS_switch_context(cpu_state *cpu, desc_t *new_tss, int link) {
     tss_t *current = (tss_t *)(mem + cpu->TSS.base);
     tss_t *next = (tss_t *)(mem + new_tss->base);
+
+    // cpu->time_stamp_counter += 500;
 
     current->CR3 = cpu->CR3;
     current->EIP = cpu->EIP;
@@ -769,35 +767,33 @@ static int TSS_switch_context(cpu_state *cpu, desc_t *new_tss, int link) {
     cpu->EBP = next->EBP;
     cpu->ESI = next->ESI;
     cpu->EDI = next->EDI;
-    LOAD_DESC(cpu, &cpu->LDT, next->LDT, type_bitmap_LDT);
-    LOAD_SEL(cpu, &cpu->ES, next->ES);
-    LOAD_SEL(cpu, &cpu->CS, next->CS);
-    LOAD_SEL(cpu, &cpu->SS, next->SS);
-    LOAD_SEL(cpu, &cpu->DS, next->DS);
-    LOAD_SEL(cpu, &cpu->FS, next->FS);
-    LOAD_SEL(cpu, &cpu->GS, next->GS);
+    LOAD_DESCRIPTOR(cpu, &cpu->LDT, next->LDT, type_bitmap_LDT, 1, NULL);
+    LOAD_DESCRIPTOR(cpu, &cpu->ES, next->ES, 0, 1, NULL);
+    LOAD_DESCRIPTOR(cpu, &cpu->CS, next->CS, 0, 0, NULL);
+    LOAD_DESCRIPTOR(cpu, &cpu->SS, next->SS, 0, 0, NULL);
+    LOAD_DESCRIPTOR(cpu, &cpu->DS, next->DS, 0, 1, NULL);
+    LOAD_DESCRIPTOR(cpu, &cpu->FS, next->FS, 0, 1, NULL);
+    LOAD_DESCRIPTOR(cpu, &cpu->GS, next->GS, 0, 1, NULL);
 
-    if (link) {
-        cpu->NT = 1;
-    }
     cpu->CR0.TS = 1;
 
-    return 0;
+    // return RAISE_INVALID_TSS(new_tss->sel);
+    return cpu_status_inta;
 }
 
 static int FAR_CALL(cpu_state *cpu, uint16_t new_csel, uint32_t new_eip) {
 
     if (new_csel == 0 && new_eip == 0) return cpu_status_gpf;
 
-    if (cpu->CR0.PE) return cpu_status_ud;
+    if (cpu->CR0.PE && !cpu->VM) return cpu_status_ud;
 
     uint32_t old_csel = cpu->CS.sel;
     uint32_t old_eip = cpu->EIP;
     sreg_t new_cs;
-    int status = LOAD_SEL(cpu, &new_cs, new_csel);
+    int status = LOAD_DESCRIPTOR(cpu, &new_cs, new_csel, type_bitmap_SEG_EXEC, 0, NULL);
     if (status) return status;
 
-    LOAD_SEL(cpu, &cpu->CS, new_csel);
+    LOAD_DESCRIPTOR(cpu, &cpu->CS, new_csel, 0, 0, NULL);
     cpu->EIP = new_eip;
     PUSHW(cpu, old_csel);
     PUSHW(cpu, old_eip);
@@ -806,14 +802,14 @@ static int FAR_CALL(cpu_state *cpu, uint16_t new_csel, uint32_t new_eip) {
 }
 
 static int FAR_JUMP(cpu_state *cpu, uint16_t new_sel, uint32_t new_eip) {
-    int status = LOAD_SEL(cpu, &cpu->CS, new_sel);
+    int status = LOAD_DESCRIPTOR(cpu, &cpu->CS, new_sel, type_bitmap_SEG_EXEC, 0, NULL);
     if (status == 0) {
         cpu->EIP = new_eip;
         if (new_sel == 0 && new_eip == 0) return cpu_status_gpf;
         return CS_LIMIT_CHECK(cpu, 0);
     } else { // TSS
         desc_t new_tss;
-        status = LOAD_DESC(cpu, &new_tss, new_sel, type_bitmap_TSS32);
+        status = LOAD_DESCRIPTOR(cpu, &new_tss, new_sel, type_bitmap_TSS32, 0, NULL);
         if (status == 0) {
             status = TSS_switch_context(cpu, &new_tss, 0);
         }
@@ -827,6 +823,86 @@ typedef enum {
     external,
 } int_cause_t;
 
+static inline int INVOKE_INT_MAIN(cpu_state *cpu, int n, int_cause_t cause) {
+    int ext = (cause == external);
+    uint32_t errcode = n * 8 + 2;
+    if (ext) errcode |= 1;
+
+    uint16_t old_csel = cpu->CS.sel, old_ssel = cpu->SS.sel;
+    uint32_t old_eip = cpu->EIP, old_esp = cpu->ESP, old_eflags = cpu->eflags;
+
+    uint16_t new_csel, new_ssel;
+    uint32_t new_eip, new_esp;
+    int has_to_switch_esp = 0, has_to_disable_irq = 0, from_vm = cpu->VM;
+    unsigned old_rpl = (from_vm) ? 3 : cpu->CS.rpl;
+
+    if (from_vm && cause == software && cpu->IOPL < 3) RAISE_GPF(errcode);
+
+    uint32_t chk_limit = (n << 3) | 7;
+    if (chk_limit > cpu->IDT.limit) return RAISE_GPF(errcode);
+    gate_desc_t *idt = (gate_desc_t *)(mem + cpu->IDT.base);
+    gate_desc_t gate = idt[n];
+    if (!gate.attr_P) return RAISE_NOT_PRESENT(errcode);
+    switch (gate.attr_type) {
+        case type_trap_gate32:
+            break;
+        case type_intr_gate32:
+            has_to_disable_irq = 1;
+            break;
+        default:
+            return RAISE_GPF(errcode);
+    }
+
+    cpu->VM = 0;
+    new_csel = gate.sel;
+    new_eip = gate.offset_1 | (gate.offset_2 << 16);
+    unsigned new_rpl = new_csel & 3;
+    if (old_rpl > new_rpl) {
+        has_to_switch_esp = 1;
+    }
+
+    if (new_csel == 0 && new_eip == 0) return RAISE_GPF(errcode|1);
+    int status = LOAD_DESCRIPTOR(cpu, &cpu->CS, new_csel, type_bitmap_SEG_EXEC, 0, NULL);
+    if (status) return status | ext;
+    cpu->EIP = new_eip;
+
+    if (has_to_switch_esp) {
+        tss_t *tss = (tss_t *)(mem + cpu->TSS.base);
+        new_esp = tss->ESP0;
+        new_ssel = tss->SS0;
+        status = LOAD_DESCRIPTOR(cpu, &cpu->SS, new_ssel, type_bitmap_SEG_WRITE, 0, NULL);
+        if (status) {
+            return RAISE_INVALID_TSS((status & UINT16_MAX) | ext);
+        }
+        cpu->ESP = new_esp;
+        if (from_vm) {
+            PUSHW(cpu, cpu->GS.sel);
+            PUSHW(cpu, cpu->FS.sel);
+            PUSHW(cpu, cpu->DS.sel);
+            PUSHW(cpu, cpu->ES.sel);
+            LOAD_DESCRIPTOR(cpu, &cpu->ES, 0, 0, 1, NULL);
+            LOAD_DESCRIPTOR(cpu, &cpu->DS, 0, 0, 1, NULL);
+            LOAD_DESCRIPTOR(cpu, &cpu->FS, 0, 0, 1, NULL);
+            LOAD_DESCRIPTOR(cpu, &cpu->GS, 0, 0, 1, NULL);
+        }
+        PUSHW(cpu, old_ssel);
+        PUSHW(cpu, old_esp);
+    }
+    PUSHW(cpu, old_eflags);
+    PUSHW(cpu, old_csel);
+    PUSHW(cpu, old_eip);
+
+    // TODO: refactoring
+    if (has_to_disable_irq) {
+        cpu->IF = 0;
+    }
+    cpu->TF = 0;
+    cpu->RF = 0;
+    cpu->NT = 0;
+
+    return 0;
+}
+
 static int INVOKE_INT(cpu_state *cpu, int n, int_cause_t cause) {
     if (!cpu->CR0.PE) {
         int idt_offset = cpu->IDT.base + n * 4;
@@ -837,75 +913,29 @@ static int INVOKE_INT(cpu_state *cpu, int n, int_cause_t cause) {
         PUSHW(cpu, cpu->CS.sel);
         PUSHW(cpu, cpu->EIP);
 
-        LOAD_SEL(cpu, &cpu->CS, new_csel);
+        LOAD_DESCRIPTOR(cpu, &cpu->CS, new_csel, 0, 0, NULL);
         cpu->EIP = new_eip;
+        cpu->eflags &= cpu->flags_mask_intrm;
 
-        if (cause == external) {
-            cpu->IF = 0;
-        }
-        cpu->TF = 0;
         if (new_csel == 0 && new_eip == 0) return RAISE_GPF(0);
         return CS_LIMIT_CHECK(cpu, 0);
+    } else {
+        uint16_t old_csel = cpu->CS.sel, old_ssel = cpu->SS.sel;
+        uint32_t old_eip = cpu->EIP, old_esp = cpu->ESP, old_eflags = cpu->eflags;
+        int status = INVOKE_INT_MAIN(cpu, n, cause);
+        if (status >= cpu_status_exception) {
+            int status2;
+            status2 = LOAD_DESCRIPTOR(cpu, &cpu->SS, old_ssel, 0, 0, NULL);
+            if (status2 >= cpu_status_exception) return cpu_status_double;
+            cpu->ESP = old_eip;
+            status2 = LOAD_DESCRIPTOR(cpu, &cpu->CS, old_csel, 0, 0, NULL);
+            if (status2 >= cpu_status_exception) return cpu_status_double;
+            cpu->EIP = old_eip;
+            cpu->eflags = old_eflags;
+            return status;
+        }
+        return CS_LIMIT_CHECK(cpu, status);
     }
-
-    uint32_t errcode = (n << 3) | 2;
-    if (cause == external) errcode |= 1;
-
-    uint16_t old_csel = cpu->CS.sel, old_ssel = cpu->SS.sel;
-    uint32_t old_eip = cpu->EIP, old_esp = cpu->ESP, old_eflags = cpu->eflags;
-
-    uint16_t new_csel, new_ssel;
-    uint32_t new_eip, new_esp;
-    int has_to_switch_esp = 0, has_to_disable_irq = (cause == external);
-
-    unsigned old_rpl = cpu->CS.rpl;
-
-    uint32_t chk_limit = (n << 3) | 7;
-    if (chk_limit > cpu->IDT.limit) return RAISE_GPF(errcode);
-    gate_desc_t *idt = (gate_desc_t *)(mem + cpu->IDT.base);
-    gate_desc_t gate = idt[n];
-    if ((gate.attr_type != type_trap_gate32) && (gate.attr_type != type_intr_gate32))
-        return RAISE_GPF(errcode);
-    if (gate.attr_type == type_intr_gate32)
-        has_to_disable_irq = 1;
-
-    new_csel = gate.sel;
-    new_eip = gate.offset_1 | (gate.offset_2 << 16);
-    unsigned new_rpl = new_csel & 3;
-    if (old_rpl > new_rpl) {
-        has_to_switch_esp = 1;
-    }
-
-    if (new_csel == 0 && new_eip == 0) return RAISE_GPF(errcode);
-    sreg_t new_cs;
-    int status = LOAD_SEL(cpu, &new_cs, new_csel);
-    if (status) return status;
-
-    if (has_to_switch_esp) {
-        tss_t *tss = (tss_t *)(mem + cpu->TSS.base);
-        new_esp = tss->ESP0;
-        new_ssel = tss->SS0;
-        LOAD_SEL(cpu, &cpu->SS, new_ssel);
-        cpu->ESP = new_esp;
-        PUSHW(cpu, old_ssel);
-        PUSHW(cpu, old_esp);
-    }
-    PUSHW(cpu, cpu->eflags);
-    PUSHW(cpu, old_csel);
-    PUSHW(cpu, old_eip);
-
-    LOAD_SEL(cpu, &cpu->CS, new_csel);
-    cpu->EIP = new_eip;
-
-    // TODO: refactoring
-    if (has_to_disable_irq) {
-        cpu->IF = 0;
-    }
-    cpu->TF = 0;
-    cpu->VM = 0;
-    cpu->RF = 0;
-    cpu->NT = 0;
-    return CS_LIMIT_CHECK(cpu, 0);
 }
 
 static int FAR_RETURN(cpu_state *cpu, uint16_t n, int is_iret) {
@@ -915,7 +945,7 @@ static int FAR_RETURN(cpu_state *cpu, uint16_t n, int is_iret) {
         // Real Mode or Virtual 8086 Mode
         new_eip = POPW(cpu);
         new_csel = POPW(cpu);
-        LOAD_SEL(cpu, &cpu->CS, new_csel);
+        LOAD_DESCRIPTOR(cpu, &cpu->CS, new_csel, 0, 0, NULL);
         cpu->EIP = new_eip;
         if (is_iret) {
             uint32_t new_fl = POPW(cpu);
@@ -951,7 +981,7 @@ static int FAR_RETURN(cpu_state *cpu, uint16_t n, int is_iret) {
                 uint16_t new_gsel = POPW(cpu);
 
                 LOAD_FLAGS(cpu, new_fl, 0);
-                LOAD_SEL(cpu, &cpu->CS, new_csel);
+                LOAD_SEL8086(cpu, &cpu->CS, new_csel);
                 cpu->EIP = new_eip;
                 LOAD_SEL8086(cpu, &cpu->SS, new_ssel);
                 cpu->ESP = new_esp;
@@ -971,13 +1001,13 @@ static int FAR_RETURN(cpu_state *cpu, uint16_t n, int is_iret) {
         }
 
         sreg_t temp;
-        int status = LOAD_SEL(cpu, &temp, new_csel);
+        int status = LOAD_DESCRIPTOR(cpu, &temp, new_csel, type_bitmap_SEG_EXEC, 0, NULL);
         if (status) {
             cpu->ESP = old_esp;
             return status;
         }
         if (has_to_switch_esp) {
-            status = LOAD_SEL(cpu, &cpu->SS, new_ssel);
+            status = LOAD_DESCRIPTOR(cpu, &cpu->SS, new_ssel, type_bitmap_SEG_WRITE, 0, NULL);
             if (status) {
                 cpu->ESP = old_esp;
                 if ((status & cpu_status_exception_mask) == cpu_status_gpf) {
@@ -990,7 +1020,7 @@ static int FAR_RETURN(cpu_state *cpu, uint16_t n, int is_iret) {
         } else {
             cpu->ESP += n;
         }
-        LOAD_SEL(cpu, &cpu->CS, new_csel);
+        LOAD_DESCRIPTOR(cpu, &cpu->CS, new_csel, 0, 0, NULL);
         cpu->EIP = new_eip;
         if (is_iret) {
             if (old_rpl) {
@@ -1100,141 +1130,124 @@ typedef struct {
     int32_t opr2;
 } operand_set;
 
-static int parse_modrm(int use32, uint32_t rip, int *_skip, modrm_t *result) {
-    const int REG_NOT_SELECTED = -1;
-    int len = 1;
-    result->modrm = mem[rip];
+static int MODRM(cpu_state *cpu, sreg_t *seg_ovr, modrm_t *result) {
+    modrm_t modrm;
+    uint32_t rip = cpu->CS.base + cpu->EIP;
+    modrm.modrm = mem[rip];
+    if (modrm.mod == 3) {
+        result->modrm = modrm.modrm;
+        cpu->EIP++;
+        return 3;
+    }
 
-    result->parsed.d32 = 0;
-    result->parsed.reg = result->reg;
-    int mod = result->mod;
-    if (mod == 3) {
-        result->parsed.base = result->rm;
-    } else {
-        int base = REG_NOT_SELECTED, index = REG_NOT_SELECTED;
-        if (use32) {
-            result->parsed.use32 = 1;
-            if (result->rm != 4) {
-                base = result->rm;
-            } else {
-                result->sib = mem[rip + len];
-                len++;
-                base = result->base;
-                if (result->index != 4) {
-                    index = result->index;
-                    result->parsed.scale = result->scale;
+    int skip = 1, use_ss = 0;
+    uint32_t offset = 0;
+    int mod = modrm.mod;
+    if (cpu->cpu_context & CPU_CTX_ADDR32) {
+        if (modrm.rm != 4) {
+            if (modrm.rm == index_EBP) {
+                if (mod == 0) {
+                    mod = 4;
+                } else {
+                    use_ss = 1;
+                    offset = cpu->EBP;
                 }
-            }
-            if (mod == 0 && base == index_EBP) {
-                base = REG_NOT_SELECTED;
-                mod = 4;
-            }
-            if (mod == 2) {
-                mod = 4;
+            } else {
+                offset = cpu->gpr[modrm.rm];
             }
         } else {
-            switch (result->rm) {
-                case 0:
-                    base = index_BX;
-                    index = index_SI;
-                    break;
-                case 1:
-                    base = index_BX;
-                    index = index_DI;
-                    break;
-                case 2:
-                    base = index_BP;
-                    index = index_SI;
-                    break;
-                case 3:
-                    base = index_BP;
-                    index = index_DI;
-                    break;
-                case 4:
-                    base = index_SI;
-                    break;
-                case 5:
-                    base = index_DI;
-                    break;
-                case 6:
-                    if (mod == 0) {
-                        mod = 2;
-                    } else {
-                        base = index_BP;
-                    }
-                    break;
-                case 7:
-                    base = index_BX;
-                    break;
+            modrm.sib = mem[rip + skip];
+            skip++;
+
+            if (modrm.base == index_EBP) {
+                if (mod == 0) {
+                    mod = 4;
+                } else {
+                    use_ss = 1;
+                    offset = cpu->EBP;
+                }
+            } else {
+                if (modrm.base == index_ESP) {
+                    use_ss = 1;
+                }
+                offset = cpu->gpr[modrm.base];
+            }
+            if (modrm.index != 4) {
+                offset += (cpu->gpr[modrm.index] << modrm.scale);
             }
         }
-        if (base >= 0) {
-            result->parsed.base = base;
-            result->parsed.has_base = 1;
+        if (mod == 2) {
+            mod = 4;
         }
-        if (index >= 0) {
-            result->parsed.index = index;
-            result->parsed.has_index = 1;
-        }
-        result->parsed.disp_bits = mod;
         switch (mod) {
             case 1:
-                result->parsed.disp = MOVSXB(mem[rip + len]);
-                len++;
-                break;
-            case 2:
-                result->parsed.disp = MOVSXW(READ_LE16(mem + rip + len));
-                len += 2;
+                offset += MOVSXB(mem[rip + skip]);
                 break;
             case 4:
-                result->parsed.disp = READ_LE32(mem + rip + len);
-                len += 4;
-                break;
-            default:
-                // result->parsed.disp = 0;
+                offset += READ_LE32(mem + rip + skip);
                 break;
         }
-    }
 
-    *_skip = len;
-
-    return (result->mod == 3) ? 3 : 0;
-}
-
-static int MODRM(cpu_state *cpu, sreg_t *seg_ovr, modrm_t *result) {
-    int skip;
-    parse_modrm(cpu->cpu_context & CPU_CTX_ADDR32, cpu->CS.base + cpu->EIP, &skip, result);
-    cpu->EIP += skip;
-
-    if (result->mod == 3) return 3;
-
-    uint32_t offset = result->parsed.disp_bits ? result->parsed.disp : 0;
-    if (result->parsed.has_base) {
-        offset += cpu->gpr[result->parsed.base];
-    }
-    if (result->parsed.has_index) {
-        uint32_t index = cpu->gpr[result->parsed.index];
-        index <<= result->parsed.scale;
-        offset += index;
-    }
-    if (result->parsed.use32) {
-        result->offset = offset;
     } else {
-        result->offset = offset & UINT16_MAX;
+        switch (modrm.rm) {
+            case 0:
+                offset = cpu->BX + cpu->SI;
+                break;
+            case 1:
+                offset = cpu->BX + cpu->DI;
+                break;
+            case 2:
+                use_ss = 1;
+                offset = cpu->BP + cpu->SI;
+                break;
+            case 3:
+                use_ss = 1;
+                offset = cpu->BP + cpu->DI;
+                break;
+            case 4:
+                offset = cpu->SI;
+                break;
+            case 5:
+                offset = cpu->DI;
+                break;
+            case 6:
+                if (mod == 0) {
+                    mod = 2;
+                } else {
+                    use_ss = 1;
+                    offset = cpu->BP;
+                }
+                break;
+            case 7:
+                offset = cpu->BX;
+                break;
+        }
+        switch (mod) {
+            case 1:
+                offset += MOVSXB(mem[rip + skip]);
+                break;
+            case 2:
+                offset += READ_LE16(mem + rip + skip);
+                break;
+        }
+        offset &= UINT16_MAX;
     }
+    cpu->EIP += skip + mod;
 
     sreg_t *seg;
     if (seg_ovr) {
         seg = seg_ovr;
     } else {
-        if (result->parsed.has_base && (result->parsed.base == index_BP || result->parsed.base == index_SP)) {
+        if (use_ss) {
             seg = &cpu->SS;
         } else {
             seg = &cpu->DS;
         }
     }
 
-    result->linear = seg->base + result->offset;
+    result->modrm = modrm.modrm;
+    result->offset = offset;
+    result->linear = seg->base + offset;
     if (result->linear > max_mem) result->linear = null_ptr;
 
     return 0;
@@ -1901,7 +1914,7 @@ static int LDS(cpu_state *cpu, sreg_t *seg_ovr, sreg_t *target) {
         offset = READ_LE16(set.opr1);
         new_sel = READ_LE16(set.opr1b + 2);
     }
-    int status = LOAD_SEL(cpu, target, new_sel);
+    int status = LOAD_DESCRIPTOR(cpu, target, new_sel, type_bitmap_SEG_READ, 0, NULL);
     if (status) return status;
     if (set.size == 2) {
         cpu->gpr[set.opr2] = offset;
@@ -1923,7 +1936,7 @@ static int CPUID(cpu_state *cpu) {
     switch (cpu->EAX) {
         case 0x00000001:
             cpu->EAX = cpu->cpuid_model_id;
-            cpu->EDX = 0x00008000;
+            cpu->EDX = 0x00008010;
             cpu->ECX = 0x80800000;
             cpu->EBX = 0;
             break;
@@ -1965,7 +1978,8 @@ static int MOV_CR(cpu_state *cpu, int cr, uint32_t value) {
             uint32_t set_changed = value & changed;
             if (set_changed & ~cpu->cr0_valid) return cpu_status_gpf;
             cpu->CR[cr] = value;
-            if (changed & 0x80000001) return cpu_status_significant;
+            if (value & 0x80000000) return cpu_status_gpf;
+            // if (changed & 0x80000001) return cpu_status_significant;
             return 0;
         }
         case 3:
@@ -2352,7 +2366,7 @@ static int cpu_step(cpu_state *cpu) {
                 return 0;
 
             case 0x07: // POP ES
-                return LOAD_SEL(cpu, &cpu->ES, POPW(cpu));
+                return POP_SEG(cpu, &cpu->ES, type_bitmap_SEG_READ, 1);
 
             case 0x08: // OR r/m, reg8
             case 0x09:
@@ -2383,7 +2397,7 @@ static int cpu_step(cpu_state *cpu) {
                 return 0;
 
             case 0x17: // POP SS
-                return LOAD_SEL(cpu, &cpu->SS, POPW(cpu));
+                return POP_SEG(cpu, &cpu->SS, type_bitmap_SEG_WRITE, 0);
 
             case 0x18: // SBB r/m, reg8
             case 0x19:
@@ -2400,7 +2414,7 @@ static int cpu_step(cpu_state *cpu) {
                 return 0;
 
             case 0x1F: // POP DS
-                return LOAD_SEL(cpu, &cpu->DS, POPW(cpu));
+                return POP_SEG(cpu, &cpu->DS, type_bitmap_SEG_READ, 1);
 
             case 0x20: // AND r/m, reg8
             case 0x21:
@@ -2595,7 +2609,8 @@ static int cpu_step(cpu_state *cpu) {
 
             // case 0x62: // BOUND or EVEX
 
-            // case 0x63: // ARPL or MOVSXD
+            case 0x63: // ARPL or MOVSXD
+                return cpu_status_ud;
 
             case 0x64: // prefix FS:
                 seg = &cpu->FS;
@@ -2836,8 +2851,29 @@ static int cpu_step(cpu_state *cpu) {
             }
 
             case 0x8E: // MOV seg, r/m
-                MODRM_W(cpu, seg, 1, &set);
-                return LOAD_SEL(cpu, &cpu->sregs[set.opr2], READ_LE16(set.opr1));
+                {
+                    desc_type_bitmap_t type;
+                    int allow_null = 1;
+                    MODRM_W(cpu, seg, 1, &set);
+                    switch (set.opr2) {
+                        case index_DS:
+                        case index_ES:
+                        case index_FS:
+                        case index_GS:
+                            type = type_bitmap_SEG_READ;
+                            break;
+
+                        case index_SS:
+                            type = type_bitmap_SEG_WRITE;
+                            allow_null = 0;
+                            break;
+
+                        case index_CS:
+                        default:
+                            return cpu_status_ud;
+                    }
+                    return LOAD_DESCRIPTOR(cpu, &cpu->sregs[set.opr2], READ_LE16(set.opr1), type, allow_null, NULL);
+                }
 
             case 0x8F: // /0 POP r/m
                 MODRM_W(cpu, seg, 1, &set);
@@ -3158,7 +3194,7 @@ static int cpu_step(cpu_state *cpu) {
             }
 
             case 0xCD: // INT
-                return INVOKE_INT(cpu, FETCH8(cpu), exception);
+                return INVOKE_INT(cpu, FETCH8(cpu), software);
 
             case 0xCE: // INTO
                 if (cpu->OF) {
@@ -3191,8 +3227,8 @@ static int cpu_step(cpu_state *cpu) {
             case 0xD5: // AAD
             {
                 int param = FETCH8(cpu);
-                uint8_t ax = cpu->AL + cpu->AH * param;
-                cpu->EAX = ax;
+                cpu->AL = SETF8(cpu, cpu->AL + cpu->AH * param);
+                cpu->AH = 0;
                 return 0;
             }
 
@@ -3479,7 +3515,7 @@ static int cpu_step(cpu_state *cpu) {
                             cpu->DX = value >> 16;
                             cpu->OF = cpu->CF = (cpu->DX != 0);
                         } else {
-                            uint64_t value = cpu->EAX * READ_LE32(set.opr1);
+                            uint64_t value = (uint64_t)cpu->EAX * (uint64_t)READ_LE32(set.opr1);
                             cpu->EAX = value;
                             cpu->EDX = value >> 32;
                             cpu->OF = cpu->CF = (cpu->EDX != 0);
@@ -3514,13 +3550,23 @@ static int cpu_step(cpu_state *cpu) {
                             cpu->AX = value;
                             cpu->DX = dst % src;
                         } else {
-                            uint64_t dst = ((uint64_t)(cpu->EDX) << 32) | (uint64_t)cpu->EAX;
-                            uint64_t src = READ_LE32(set.opr1);
-                            if (src == 0) return cpu_status_div;
-                            uint64_t value = dst / src;
-                            if (value > 0x100000000ULL) return cpu_status_div;
-                            cpu->EAX = value;
-                            cpu->EDX = dst % src;
+                            uint32_t edx = cpu->EDX;
+                            if (edx) {
+                                uint64_t dst = ((uint64_t)edx << 32) | (uint64_t)cpu->EAX;
+                                uint64_t src = READ_LE32(set.opr1);
+                                if (src == 0) return cpu_status_div;
+                                uint64_t value = dst / src;
+                                if (value > 0x100000000ULL) return cpu_status_div;
+                                cpu->EAX = value;
+                                cpu->EDX = dst % src;
+                            } else {
+                                uint32_t dst = cpu->EAX;
+                                uint32_t src = READ_LE32(set.opr1);
+                                if (src == 0) return cpu_status_div;
+                                uint32_t value = dst / src;
+                                cpu->EAX = value;
+                                cpu->EDX = dst % src;
+                            }
                         }
                         return 0;
                     }
@@ -3535,13 +3581,24 @@ static int cpu_step(cpu_state *cpu) {
                             cpu->AX = value;
                             cpu->DX = dst % src;
                         } else {
-                            int64_t dst = ((uint64_t)(cpu->EDX) << 32) | (uint64_t)cpu->EAX;
-                            int64_t src = MOVSXD(READ_LE32(set.opr1));
-                            if (src == 0) return cpu_status_div;
-                            int64_t value = dst / src;
-                            if (value != MOVSXD(value)) return cpu_status_div;
-                            cpu->EAX = value;
-                            cpu->EDX = dst % src;
+                            int32_t edx = cpu->EDX;
+                            int32_t eax = cpu->EAX;
+                            if ((eax < 0) ? (edx == -1) : (edx == 0)) {
+                                int32_t dst = (int32_t)eax;
+                                int32_t src = (int32_t)READ_LE32(set.opr1);
+                                if (src == 0) return cpu_status_div;
+                                int32_t value = dst / src;
+                                cpu->EAX = value;
+                                cpu->EDX = dst % src;
+                            } else {
+                                int64_t dst = ((uint64_t)(cpu->EDX) << 32) | (uint64_t)cpu->EAX;
+                                int64_t src = MOVSXD(READ_LE32(set.opr1));
+                                if (src == 0) return cpu_status_div;
+                                int64_t value = dst / src;
+                                if (value != MOVSXD(value)) return cpu_status_div;
+                                cpu->EAX = value;
+                                cpu->EDX = dst % src;
+                            }
                         }
                         return 0;
                     }
@@ -3676,19 +3733,12 @@ static int cpu_step(cpu_state *cpu) {
                             {
                                 if (!is_kernel(cpu)) return RAISE_GPF(0);
                                 uint16_t new_sel = READ_LE16(set.opr1);
-                                if (new_sel & 0xFFFC) {
-                                    return LOAD_DESC(cpu, &cpu->LDT, new_sel, type_bitmap_LDT);
-                                } else {
-                                    cpu->LDT.attrs = 0;
-                                    cpu->LDT.base = 0;
-                                    cpu->LDT.limit = 0;
-                                    cpu->LDT.sel = new_sel;
-                                    return 0;
-                                }
+                                return LOAD_DESCRIPTOR(cpu, &cpu->LDT, new_sel, type_bitmap_LDT, 1, NULL);
                             }
                             case 3: // LTR
                                 if (!is_kernel(cpu)) return RAISE_GPF(0);
-                                return LOAD_DESC(cpu, &cpu->TSS, READ_LE16(set.opr1), type_bitmap_TSS32);
+                                uint16_t new_sel = READ_LE16(set.opr1);
+                                return LOAD_DESCRIPTOR(cpu, &cpu->TSS, new_sel, type_bitmap_TSS32, 0, NULL);
                             // case 4: // VERR
                             // case 5: // VERW
                         }
@@ -3786,7 +3836,7 @@ static int cpu_step(cpu_state *cpu) {
                     case 0x22: // MOV Cr, reg
                     {
                         if (cpu->cpu_gen < cpu_gen_80386) return cpu_status_ud;
-                        if (!is_kernel(cpu)) return RAISE_GPF(0);
+                        // if (!is_kernel(cpu)) return RAISE_GPF(0);
                         modrm_t modrm;
                         if (!MODRM(cpu, NULL, &modrm)) return cpu_status_ud;
                         if ((1 << modrm.reg) & 0xFEE2) return cpu_status_gpf;
@@ -3798,8 +3848,23 @@ static int cpu_step(cpu_state *cpu) {
                         return 0;
                     }
 
+                    // case 0x21: // MOV reg, Dr
+                    // case 0x23: // MOV Dr, reg
+                    // {
+                    //     // TODO:
+                    //     if (cpu->cpu_gen < cpu_gen_80386) return cpu_status_ud;
+                    //     if (!is_kernel(cpu)) return RAISE_GPF(0);
+                    //     modrm_t modrm;
+                    //     if (!MODRM(cpu, NULL, &modrm)) return cpu_status_ud;
+                    //     if (inst & 2) {
+                    //         // DO NOTHING
+                    //     } else {
+                    //         cpu->gpr[modrm.rm] = 0;
+                    //     }
+                    //     return 0;
+                    // }
+
                     case 0x30: // WRMSR
-                    // case 0x31: // RDTSC
                     case 0x32: // RDMSR
                     // case 0x33: // RDPMC
                     case 0x34: // SYSENTER
@@ -3807,6 +3872,14 @@ static int cpu_step(cpu_state *cpu) {
                     // case 0x37: // GETSEC
                         if (!is_kernel(cpu)) return RAISE_GPF(0);
                         return cpu_status_ud;
+
+                    case 0x31: // RDTSC
+                    {
+                        uint64_t tsc = cpu->time_stamp_counter;
+                        cpu->EAX = tsc;
+                        cpu->EDX = tsc >> 32;
+                        return 0;
+                    }
 
                     // case 0x38: // SSE 3byte op
                     // case 0x3A: // SSE 3byte op
@@ -3888,7 +3961,7 @@ static int cpu_step(cpu_state *cpu) {
                         return 0;
 
                     case 0xA1: // POP FS
-                        return LOAD_SEL(cpu, &cpu->FS, POPW(cpu));
+                        return POP_SEG(cpu, &cpu->FS, type_bitmap_SEG_READ, 1);
 
                     case 0xA2: // CPUID
                     {
@@ -3920,7 +3993,7 @@ static int cpu_step(cpu_state *cpu) {
                         return 0;
 
                     case 0xA9: // POP GS
-                        return LOAD_SEL(cpu, &cpu->GS, POPW(cpu));
+                        return POP_SEG(cpu, &cpu->GS, type_bitmap_SEG_READ, 1);
 
                     case 0xAB: // BTS r/m, reg
                     {
@@ -4181,76 +4254,58 @@ char *dump_segment(char *p, sreg_t *seg) {
 void dump_regs(cpu_state *cpu, uint32_t eip) {
     static char buff[1024];
     char *p = buff;
-    int use32 = cpu->cpu_gen >= cpu_gen_80386;
-    p = dump_string(p, "CS:IP ");
-    p = dump16(p, cpu->CS.sel);
-    *p++ = ':';
-    if (use32 || eip > 0xFFFF) {
-        p = dump32(p, eip);
-    } else {
-        p = dump16(p, eip);
-    }
-    p = dump_string(p, " SS:SP ");
-    p = dump16(p, cpu->SS.sel);
-    *p++ = ':';
-    uint32_t esp = cpu->ESP;
-    if (use32 || esp > 0xFFFF) {
-        p = dump32(p, esp);
-    } else {
-        p = dump16(p, esp);
-    }
 
-    // for (int i = 0; i < 8; i++) {
-    //     if (cpu->CS.base + eip + i < max_mem) {
-    //         *p++ = ' ';
-    //         p = dump8(p, READ_MEM8(&cpu->CS, eip + i));
-    //     } else {
-    //         p = dump_string(p, " **");
-    //         break;
-    //     }
-    // }
-
-    if (use32) {
-        p = dump_string(p, "\nAX ");
+    if (cpu->cpu_gen >= cpu_gen_80386) {
+        p = dump_string(p, "EAX ");
         p = dump32(p, cpu->EAX);
-        p = dump_string(p, " BX ");
+        p = dump_string(p, " EBX ");
         p = dump32(p, cpu->EBX);
-        p = dump_string(p, " CX ");
+        p = dump_string(p, " ECX ");
         p = dump32(p, cpu->ECX);
-        p = dump_string(p, " DX ");
+        p = dump_string(p, " EDX ");
         p = dump32(p, cpu->EDX);
-        p = dump_string(p, "\nBP ");
+        p = dump_string(p, " ESP ");
+        p = dump32(p, cpu->ESP);
+        p = dump_string(p, " EBP ");
         p = dump32(p, cpu->EBP);
-        p = dump_string(p, " SI ");
+        p = dump_string(p, "\nESI ");
         p = dump32(p, cpu->ESI);
-        p = dump_string(p, " DI ");
+        p = dump_string(p, " EDI ");
         p = dump32(p, cpu->EDI);
-        p = dump_string(p, " flags ");
+        p = dump_string(p, " EIP ");
+        p = dump32(p, cpu->EIP);
+        p = dump_string(p, " EFLAGS ");
         p = dump32(p, cpu->eflags);
     } else {
-        p = dump_string(p, "\nAX ");
-        p = dump16(p, cpu->EAX);
+        p = dump_string(p, "AX ");
+        p = dump16(p, cpu->AX);
         p = dump_string(p, " BX ");
-        p = dump16(p, cpu->EBX);
+        p = dump16(p, cpu->BX);
         p = dump_string(p, " CX ");
-        p = dump16(p, cpu->ECX);
+        p = dump16(p, cpu->CX);
         p = dump_string(p, " DX ");
-        p = dump16(p, cpu->EDX);
+        p = dump16(p, cpu->DX);
+        p = dump_string(p, " SP ");
+        p = dump16(p, cpu->SP);
         p = dump_string(p, " BP ");
-        p = dump16(p, cpu->EBP);
+        p = dump16(p, cpu->BP);
         p = dump_string(p, " SI ");
-        p = dump16(p, cpu->ESI);
+        p = dump16(p, cpu->SI);
         p = dump_string(p, " DI ");
-        p = dump16(p, cpu->EDI);
-        p = dump_string(p, "\nDS ");
+        p = dump16(p, cpu->DI);
+        p = dump_string(p, "\nCS ");
+        p = dump16(p, cpu->CS.sel);
+        p = dump_string(p, " SS ");
+        p = dump16(p, cpu->SS.sel);
+        p = dump_string(p, " DS ");
         p = dump16(p, cpu->DS.sel);
         p = dump_string(p, " ES ");
         p = dump16(p, cpu->ES.sel);
-        p = dump_string(p, " FS ");
-        p = dump16(p, cpu->FS.sel);
-        p = dump_string(p, " GS ");
-        p = dump16(p, cpu->GS.sel);
-        p = dump_string(p, " flags ");
+        // p = dump_string(p, " FS ");
+        // p = dump16(p, cpu->FS.sel);
+        // p = dump_string(p, " GS ");
+        // p = dump16(p, cpu->GS.sel);
+        p = dump_string(p, " FLAGS ");
         p = dump16(p, cpu->eflags);
     }
     *p++ = ' ';
@@ -4261,7 +4316,8 @@ void dump_regs(cpu_state *cpu, uint32_t eip) {
     *p++ = cpu->ZF ? 'Z' : '-';
     *p++ = cpu->PF ? 'P' : '-';
     *p++ = cpu->CF ? 'C' : '-';
-    if (cpu->cpu_gen >= cpu_gen_80286) {
+
+    if (cpu->cpu_gen >= cpu_gen_80386) {
         if (cpu->CR0.PE) {
             p = dump_string(p, "\nCS ");
             p = dump_segment(p, &cpu->CS);
@@ -4284,7 +4340,11 @@ void dump_regs(cpu_state *cpu, uint32_t eip) {
             p = dump_string(p, " TSS ");
             p = dump_segment(p, &cpu->TSS);
         } else {
-            p = dump_string(p, "\nDS ");
+            p = dump_string(p, "\nCS ");
+            p = dump16(p, cpu->CS.sel);
+            p = dump_string(p, " SS ");
+            p = dump16(p, cpu->SS.sel);
+            p = dump_string(p, " DS ");
             p = dump16(p, cpu->DS.sel);
             p = dump_string(p, " ES ");
             p = dump16(p, cpu->ES.sel);
@@ -4311,7 +4371,7 @@ void cpu_reset(cpu_state *cpu, int gen) {
     memset(cpu, 0, sizeof(cpu_state));
 
     cpu->cpu_gen = new_gen;
-    cpu->cpuid_model_id = 0x86 | (new_gen << 8);
+    cpu->cpuid_model_id = 0x00 | (new_gen << 8);
 
     cpu->flags_mask = 0x003F7FD5;
     cpu->flags_mask1 = 0x00000002;
@@ -4330,6 +4390,7 @@ void cpu_reset(cpu_state *cpu, int gen) {
             cpu->flags_mask &= 0x0027FFFF;
             break;
     }
+    cpu->flags_mask_intrm = 0xFFFBFCFF;
     cpu->flags_preserve_iret3 = 0x001B7200;
     cpu->flags_preserve_popf = 0;
     LOAD_FLAGS(cpu, 0, 0);
@@ -4386,7 +4447,8 @@ static int cpu_block(cpu_state *cpu) {
         has_to_trace = 1;
         periodic = 1;
     }
-    for (int i = 0; i < periodic; i++) {
+    int i = 0;
+    for (; i < periodic; i++) {
         uint32_t last_known_eip = cpu->EIP;
         int status = cpu_step(cpu);
         if (status == cpu_status_periodic) continue;
@@ -4395,15 +4457,16 @@ static int cpu_block(cpu_state *cpu) {
             status = check_irq(cpu);
             if (status) return status;
             if (cpu->TF) {
+                last_known_eip = cpu->EIP;
                 status = cpu_step(cpu);
-                if (status) return status;
+                if (status) goto check;
                 has_to_trace = 0;
                 status = INVOKE_INT(cpu, 1, exception);
                 if (status) return status;
             }
             continue;
         }
-
+check:
         switch (status) {
             // case cpu_status_periodic:
             //     continue;
@@ -4427,6 +4490,11 @@ static int cpu_block(cpu_state *cpu) {
                 return status;
         }
     }
+
+    cpu->time_stamp_counter += (i + 1);
+
+    // status = check_irq(cpu);
+    // if (status) return status;
     if (has_to_trace) {
         INVOKE_INT(cpu, 1, exception);
     }
@@ -4465,26 +4533,29 @@ WASM_EXPORT int run(cpu_state *cpu) {
             println("**** DIVIDE ERROR");
             dump_regs(cpu, cpu->EIP);
             return status;
+
         case cpu_status_ud:
-            println("**** PANIC: UNDEFINED INSTRUCTION");
-            dump_regs(cpu, cpu->EIP);
-            return status;
+            if (!cpu->VM) {
+                println("**** PANIC: UNDEFINED INSTRUCTION");
+                dump_regs(cpu, cpu->EIP);
+                return status;
+            }
         default:
-            // if (cpu->CR0.PE && status > cpu_status_exception_base) {
-            //     int status2 = INVOKE_INT(cpu, status >> 16, exception);
-            //     if (status2) { // DOUBLE FAULT
-            //         status2 = INVOKE_INT(cpu, 8, exception);
-            //         if (status2 == 0) {
-            //             PUSHW(cpu, 0);
-            //             return 0;
-            //         }
-            //     } else {
-            //         if (status > cpu_status_ud) {
-            //             PUSHW(cpu, status & UINT16_MAX);
-            //         }
-            //         return 0;
-            //     }
-            // }
+            if (cpu->CR0.PE && status > cpu_status_exception_base) {
+                int status2 = INVOKE_INT(cpu, status >> 16, exception);
+                if (status2) { // DOUBLE FAULT
+                    status2 = INVOKE_INT(cpu, 8, exception);
+                    if (status2 == 0) {
+                        PUSHW(cpu, 0);
+                        return 0;
+                    }
+                } else {
+                    if (status > cpu_status_ud) {
+                        PUSHW(cpu, status & UINT16_MAX);
+                    }
+                    return 0;
+                }
+            }
             println("**** PANIC: TRIPLE FAULT!!!");
             dump_regs(cpu, cpu->EIP);
             return status;
@@ -4518,6 +4589,7 @@ WASM_EXPORT int run(cpu_state *cpu) {
  */
 WASM_EXPORT int step(cpu_state *cpu) {
     uint32_t last_eip = cpu->EIP;
+    cpu->time_stamp_counter++;
     int status = cpu_step(cpu);
     if (status >= cpu_status_exception) {
         cpu->EIP = last_eip;
@@ -4546,12 +4618,12 @@ WASM_EXPORT void reset(cpu_state *cpu, int gen) {
  * Load Selector into specified Segment for debugging.
  */
 WASM_EXPORT int debug_load_selector(cpu_state *cpu, sreg_t *seg, uint16_t selector) {
-    return LOAD_SEL(cpu, seg, selector);
+    return LOAD_DESCRIPTOR(cpu, seg, selector, type_bitmap_SEG_ALL, 1, NULL);
 }
 
 WASM_EXPORT uint32_t debug_get_segment_base(cpu_state *cpu, uint16_t selector) {
     sreg_t temp;
-    int status = LOAD_SEL(cpu, &temp, selector);
+    int status = LOAD_DESCRIPTOR(cpu, &temp, selector, type_bitmap_SEG_ALL, 1, NULL);
     if (status) return 0;
     return temp.base;
 }
@@ -4611,17 +4683,120 @@ WASM_EXPORT const char *debug_get_register_map(cpu_state *cpu) {
  * get vram signature
  */
 WASM_EXPORT uint32_t get_vram_signature(uint32_t base, size_t size) {
-    int shift = 17;
+    int shift = 13;
     uint32_t acc = 0;
     uint32_t *vram = (uint32_t *)(mem + base);
     const uint32_t max_vram = size / 4;
     for (int i = 0; i < max_vram; i++) {
         uint32_t v = vram[i];
-        acc = ((acc >> (32 - shift)) | (acc << shift)) ^ v;
+        acc = ((acc >> (32 - shift)) | (acc << shift)) + v;
     }
     return acc;
 }
 
+
+
+
+static inline int parse_modrm(int use32, uint32_t rip, int *_skip, modrm_t *result) {
+    const int REG_NOT_SELECTED = -1;
+    int len = 1;
+    result->modrm = mem[rip];
+
+    result->parsed.d32 = 0;
+    result->parsed.reg = result->reg;
+    int mod = result->mod;
+    if (mod == 3) {
+        result->parsed.base = result->rm;
+    } else {
+        int base = REG_NOT_SELECTED, index = REG_NOT_SELECTED;
+        if (use32) {
+            result->parsed.use32 = 1;
+            if (result->rm != 4) {
+                base = result->rm;
+            } else {
+                result->sib = mem[rip + len];
+                len++;
+                base = result->base;
+                if (result->index != 4) {
+                    index = result->index;
+                    result->parsed.scale = result->scale;
+                }
+            }
+            if (mod == 0 && base == index_EBP) {
+                base = REG_NOT_SELECTED;
+                mod = 4;
+            }
+            if (mod == 2) {
+                mod = 4;
+            }
+        } else {
+            switch (result->rm) {
+                case 0:
+                    base = index_BX;
+                    index = index_SI;
+                    break;
+                case 1:
+                    base = index_BX;
+                    index = index_DI;
+                    break;
+                case 2:
+                    base = index_BP;
+                    index = index_SI;
+                    break;
+                case 3:
+                    base = index_BP;
+                    index = index_DI;
+                    break;
+                case 4:
+                    base = index_SI;
+                    break;
+                case 5:
+                    base = index_DI;
+                    break;
+                case 6:
+                    if (mod == 0) {
+                        mod = 2;
+                    } else {
+                        base = index_BP;
+                    }
+                    break;
+                case 7:
+                    base = index_BX;
+                    break;
+            }
+        }
+        if (base >= 0) {
+            result->parsed.base = base;
+            result->parsed.has_base = 1;
+        }
+        if (index >= 0) {
+            result->parsed.index = index;
+            result->parsed.has_index = 1;
+        }
+        result->parsed.disp_bits = mod;
+        switch (mod) {
+            case 1:
+                result->parsed.disp = MOVSXB(mem[rip + len]);
+                len++;
+                break;
+            case 2:
+                result->parsed.disp = MOVSXW(READ_LE16(mem + rip + len));
+                len += 2;
+                break;
+            case 4:
+                result->parsed.disp = READ_LE32(mem + rip + len);
+                len += 4;
+                break;
+            default:
+                // result->parsed.disp = 0;
+                break;
+        }
+    }
+
+    *_skip = len;
+
+    return (result->mod == 3) ? 3 : 0;
+}
 
 static inline char *disasm_separator(char *p, int *n_opl) {
     if (*n_opl) {
@@ -4801,8 +4976,7 @@ static inline char *disasm_main(char * p, uint16_t sel, uint32_t eip, uint32_t r
             if (name_ptr) {
                 p = dump_string(p, name_ptr);
             } else {
-                p = dump_string(p, "db 0x");
-                p = dump8(p, opcode);
+                p = dump_string(p, "???");
             }
 
             int n_oplands = 0;
@@ -5114,7 +5288,7 @@ WASM_EXPORT void disasm(cpu_state *cpu, uint32_t sel, uint32_t offset, int count
     char *p = buff;
     int len;
     sreg_t seg;
-    if (LOAD_SEL(cpu, &seg, sel)) {
+    if (LOAD_DESCRIPTOR(cpu, &seg, sel, type_bitmap_SEG_ALL, 1, NULL)) {
         seg.attr_D = cpu->CS.attr_D;
         seg.base = 0;
     }

@@ -112,7 +112,6 @@ export class PS2 {
     private iram: Uint8Array;
     private o_fifo: number[];
     private i_fifo: number[];
-    private toggle_value: number = 0;
 
     constructor (env: RuntimeEnvironment) {
         this.env = env;
@@ -121,15 +120,10 @@ export class PS2 {
         this.i_fifo = [];
 
         env.iomgr.on(0x0060, (_, data) => this.data(data), (_) => this.o_fifo.shift() || 0);
-        env.iomgr.on(0x0061, undefined, (_) => this.toggle());
         env.iomgr.on(0x0064, (_, data) => this.command(data), (_) => {
             return ((this.o_fifo.length > 0) ? 1 : 0)
         });
         env.iomgr.onw(0x64, undefined, (_) => this.o_fifo.shift() || 0);
-    }
-    private toggle(): number {
-        this.toggle_value ^= 0x10;
-        return this.toggle_value;
     }
     private command(data: number): void {
         this.lastCmd = data;
