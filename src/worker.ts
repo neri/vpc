@@ -1,7 +1,7 @@
 // Virtual Playground Worker
 'use strict';
 
-import { RuntimeEnvironment, WorkerInterface } from './env';
+import { RuntimeEnvironment, WorkerInterface, WorkerMessageHandler } from './env';
 import { PS2 } from './ps2';
 import { VGA } from './vga';
 import { VFD } from './vfd';
@@ -9,6 +9,21 @@ import { MPU401 } from './mpu';
 
 const ctx: Worker = self as any;
 class WI implements WorkerInterface {
+    private dispatchTable: { [key: string]: WorkerMessageHandler } = {}
+
+    constructor() {
+        ctx.onmessage = e => this.dispatch(e.data.command, e.data);
+
+        this.bind('start', (args) => {
+            env.initMemory(args.mem);
+            env.iomgr.ioRedirectMap = args.ioRedirectMap;
+            if (args.midi) {
+                (self as any).midi = new MPU401(env, 0x330);
+            }
+            setTimeout(() => env.run(args.gen), 100);
+        });
+    }
+
     print(s: string): void {
         this.postCommand('write', s);
     }
@@ -18,17 +33,30 @@ class WI implements WorkerInterface {
     hasClass(className: string): boolean {
         return (typeof ctx[className] === 'function');
     }
+    bind(command: string, handler: WorkerMessageHandler): void {
+        if (this.dispatchTable[command]) {
+            throw new Error(`bind: Conflict dispatch table for ${command}`);
+        } else {
+            this.dispatchTable[command] = handler;
+        }
+    }
+
+    private dispatch(command: string, args: { [key: string]: any }) {
+        const handler = this.dispatchTable[command];
+        if (handler) {
+            handler(args);
+        } else {
+            console.log('worker.onmessage', command, args);
+        }
+    }
 }
 
 const wi = new WI();
 const env = new RuntimeEnvironment(wi);
-const ps2 = new PS2(env);
-const floppy = new VFD(env);
-const vga = new VGA(env);
-let midi: MPU401;
 (self as any).env = env;
-(self as any).ps2 = ps2;
-(self as any).vga = vga;
+(self as any).ps2 = new PS2(env);
+(self as any).floppy = new VFD(env);
+(self as any).vga = new VGA(env);
 
 (async function() {
     console.log('Loading CPU...');
@@ -62,43 +90,3 @@ let midi: MPU401;
 
     wi.postCommand('loaded', null);
 })();
-
-onmessage = e => {
-    switch (e.data.command) {
-        case 'start':
-            env.initMemory(e.data.mem);
-            env.iomgr.ioRedirectMap = e.data.ioRedirectMap;
-            if (e.data.midi) {
-                midi = new MPU401(env, 0x330);
-            }
-            setTimeout(() => env.run(e.data.gen), 100);
-            break;
-        case 'reset':
-            env.reset(e.data.gen);
-            break;
-        case 'key':
-            ps2.onKey(e.data.data);
-            break
-        case 'nmi':
-            env.nmi();
-            break;
-        case 'cont':
-            env.debugContinue();
-            break;
-        case 'dump':
-            env.dump(e.data.address);
-            break;
-        case 'disasm':
-            env.disasm(e.data.range[0], e.data.range[1]);
-            break;
-        case 'attach':
-            try {
-                floppy.attachImage(e.data.blob);
-            } catch (e) {
-                wi.postCommand('alert', e.toString());
-            }
-            break;
-        default:
-            console.log('worker.onmessage', e.data);
-    }
-}

@@ -110,20 +110,20 @@ export class PS2 {
     private env: RuntimeEnvironment;
     private lastCmd: number = 0;
     private iram: Uint8Array;
-    private o_fifo: number[];
-    private i_fifo: number[];
+    private o_fifo: number[] = [];
+    private i_fifo: number[] = [];
 
     constructor (env: RuntimeEnvironment) {
         this.env = env;
         this.iram = new Uint8Array(32);
-        this.o_fifo = [];
-        this.i_fifo = [];
 
         env.iomgr.on(0x0060, (_, data) => this.data(data), (_) => this.o_fifo.shift() || 0);
         env.iomgr.on(0x0064, (_, data) => this.command(data), (_) => {
             return ((this.o_fifo.length > 0) ? 1 : 0)
         });
         env.iomgr.onw(0x64, undefined, (_) => this.o_fifo.shift() || 0);
+
+        env.worker.bind('key', (args) => this.onKey(args.data));
     }
     private command(data: number): void {
         this.lastCmd = data;

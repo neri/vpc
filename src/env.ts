@@ -3,10 +3,13 @@
 import { IOManager } from './iomgr';
 import { VPIC, VPIT, UART, RTC } from './dev';
 
+export type WorkerMessageHandler = (args: { [key: string]: any }) => void;
+
 export interface WorkerInterface {
     print(s: string): void;
     postCommand(cmd: string, data: any): void;
     hasClass(className: string): boolean;
+    bind(command: string, handler: WorkerMessageHandler): void;
 }
 
 const STATUS_EXCEPTION = 0x10000;
@@ -72,6 +75,12 @@ export class RuntimeEnvironment {
         this.iomgr.on(0x0CF9, (_port, _data) => this.reset(-1));
         this.iomgr.onw(0xFC00, undefined, (_) => this.memoryConfig[0]);
         this.iomgr.onw(0xFC02, undefined, (_) => this.memoryConfig[1]);
+
+        worker.bind('reset', (args) => this.reset(args.gen));
+        worker.bind('nmi', (_) => this.nmi());
+        worker.bind('cont', (_) => this.debugContinue());
+        worker.bind('dump', (args) => this.dump(args.address));
+        worker.bind('disasm', (args) => this.disasm(args.range[0], args.range[1]));
 
     }
     public loadCPU(wasm: WebAssembly.Instance): void {
