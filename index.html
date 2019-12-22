@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=640">
     <title>Virtual Playground</title>
-    <link rel="stylesheet" href="styles/vpc.css">
+    <link rel="stylesheet" href="styles/vpc.css?19122215">
     <script>
 
         const $ = x => document.querySelector(x);
@@ -678,6 +678,7 @@
             window.beep = new i8254Sound(window.devmgr);
             window.midi = new VirtualMidiDevice(window.devmgr, $('#cpMidi'));
             window.vga = new VideoDevice(window.devmgr, $('#canvasVGA'), Math.ceil(window.devicePixelRatio) | 1);
+            window.vpad = new VirtualTrackPad(window.devmgr, $('#virtualPad'), $('#vPadBtnL'), $('#vPadBtnR'));
 
             $('#click_to_start').addEventListener('click', e => {
                 if (!window.WebAssembly) {
@@ -768,7 +769,129 @@
             $('#buttonDevCLS').addEventListener('click', e => {
                 $('#devTerminal').value = '';
             });
+
         });
+
+class VirtualTrackPad {
+
+    constructor(devmgr, dom, domL, domR) {
+        this.mouseDown = false;
+        this.touchCoord = null;
+        this.touchIdentifier = null;
+
+        // dom.addEventListener('mousedown', (e) => {
+        //     this.mouseDown = true;
+        //     const { ex, ey } = this.convertMouseEvent(e);
+
+        //     e.preventDefault();
+        //     e.stopPropagation();
+        // }, false);
+        // dom.addEventListener('mousemove', (e) => {
+        //     if (this.mouseDown) {
+        //         const { ex, ey } = this.convertMouseEvent(e);
+
+        //         e.preventDefault();
+        //         e.stopPropagation();
+        //     }
+        // }, false);
+        // dom.addEventListener('mouseup', (e) => {
+        //     this.mouseDown = false;
+        //     const { ex, ey } = this.convertMouseEvent(e);
+
+        //     e.preventDefault();
+        //     e.stopPropagation();
+        // }, false);
+
+        dom.addEventListener('touchstart', (e) => {
+            this.touchCoord = this.convertTouchEvent(e, true);
+            e.preventDefault();
+        }, false);
+        dom.addEventListener('touchmove', (e) => {
+            this.sendPointerChanged(this.convertTouchCursor(this.convertTouchEvent(e)));
+            e.preventDefault();
+        }, false);
+        dom.addEventListener('touchend', (e) => {
+            this.touchCoord = null;
+            this.touchIdentifier = null;
+            e.preventDefault();
+        }, false);
+        dom.addEventListener('touchcancel', (e) => {
+            this.touchCoord = null;
+            this.touchIdentifier = null;
+            e.preventDefault();
+        }, false);
+
+        domL.addEventListener('touchstart', (e) => {
+            this.sendButtonStateChanged('L', true);
+            e.preventDefault();
+        }, false);
+        domL.addEventListener('touchend', (e) => {
+            this.sendButtonStateChanged('L', false);
+            e.preventDefault();
+        }, false);
+        domL.addEventListener('touchcancel', (e) => {
+            this.sendButtonStateChanged('L', false);
+            e.preventDefault();
+        }, false);
+
+        domR.addEventListener('touchstart', (e) => {
+            this.sendButtonStateChanged('R', true);
+            e.preventDefault();
+        }, false);
+        domR.addEventListener('touchend', (e) => {
+            this.sendButtonStateChanged('R', false);
+            e.preventDefault();
+        }, false);
+        domR.addEventListener('touchcancel', (e) => {
+            this.sendButtonStateChanged('R', false);
+            e.preventDefault();
+        }, false);
+
+    }
+    sendPointerChanged(array) {
+        if (window.worker && array) {
+            worker.postMessage({command: 'pointer', move: array});
+        }
+    }
+    sendButtonStateChanged(button, pressed) {
+        if (window.worker) {
+            worker.postMessage({command: 'pointer', button: button, pressed: pressed});
+        } 
+    }
+    convertMouseEvent(e) {
+        const tr = e.target.getBoundingClientRect();
+        const ex = (e.clientX - tr.left) | 0;
+        const ey = (e.clientY - tr.top) | 0;
+        return {ex, ey};
+    }
+    convertTouchEvent(e, is_start = false) {
+        const tr = e.target.getBoundingClientRect();
+        if (is_start) {
+            this.touchIdentifier = e.touches[0].identifier;
+        }
+        for (let i = 0; i < e.touches.length; i++) {
+            const t = e.touches[i];
+            if (t.identifier === this.touchIdentifier) {
+                const ex = (t.clientX - tr.left) | 0;
+                const ey = (t.clientY - tr.top) | 0;
+                return {ex, ey};
+            }
+        }
+        return undefined;
+    }
+    convertTouchCursor(coords) {
+        if (coords) {
+            const { ex, ey } = coords;
+            if (this.touchCoord && (ex || ey)) {
+                const retVal = [ex - this.touchCoord[0], ey - this.touchCoord[1]];
+                this.touchCoord = [ex, ey];
+                return retVal;
+            }
+        }
+        return undefined;
+    }
+
+}
 
 
 </script>
@@ -802,6 +925,15 @@
                 &#x1F50A;<input id="inputVolume" type="range" min="0" max="10" step="1" value="5" style="width: 5em;">
             </label>
         </span>
+
+        <details>
+            <summary class="buttonFace activeButton">vPad</summary>
+            <article>
+                <div id="virtualPad"><span
+                    class="vPadButton" id="vPadBtnL">&nbsp;</span><span
+                    class="vPadButton" id="vPadBtnR">&nbsp;</span></div>
+            </article>
+        </details>
 
         <details>
             <summary class="buttonFace activeButton">Option</summary>

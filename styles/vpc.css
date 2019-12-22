@@ -228,3 +228,26 @@ input[readonly] {
 #devTerminal {
     font: 10px 'TerminalWebFont', 'Menlo', 'Monaco', 'Consolas', 'Courier New', 'Courier', monospace;
 }
+
+#virtualPad {
+    margin: 4px 156px;
+    display: block;
+    width: 320px;
+    height: 200px;
+    background: rgba(128, 128, 128, 0.5);
+    cursor: crosshair;
+    padding: 4px;
+}
+
+.vPadButton {
+    position: relative;
+    top: 150px;
+    display: inline-block;
+    margin: 4px;
+    width: 150px;
+    line-height: 40px;
+    background: rgba(160, 160, 160, 0.5);
+    cursor: pointer;
+    text-align: center;
+    color: black;
+}

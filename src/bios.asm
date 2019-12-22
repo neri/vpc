@@ -1297,6 +1297,26 @@ _clear_vram:
     sti
 
 
+    ;; Init PS/2
+_init_ps2:
+    mov al, 0xFF
+    out 0x60, al
+.loop0:
+    in al, 0x64
+    test al, 0x01
+    jz .skip0
+    in al, 0x60
+    jmp .loop0
+.skip0:
+    mov al, 0xF4
+    out 0x60, al
+
+    mov al, 0xD4
+    out 0x64, al
+    mov al, 0xFF
+    out 0x60, al
+
+
     ;; INIT VIDEO
     mov ax, 0x0003
     int 0x10

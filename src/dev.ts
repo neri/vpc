@@ -77,7 +77,7 @@ export class VPIC {
             if (this.irq.length) return;
             const global_irq = port * 8 + i;
             const mask = (1 << i);
-            if (port == 0 && i == this.ICW[0] && (this.IMR[0] & mask) == 0) {
+            if ((port == 0) && (i == this.ICW[6]) && ((this.IMR[0] & mask) == 0)) {
                 this.enqueue(1);
                 break;
             }
@@ -89,6 +89,9 @@ export class VPIC {
                 this.irq.push(global_irq);
             }
         }
+    }
+    public cancelIRQ(n: number): void {
+        this.intCount[n] = 0;
     }
     public raiseIRQ(n: number): void {
         // if (n) console.log('raise', n, this.irq.length);
