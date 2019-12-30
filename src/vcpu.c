@@ -1978,8 +1978,6 @@ static int MOV_CR(cpu_state *cpu, int cr, uint32_t value) {
             uint32_t set_changed = value & changed;
             if (set_changed & ~cpu->cr0_valid) return cpu_status_gpf;
             cpu->CR[cr] = value;
-            if (value & 0x80000000) return cpu_status_gpf;
-            // if (changed & 0x80000001) return cpu_status_significant;
             return 0;
         }
         case 3:
@@ -3528,14 +3526,12 @@ static int cpu_step(cpu_state *cpu) {
                             int value = MOVSXW(cpu->AX) * MOVSXW(READ_LE16(set.opr1));
                             cpu->AX = value;
                             cpu->DX = value >> 16;
-                            int check = cpu->AX + (cpu->DX << 16);
-                            cpu->OF = cpu->CF = (MOVSXW(cpu->AX) != check);
+                            cpu->OF = cpu->CF = (value > INT16_MAX || value < INT16_MIN);
                         } else {
                             int64_t value = MOVSXD(cpu->EAX) * MOVSXD(READ_LE32(set.opr1));
                             cpu->EAX = value;
                             cpu->EDX = value >> 32;
-                            int64_t check = MOVSXD(cpu->EAX) + (MOVSXD(cpu->EDX) << 32);
-                            cpu->OF = cpu->CF = (MOVSXD(cpu->EAX) != check);
+                            cpu->OF = cpu->CF = (value > INT32_MAX || value < INT32_MIN);
                         }
                         return 0;
                     }
@@ -3581,24 +3577,13 @@ static int cpu_step(cpu_state *cpu) {
                             cpu->AX = value;
                             cpu->DX = dst % src;
                         } else {
-                            int32_t edx = cpu->EDX;
-                            int32_t eax = cpu->EAX;
-                            if ((eax < 0) ? (edx == -1) : (edx == 0)) {
-                                int32_t dst = (int32_t)eax;
-                                int32_t src = (int32_t)READ_LE32(set.opr1);
-                                if (src == 0) return cpu_status_div;
-                                int32_t value = dst / src;
-                                cpu->EAX = value;
-                                cpu->EDX = dst % src;
-                            } else {
-                                int64_t dst = ((uint64_t)(cpu->EDX) << 32) | (uint64_t)cpu->EAX;
-                                int64_t src = MOVSXD(READ_LE32(set.opr1));
-                                if (src == 0) return cpu_status_div;
-                                int64_t value = dst / src;
-                                if (value != MOVSXD(value)) return cpu_status_div;
-                                cpu->EAX = value;
-                                cpu->EDX = dst % src;
-                            }
+                            int64_t dst = ((uint64_t)(cpu->EDX) << 32) | (uint64_t)cpu->EAX;
+                            int64_t src = MOVSXD(READ_LE32(set.opr1));
+                            if (src == 0) return cpu_status_div;
+                            int32_t value = dst / src;
+                            if (value != MOVSXD(value)) return cpu_status_div;
+                            cpu->EAX = value;
+                            cpu->EDX = dst % src;
                         }
                         return 0;
                     }
@@ -4395,7 +4380,7 @@ void cpu_reset(cpu_state *cpu, int gen) {
     cpu->flags_preserve_popf = 0;
     LOAD_FLAGS(cpu, 0, 0);
 
-    cpu->cr0_valid = 0xE005003F;
+    cpu->cr0_valid = 0xE005003F & INT32_MAX;
     switch (cpu->cpu_gen) {
         case cpu_gen_8086:
         case cpu_gen_80186:
@@ -4437,9 +4422,9 @@ static int check_irq(cpu_state *cpu) {
     return INVOKE_INT(cpu, vector, external);
 }
 
-#define CPU_PERIODIC    0x100000
-static int cpu_block(cpu_state *cpu) {
-    int periodic = CPU_PERIODIC;
+static int cpu_block(cpu_state *cpu, int speed_status) {
+    int periodic = speed_status;
+
     int status = check_irq(cpu);
     if (status) return status;
     int has_to_trace = 0;
@@ -4513,8 +4498,8 @@ WASM_EXPORT cpu_state *alloc_cpu(int gen) {
 /**
  * Run CPU for a while.
  */
-WASM_EXPORT int run(cpu_state *cpu) {
-    int status = cpu_block(cpu);
+WASM_EXPORT int run(cpu_state *cpu, int speed_status) {
+    int status = cpu_block(cpu, speed_status);
     switch (status) {
         case cpu_status_periodic:
         case cpu_status_significant:

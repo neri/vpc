@@ -53,6 +53,8 @@
 %define BDA_VGA_CURRENT_MODE    0x0049
 %define BDA_VGA_CONSOLE_COLS    0x004A
 %define BDA_VGA_CURSOR      0x0050
+%define BDA_TIME_STAMP      0x006C
+%define BDA_MIDNIGHT_FLAG        0x0070
 %define BDA_VGA_CONSOLE_ROWSm1  0x0084
 %define BDA_KBD_MODE_TYPE   0x0096
 
@@ -99,18 +101,18 @@ _int1A_etbl:
 _irq0:
     push ds
     push ax
-    xor ax, ax
+    mov ax, BDA_SEG
     mov ds, ax
-    inc word [0x046C]
+    inc word [BDA_TIME_STAMP]
     jnz .skip
-    mov ax, [0x046E]
+    mov ax, [BDA_TIME_STAMP + 2]
     inc ax
     cmp ax, 24
     jb .nb
     xor ax, ax
-    mov byte [0x0470], 1
+    mov byte [BDA_MIDNIGHT_FLAG], 1
 .nb:
-    mov [0x046E], ax
+    mov [BDA_TIME_STAMP + 2], ax
 .skip:
     int 0x1C
     mov al, 0x20
@@ -138,10 +140,10 @@ _irq1:
     stc
     int 0x15
     jnc .loop
-    cmp al, 0xE1
-    jz .E1
-    cmp al, 0xE0
-    jz .E0
+    ; cmp al, 0xE1
+    ; jz .E1
+    ; cmp al, 0xE0
+    ; jz .E0
     mov bl, al
     and al, 0x7F
     cmp al, 0x1D
@@ -925,18 +927,19 @@ i1600:
     ret
 
 i1601:
+    mov dl, [bp + STK_FLAGS]
     mov ax, [BDA_KBD_BUFF_TAIL]
     mov bx, [BDA_KBD_BUFF_HEAD]
     sub ax, bx
-    jz .zero
+    jz .no_data
     mov ax, [bx]
-    xor cl, cl
+    and dl, 0xFF - FLAGS_ZF
     jmp .end
-.zero:
-    mov cl, FLAGS_ZF
+.no_data:
+    or dl, FLAGS_ZF
 .end:
     mov [bp + STK_AX], ax
-    mov [bp + STK_FLAGS], cl
+    mov [bp + STK_FLAGS], dl
     ret
 
 i1602:
@@ -951,15 +954,13 @@ _int17:
 
 
 i1A00:
-    xor cx, cx
-    mov ds, cx
-    mov dx, [0x046C]
-    mov cx, [0x046E]
-    xor al, al
-    xchg al, [0x0470]
+    mov dx, [BDA_TIME_STAMP]
+    mov cx, [BDA_TIME_STAMP + 2]
+    xor ax, ax
+    xchg al, [BDA_MIDNIGHT_FLAG]
     mov [bp + STK_DX], dx
     mov [bp + STK_CX], cx
-    mov [bp + STK_AX], al
+    mov [bp + STK_AX], ax
     ret
 
 i1A02:

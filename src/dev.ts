@@ -90,9 +90,6 @@ export class VPIC {
             }
         }
     }
-    public cancelIRQ(n: number): void {
-        this.intCount[n] = 0;
-    }
     public raiseIRQ(n: number): void {
         // if (n) console.log('raise', n, this.irq.length);
         this.intCount[n]++;
@@ -266,11 +263,6 @@ export class RTC {
     writeRTC(data: number): void {
         this.ram[this.index] = data;
     }
-    // readRTC(): number {
-    //     const result = this._readRTC();
-    //     console.log('read_rtc', this.index, ('00' + result.toString(16)).slice(-2));
-    //     return result;
-    // }
     readRTC(): number {
         const toBCD = (n: number) => {
             const a1 = n % 10;
@@ -298,5 +290,18 @@ export class RTC {
         default:
             return this.ram[this.index];
         }
+    }
+}
+
+/**
+ * Peripheral Component Interconnect
+ */
+export class PCI {
+    private lastAddress = 0;
+
+    constructor (env: RuntimeEnvironment) {
+        // TODO: everything
+        env.iomgr.ond(0xCF8, (_, data) => this.lastAddress = data, (_) => this.lastAddress);
+        env.iomgr.ond(0xCFC, (_, _data) => {}, (_) => 0xFFFFFFFF);
     }
 }

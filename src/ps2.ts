@@ -204,7 +204,7 @@ export class PS2 {
                         this.postMouseACK(PS2_ACK);
                         break;
                     case 0xFF:
-                        this.env.pic.cancelIRQ(IRQ_MOUSE);
+                        this.env.pic.clearPendingIRQ(IRQ_MOUSE);
                         this.m_fifo = [];
                         this.isMouseEnabled = false;
                         this.postMouseACK(0xAA);
@@ -227,7 +227,7 @@ export class PS2 {
                         this.postKeyData(PS2_ACK);
                         break;
                     case 0xFF:
-                        this.env.pic.cancelIRQ(IRQ_KEY);
+                        this.env.pic.clearPendingIRQ(IRQ_KEY);
                         this.k_fifo = [];
                         this.isKeyboardEnabled = false;
                         this.postKeyData(0xAA);
@@ -253,7 +253,7 @@ export class PS2 {
         this.env.pic.raiseIRQ(IRQ_MOUSE);
         this.env.pic.raiseIRQ(IRQ_MOUSE);
     }
-    onKey(e: any): void {
+    private onKey(e: any): void {
         if (!this.isKeyboardEnabled) return;
         const { type, key, code, keyCode, ctrlKey, altKey } = e;
         let prefix: number = 0;
@@ -284,9 +284,9 @@ export class PS2 {
             scancode &= 0x7F;
         }
 
-        if (scancode === 0 && ascii !== 0) {
-            scancode = SCAN_DUMMY;
-        }
+        // if (scancode === 0 && ascii !== 0) {
+        //     scancode = SCAN_DUMMY;
+        // }
 
         switch (type) {
         case 'keydown':
@@ -304,7 +304,7 @@ export class PS2 {
             this.postKeyData(scancode);
         }
     }
-    onPointer(move?: number[], button?: string, pressed?: boolean) {
+    private onPointer(move?: number[], button?: string, pressed?: boolean) {
         if (!this.isMouseEnabled) return;
         if (move) {
             this.pointer.x += move[0];

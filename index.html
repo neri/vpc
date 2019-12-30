@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=640">
     <title>Virtual Playground</title>
-    <link rel="stylesheet" href="styles/vpc.css?19122215">
+    <link rel="stylesheet" href="styles/vpc.css">
     <script>
 
         const $ = x => document.querySelector(x);
@@ -40,7 +40,7 @@
                     if (pos > 0) {
                         name = name.slice(0, pos);
                     }
-                    $('#labelLocal').value = name;
+                    $('#labelLocal').value = `file: ${name}`;
                     target.removeAttribute('disabled');
                     callback(buffer);
                 })
@@ -51,6 +51,17 @@
                 })
         }
 
+        const flipElement = (dom) => {
+            const list = dom.classList;
+            if (list.contains('dimScreen')) {
+                list.remove('dimScreen');
+                return false;
+            } else {
+                list.add('dimScreen');
+                return true;
+            }
+        }
+
         const startEmu = () => {
             $('#screen_container').style.display = 'block';
             $('#click_to_start').style.display = 'none';
@@ -59,7 +70,7 @@
 
             if (window.beep) {
                 window.beep.createAudioContext(); // IMPORTANT!
-        }
+            }
 
             const term = $('#terminal');
             term.write = function (message) {
@@ -88,10 +99,14 @@
                 // window.worker.postMessage({command: 'key', data: e.data});
             });
             window.term = term;
-            $('#screen_container').addEventListener('click', e => {
+            $('#keyFocusButton').addEventListener('click', e => {
                 term.focus();
             });
+            // $('#mouseFocusButton').addEventListener('click', e => {
+            //     // TODO:
+            // });
             setTimeout(() => term.focus(), 100);
+            term.focus();
 
             setTimeout(startSecond, 100);
         }
@@ -678,7 +693,7 @@
             window.beep = new i8254Sound(window.devmgr);
             window.midi = new VirtualMidiDevice(window.devmgr, $('#cpMidi'));
             window.vga = new VideoDevice(window.devmgr, $('#canvasVGA'), Math.ceil(window.devicePixelRatio) | 1);
-            window.vpad = new VirtualTrackPad(window.devmgr, $('#virtualPad'), $('#vPadBtnL'), $('#vPadBtnR'));
+            window.vpad = new VirtualTrackPad(window.devmgr, $('#screen_container'), $('#vPadBtnL'), $('#vPadBtnR'), $('#terminal'));
 
             $('#click_to_start').addEventListener('click', e => {
                 if (!window.WebAssembly) {
@@ -700,23 +715,8 @@
                     worker.postMessage({command: 'nmi' });
                 }
             });
-            $('#buttonDump').addEventListener('click', e => {
-                if (window.worker) {
-                    worker.postMessage({command: 'dump', address: $('#inputAddress').value});
-                }
-            });
-            $('#buttonDisAsm').addEventListener('click', e => {
-                if (window.worker) {
-                    worker.postMessage({command: 'disasm', range: [$('#inputAddress2').value || "cs:eip", 10]});
-                }
-            });
-            $('#buttonContinue').addEventListener('click', e => {
-                if (window.worker) {
-                    worker.postMessage({command: 'cont'});
-                }
-            });
 
-            $('#buttonLocal').addEventListener('click', e => {
+            $('#labelLocal').addEventListener('click', e => {
                 $('#fileLocal').click();
             });
             const vfdAttach = (name, blob) => {
@@ -769,15 +769,30 @@
             $('#buttonDevCLS').addEventListener('click', e => {
                 $('#devTerminal').value = '';
             });
+            $('#debugCmdline').addEventListener('keypress', e => {
+                if (e.keyCode == 13) {
+                    e.preventDefault();
+                    alert(e);
+                }
+            });
+
+            $('#biosButton').addEventListener('click', e => {
+                if (flipElement($('#screen_container'))) {
+                    $('#biosPanel').style.display = 'block';
+                } else {
+                    $('#biosPanel').style.display = 'none';
+                }
+            });
 
         });
 
 class VirtualTrackPad {
 
-    constructor(devmgr, dom, domL, domR) {
+    constructor(devmgr, dom, domL, domR, domTerm) {
         this.mouseDown = false;
         this.touchCoord = null;
         this.touchIdentifier = null;
+        this.mouseEnabled = false;
 
         // dom.addEventListener('mousedown', (e) => {
         //     this.mouseDown = true;
@@ -789,7 +804,6 @@ class VirtualTrackPad {
         // dom.addEventListener('mousemove', (e) => {
         //     if (this.mouseDown) {
         //         const { ex, ey } = this.convertMouseEvent(e);
-
         //         e.preventDefault();
         //         e.stopPropagation();
         //     }
@@ -802,22 +816,32 @@ class VirtualTrackPad {
         //     e.stopPropagation();
         // }, false);
 
+        dom.addEventListener('click', (e) => {
+            if (this.mouseEnabled) return;
+            e.preventDefault();
+            domTerm.focus();
+        });
+
         dom.addEventListener('touchstart', (e) => {
+            if (!this.mouseEnabled) return;
             this.touchCoord = this.convertTouchEvent(e, true);
             e.preventDefault();
         }, false);
         dom.addEventListener('touchmove', (e) => {
+            if (!this.mouseEnabled) return;
             this.sendPointerChanged(this.convertTouchCursor(this.convertTouchEvent(e)));
             e.preventDefault();
         }, false);
         dom.addEventListener('touchend', (e) => {
             this.touchCoord = null;
             this.touchIdentifier = null;
+            if (!this.mouseEnabled) return;
             e.preventDefault();
         }, false);
         dom.addEventListener('touchcancel', (e) => {
             this.touchCoord = null;
             this.touchIdentifier = null;
+            if (!this.mouseEnabled) return;
             e.preventDefault();
         }, false);
 
@@ -903,6 +927,42 @@ class VirtualTrackPad {
             <canvas id="canvasVGA"></canvas>
         </div>
         <div id="click_to_start"><p>はじめるときはここをクリック...</p></div>
+
+        <div id="virtualTrackpad" style="display: none;">
+            <span class="vPadButton" id="vPadBtnL">&nbsp;</span>
+            <span class="vPadButton" id="vPadBtnR">&nbsp;</span>
+        </div>
+
+        <div id="biosPanel" style="display: none;">
+            <article>
+                <div class="controlFrame">
+                    <label>
+                        CPU Mode:
+                        <select id="selCpuGen">
+                            <option value="0">8086</option>
+                            <option value="1">80186</option>
+                            <option value="2">80286</option>
+                            <option value="3">386SX</option>
+                            <option value="4" selected>486SX</option>
+                        </select>
+                    </label>
+                    <!-- <label>
+                        Priority:
+                        <input type="range">
+                    </label> -->
+                    <br>
+                    <label>
+                        Memory:
+                        <select id="selMemory">
+                            <option value="640">640KB</option>
+                            <option value="16384" selected>16MB</option>
+                            <option value="65536">64MB</option>
+                        </select>
+                    </label>
+                </div>
+                <div id="cpMidi"></div>
+            </article>
+        </div>
     </div>
 
     <div id="controlPanel">
@@ -918,76 +978,41 @@ class VirtualTrackPad {
             </select>
             <input id="fileLocal" type="file" style="position: absolute; width:0px; height:0px; z-index: -1;">
             <label>
-                <a id="buttonLocal" class="buttonFace">file:</a>
-                <input id="labelLocal" type="text" readonly="readonly">
+                <input id="labelLocal" type="text" readonly="readonly" placeholder="file:">
             </label>
             <label id="volumeControl">
                 &#x1F50A;<input id="inputVolume" type="range" min="0" max="10" step="1" value="5" style="width: 5em;">
             </label>
+            <label>
+                <a id="keyFocusButton" class="buttonFace activeButton">&#x2328;&#xFE0F;</a>
+            </label>
+            <!-- <label>
+                <a id="mouseFocusButton" class="buttonFace" disabled>&#x1F5B1;&#xFE0F;</a>
+            </label> -->
+            <label>
+                <a id="biosButton" class="buttonFace activeButton">Config</a>
+            </label>
         </span>
 
         <details>
-            <summary class="buttonFace activeButton">vPad</summary>
+            <summary class="buttonFace">DevTool</summary>
             <article>
-                <div id="virtualPad"><span
-                    class="vPadButton" id="vPadBtnL">&nbsp;</span><span
-                    class="vPadButton" id="vPadBtnR">&nbsp;</span></div>
-            </article>
-        </details>
-
-        <details>
-            <summary class="buttonFace activeButton">Option</summary>
-            <article>
-
-                <div class="controlFrame">
-
-                    <label>
-                        CPU:
-                        <select id="selCpuGen">
-                            <option value="0">8086</option>
-                            <option value="1">80186</option>
-                            <option value="2">80286</option>
-                            <option value="3">386SX</option>
-                            <option value="4" selected>486SX</option>
-                        </select>
-                    </label>
-
-                    <label>
-                        Memory:
-                        <select id="selMemory">
-                            <option value="640">640KB</option>
-                            <option value="16384" selected>16MB</option>
-                            <option value="65536">64MB</option>
-                        </select>
-                    </label>
-
-                </div>
-
-                <div id="cpMidi"></div>
-
-                <div class="controlFrame">
-                    <details>
-                        <summary class="buttonFace">DevTool</summary>
-                        <a id="buttonNMI" class="buttonFace">Step</a>
-                        <a id="buttonDevCLS" class="buttonFace destructiveButton">&#x1f5d1;</a>
-                        <!-- <input id="debugCmdline" type="text" list="cmdSuggestion" placeholder="COMMAND">
-                        <datalist id="cmdSuggestion">
-                            <option value="?">Help</option>
-                            <option value="t">Step</option>
-                            <option value="c">Continue</option>
-                            <option value="d">Dump &lt;Range&gt;</option>
-                            <option value="r">Register</option>
-                            <option value="u">DisAssemble &lt;Range&gt;</option>
-                        </datalist> -->
-                        <input id="inputAddress" type="text" value="" placeholder="0000000" size="8">
-                        <a id="buttonDump" class="buttonFace">Dump</a>
-                        <input id="inputAddress2" type="text" value="" placeholder="0000:0000" size="8">
-                        <a id="buttonDisAsm" class="buttonFace">DisAsm</a>
-                        <a id="buttonContinue" class="buttonFace">Cont</a>
-                        <br>
-                        <textarea id="devTerminal" cols="80" rows="20" readonly></textarea>
-                    </details>
-                </div>
+                    <a id="buttonNMI" class="buttonFace">Step</a>
+                    <a id="buttonDevCLS" class="buttonFace destructiveButton">&#x1f5d1;</a>
+                    <input id="debugCmdline" type="text" list="cmdSuggestion" placeholder="COMMAND" size="40">
+                    <a id="" class="buttonFace activeButton">Enter</a>
+                    <datalist id="cmdSuggestion">
+                        <option value="?">Help</option>
+                        <option value="t">Step</option>
+                        <option value="c">Continue</option>
+                        <option value="e">Edit &lt;Address&gt; &lt;Values...&gt;</option>
+                        <option value="f">Fill &lt;Range&gt; &lt;Value&gt;</option>
+                        <option value="d">Dump &lt;Range&gt;</option>
+                        <option value="r">ShowRegister</option>
+                        <option value="u">DisAssemble &lt;Range&gt;</option>
+                    </datalist>
+                    <br>
+                    <textarea id="devTerminal" cols="80" rows="20" readonly></textarea>
             </article>
             <address>POWERED by <a href="https://github.com/neri/vpc">Virtual Playground</a></address>
         </details>

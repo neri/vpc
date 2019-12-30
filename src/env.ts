@@ -1,7 +1,7 @@
 // Runtime Environment for Virtual Playground
 
 import { IOManager } from './iomgr';
-import { VPIC, VPIT, UART, RTC } from './dev';
+import { VPIC, VPIT, UART, RTC, PCI } from './dev';
 
 export type WorkerMessageHandler = (args: { [key: string]: any }) => void;
 
@@ -21,6 +21,7 @@ export class RuntimeEnvironment {
     public pit: VPIT;
     public uart: UART;
     public rtc: RTC;
+    public pci: PCI;
 
     private period: number;
     private lastTick: number;
@@ -34,6 +35,7 @@ export class RuntimeEnvironment {
     private memoryConfig: Uint16Array = new Uint16Array(2);
     private isDebugging: boolean = false;
     private isRunning: boolean = false;
+    private speed_status = 0x200000;
 
     constructor(worker: WorkerInterface) {
         this.worker = worker;
@@ -69,6 +71,7 @@ export class RuntimeEnvironment {
         this.pic = new VPIC(this.iomgr);
         this.pit = new VPIT(this);
         this.rtc = new RTC(this);
+        this.pci = new PCI(this);
         // this.uart = new UART(this, 0x3F8, 4);
 
         this.iomgr.onw(0x0000, undefined, (_) => Math.random() * 65535);
@@ -82,6 +85,10 @@ export class RuntimeEnvironment {
         worker.bind('dump', (args) => this.dump(args.address));
         worker.bind('disasm', (args) => this.disasm(args.range[0], args.range[1]));
 
+        // const test1 = Date.now();
+        // setTimeout(() => {
+        //     console.log(`diff: ${Date.now() - test1}`);
+        // }, 1);
     }
     public loadCPU(wasm: WebAssembly.Instance): void {
         this.instance = wasm;
@@ -182,13 +189,16 @@ export class RuntimeEnvironment {
             }
         }
         let status: number;
+        // const time0 = Date.now();
         try {
-            status = this.instance.exports.run(this.cpu);
+            status = this.instance.exports.run(this.cpu, this.speed_status);
         } catch (e) {
             console.error(e);
             status = STATUS_EXCEPTION;
             this.instance.exports.debug_dump(this.cpu);
         }
+        // const diff = Date.now() - time0;
+        // this.speed_status = (diff < 5) ? 1 : -1;
         this.dequeueUART();
         if (status >= STATUS_EXCEPTION) {
             this.isRunning = false;
@@ -206,19 +216,6 @@ export class RuntimeEnvironment {
                     timer = expected - now;
                     if (timer < 0) timer = 0;
                     break;
-                // case 1:
-                //     const cr0 = this.getReg('CR0');
-                //     let mode: string[] = [];
-                //     if (cr0 & 0x80000000) {
-                //         mode.push('Paged');
-                //     }
-                //     if (cr0 & 0x00000001) {
-                //         mode.push('Protected Mode');
-                //     } else {
-                //         mode.push('Real Mode');
-                //     }
-                //     console.log(`CPU Mode Change: ${('00000000' + cr0.toString(16)).slice(-8)} ${mode.join(' ')}`);
-                //     break;
                 default:
                     // timer = 1;
             }
