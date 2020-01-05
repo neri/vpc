@@ -22,6 +22,40 @@ class WI implements WorkerInterface {
             }
             setTimeout(() => env.run(args.gen), 100);
         });
+
+        (async function() {
+            console.log('Loading CPU...');
+            await fetch('./vcpu.wasm')
+                .then(res => {
+                    if (!res.ok) { throw Error(res.statusText); }
+                    return res.arrayBuffer()
+                })
+                .then(buffer => WebAssembly.instantiate(buffer, env as any))
+                .then(wasm => env.loadCPU(wasm.instance))
+            
+            console.log('Loading BIOS...');
+            await fetch('./bios.bin')
+                .then(res => {
+                    if (!res.ok) { throw Error(res.statusText); }
+                    return res.blob()
+                })
+                .then(blob => {
+                    return new Promise(resolve => {
+                        const reader = new FileReader();
+                        reader.onloadend = () => {
+                            resolve(reader.result);
+                        };
+                        reader.readAsArrayBuffer(blob);
+                    });
+                })
+                .then((buffer: ArrayBuffer) => {
+                    const bios = new Uint8Array(buffer);
+                    env.fetchBIOS(bios);
+                })
+        
+            wi.postCommand('loaded', null);
+        })();
+
     }
 
     print(s: string): void {
@@ -57,36 +91,3 @@ const env = new RuntimeEnvironment(wi);
 (self as any).ps2 = new PS2(env);
 (self as any).floppy = new VFD(env);
 (self as any).vga = new VGA(env);
-
-(async function() {
-    console.log('Loading CPU...');
-    await fetch('./vcpu.wasm')
-        .then(res => {
-            if (!res.ok) { throw Error(res.statusText); }
-            return res.arrayBuffer()
-        })
-        .then(buffer => WebAssembly.instantiate(buffer, env as any))
-        .then(wasm => env.loadCPU(wasm.instance))
-    
-    console.log('Loading BIOS...');
-    await fetch('./bios.bin')
-        .then(res => {
-            if (!res.ok) { throw Error(res.statusText); }
-            return res.blob()
-        })
-        .then(blob => {
-            return new Promise(resolve => {
-                const reader = new FileReader();
-                reader.onloadend = () => {
-                    resolve(reader.result);
-                };
-                reader.readAsArrayBuffer(blob);
-            });
-        })
-        .then((buffer: ArrayBuffer) => {
-            const bios = new Uint8Array(buffer);
-            env.fetchBIOS(bios);
-        })
-
-    wi.postCommand('loaded', null);
-})();

@@ -900,6 +900,18 @@ describe('CPU', () => {
 
         });
 
+        it('MOV out of bounds', () => {
+            env.emitTest([0x67, 0xA1, 0x78, 0x56, 0x34, 0x12]);
+
+            env.setReg('AX', 0x12345678);
+            env.saveState();
+            expect(env.step()).toBe(0);
+            expect(env.getReg('IP')).toBe(0xFFF6);
+            expect(env.getReg('AX')).toBe(0x1234FFFF);
+            expect(env.changed()).toStrictEqual(['AX','IP']);
+
+        });
+
         it('MOVZX/MOVSX', () => {
             env.emitTest([0x66, 0x0F, 0xB7, 0xC3, 0x66, 0x0F, 0xBF, 0xC3]);
 
@@ -1171,7 +1183,7 @@ describe('CPU', () => {
             env.saveState();
         });
 
-        it('GDT', () => {
+        it('GDT (WIP)', () => {
             env.emitTest([0x0F, 0x01, 0x17]);
             env.setReg('AX', 0x12345678);
             env.saveState();

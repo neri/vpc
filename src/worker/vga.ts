@@ -3,7 +3,8 @@
 import { WorkerInterface, RuntimeEnvironment } from './env';
 // import { IOManager } from './iomgr';
 
-const FPS = 1000 / 10;
+const actualFPS = 60;
+const vtInterval = (1000 / actualFPS) | 0;
 
 const GRAPHICS_MODE = 0x01;
 const CGA_MODE = 0x02;
@@ -28,7 +29,7 @@ export class VGA {
     private vram_base: number = 0;
     private vram_size: number = 0;
     private vram_sign: number = 0;
-    private _vtrace: number;
+    private vtrace = false;
 
     constructor (env: RuntimeEnvironment) {
         this.env = env;
@@ -39,7 +40,6 @@ export class VGA {
         }
         this.crtcData = new Uint8Array(24);
         this.attrData = new Uint8Array(32);
-        this._vtrace = 0;
 
         // CRTC
         env.iomgr.on(0x3B4, (_, data) => this.crtcIndex = data, (_) => this.crtcIndex);
@@ -50,8 +50,8 @@ export class VGA {
             (_) => this.crtcData[this.crtcIndex]);
 
         // Vtrace
-        env.iomgr.on(0x3BA, undefined, (_) => this.vtrace());
-        env.iomgr.on(0x3DA, undefined, (_) => this.vtrace());
+        env.iomgr.on(0x3BA, undefined, (_) => this.readVtrace());
+        env.iomgr.on(0x3DA, undefined, (_) => this.readVtrace());
 
         // Attribute Controller Registers
         env.iomgr.on(0x3C0, (_, data) => this.attrIndex = data, (_) => this.attrIndex);
@@ -66,18 +66,18 @@ export class VGA {
         }, (_) => this.attrData[this.attrIndex]);
 
         // VGA Palette
-        env.iomgr.on(0x03C7, (_, data) => { this.pal_read_index = data * 4; });
-        env.iomgr.on(0x03C8, (_, data) => { this.pal_index = data * 4; });
+        env.iomgr.on(0x03C7, (_, data) => { this.pal_read_index = data << 2; });
+        env.iomgr.on(0x03C8, (_, data) => { this.pal_index = data << 2; });
         env.iomgr.on(0x03C9, (_, data) => {
             let pal_index = this.pal_index;
-            this.pal_u8[pal_index] = ((data & 0x3F) << 2) | ((data & 0x30) >> 4);
+            this.pal_u8[pal_index] = ((data & 0x3F) * 4.05) & 0xFF;
             pal_index++;
             if ((pal_index & 3) == 3) {
                 const color_index = pal_index >> 2;
                 this.env.worker.postCommand('pal', [color_index, this.pal_u32[color_index]]);
                 pal_index++;
             }
-            this.pal_index = pal_index & 1023;
+            this.pal_index = pal_index & 0x3FF;
         }, (_) => {
             let pal_index = this.pal_read_index;
             const result = this.pal_u8[pal_index] >> 2;
@@ -85,16 +85,20 @@ export class VGA {
             if ((pal_index & 3) == 3) {
                 pal_index++;
             }
-            this.pal_read_index = pal_index & 1023;
+            this.pal_read_index = pal_index & 0x3FF;
             return result;
         });
 
         env.iomgr.onw(0xFC04, (_, data) => this.setVGAMode(data));
 
     }
-    vtrace(): number {
-        this._vtrace ^= 0x09;
-        return this._vtrace;
+    readVtrace(): number {
+        if (this.vtrace) {
+            this.vtrace = false;
+            return 0x08;
+        } else {
+            return 0x01;
+        }
     }
     crtcDataWrite(index: number, data: number): void {
         this.crtcData[this.crtcIndex] = data;
@@ -106,13 +110,13 @@ export class VGA {
         if (value & 0x40) { // 8BIT
             this.vram_base = SEGMENT_A000;
             this.vram_size = 320 * 200;
-            this.setMode([320, 200], [640, 400], 8, GRAPHICS_MODE);
+            this.setMode([320, 200], 8, GRAPHICS_MODE, [640, 400]);
         } else {
             if (value & 0x01) { // Graphics Enable
             } else {
                 this.vram_base = SEGMENT_B800;
                 this.vram_size = 80 * 25 * 2;
-                this.setMode([640, 400], [640, 400], 4, 0);
+                this.setMode([640, 400], 4, 0, [640, 400]);
             }
         }
         return value;
@@ -122,32 +126,32 @@ export class VGA {
             case 0x03:
                 this.vram_base = SEGMENT_B800;
                 this.vram_size = 80 * 25 * 2;
-                this.setMode([640, 400], [640, 400], 4, 0);
+                this.setMode([640, 400], 4, 0);
                 break;
             case 0x06:
                 this.vram_base = SEGMENT_B800;
                 this.vram_size = 0x4000;
-                this.setMode([640, 200], [640, 400], 1, CGA_MODE);
+                this.setMode([640, 200], 1, CGA_MODE, [640, 400]);
                 break;
             case 0x11:
                 this.vram_base = SEGMENT_A000;
                 this.vram_size = 640 * 480 / 8;
-                this.setMode([640, 480], [640, 480], 1, GRAPHICS_MODE);
+                this.setMode([640, 480], 1, GRAPHICS_MODE);
                 break;
             case 0x13:
                 this.vram_base = SEGMENT_A000;
                 this.vram_size = 320 * 200;
-                this.setMode([320, 200], [640, 400], 8, GRAPHICS_MODE);
+                this.setMode([320, 200], 8, GRAPHICS_MODE, [640, 400]);
                 break;
             case 0x100:
                 this.vram_base = SEGMENT_A000;
                 this.vram_size = 640 * 400;
-                this.setMode([640, 400], [640, 400], 8, GRAPHICS_MODE);
+                this.setMode([640, 400], 8, GRAPHICS_MODE);
                 break;
             case 0x101:
                 this.vram_base = SEGMENT_A000;
                 this.vram_size = 640 * 480;
-                this.setMode([640, 480], [640, 480], 8, GRAPHICS_MODE);
+                this.setMode([640, 480], 8, GRAPHICS_MODE);
                 break;
         }
     }
@@ -161,10 +165,10 @@ export class VGA {
         // console.log('cursor', cursor_sl, cursor_sh, (cursor % 160) / 2, (cursor / 160) | 0);
         this.env.worker.postCommand('vga_cursor', cursor);
     }
-    setMode(dim: Size, vdim: Size, bpp: number, mode: number): void {
+    setMode(dim: Size, bpp: number, mode: number, vdim?: Size): void {
         this.clearTimer();
-        this.env.worker.postCommand('vga_mode', { dim: dim, vdim: vdim, bpp: bpp, mode: mode});
-        this.timer = setInterval(() => this.transferVGA(), FPS);
+        this.env.worker.postCommand('vga_mode', { dim: dim, vdim: vdim ? vdim : dim, bpp: bpp, mode: mode});
+        this.timer = setInterval(() => this.transferVGA(), vtInterval);
     }
     clearTimer() {
         if (this.timer) {
@@ -173,8 +177,9 @@ export class VGA {
         }
     }
     transferVGA() {
+        this.vtrace = true;
         this.updateCursor();
-        const sign: number = this.env.get_vram_signature(this.vram_base, this.vram_size);
+        const sign: number = this.env.getVramSignature(this.vram_base, this.vram_size);
         if (this.vram_sign != sign) {
             this.vram_sign = sign;
             const vram = this.env.dmaRead(this.vram_base, this.vram_size);

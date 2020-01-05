@@ -80,15 +80,7 @@ export class RuntimeEnvironment {
         this.iomgr.onw(0xFC02, undefined, (_) => this.memoryConfig[1]);
 
         worker.bind('reset', (args) => this.reset(args.gen));
-        worker.bind('nmi', (_) => this.nmi());
-        worker.bind('cont', (_) => this.debugContinue());
-        worker.bind('dump', (args) => this.dump(args.address));
-        worker.bind('disasm', (args) => this.disasm(args.range[0], args.range[1]));
-
-        // const test1 = Date.now();
-        // setTimeout(() => {
-        //     console.log(`diff: ${Date.now() - test1}`);
-        // }, 1);
+        worker.bind('nmi', (_) => this.NMI());
     }
     public loadCPU(wasm: WebAssembly.Instance): void {
         this.instance = wasm;
@@ -230,7 +222,7 @@ export class RuntimeEnvironment {
             }
         }
     }
-    public nmi(): void {
+    public NMI(): void {
         if (!this.instance) return;
         if (!this.isRunning) {
             let status: number = this.instance.exports.step(this.cpu);
@@ -262,39 +254,28 @@ export class RuntimeEnvironment {
         let a = new Uint32Array(this.env.memory.buffer, reg, 1);
         return a[0];
     }
-    private reg_or_value(_token: string): number {
+    public regOrValue(_token: string): number {
         let token = _token.toUpperCase();
         if (Object.keys(this.regmap).indexOf(token) >= 0) {
             return this.getReg(token);
         } else if (token[0] === 'E' && Object.keys(this.regmap).indexOf(token.substr(1)) >= 0) {
             return this.getReg(token.substr(1));
-        } else {
+        } else if (token.match(/^([\dABCDEF]+)$/)) {
             return parseInt(`0x0${token}`) | 0;
-        }
-    }
-    public disasm(seg_off: string, count: number): void {
-        if (!this.instance) return;
-        const a = seg_off.split(/:/);
-        let seg: number, off: number;
-        if (a.length == 2) {
-            seg = this.reg_or_value(a[0]);
-            off = this.reg_or_value(a[1]);
         } else {
-            seg = this.getReg('CS');
-            off = this.reg_or_value(a[0]);
+            throw new Error('BAD TOKEN');
         }
-        this.instance.exports.disasm(this.cpu, seg, off, count);
     }
     public dump(seg_off: string): void {
         if (!this.instance) return;
         const a = seg_off.split(/:/);
         let seg: number, off: number;
         if (a.length == 2) {
-            seg = this.reg_or_value(a[0]);
-            off = this.reg_or_value(a[1]);
+            seg = this.regOrValue(a[0]);
+            off = this.regOrValue(a[1]);
         } else {
             seg = 0;
-            off = this.reg_or_value(a[0]);
+            off = this.regOrValue(a[0]);
         }
         const base: number = this.instance.exports.debug_get_segment_base(this.cpu, seg) + off;
         const addrToHex = (n: number) => ('00000000' + n.toString(16)).substr(-8);
@@ -318,7 +299,20 @@ export class RuntimeEnvironment {
         }
         this.worker.print(lines.join('\n'));
     }
-    public get_vram_signature(base: number, size: number): number {
+    public disasm(seg_off: string, count: number): void {
+        if (!this.instance) return;
+        const a = seg_off.split(/:/);
+        let seg: number, off: number;
+        if (a.length == 2) {
+            seg = this.regOrValue(a[0]);
+            off = this.regOrValue(a[1]);
+        } else {
+            seg = this.getReg('CS');
+            off = this.regOrValue(a[0]);
+        }
+        this.instance.exports.disasm(this.cpu, seg, off, count);
+    }
+    public getVramSignature(base: number, size: number): number {
         if (!this.instance) return 0;
         return this.instance.exports.get_vram_signature(base, size);
     }

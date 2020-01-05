@@ -110,7 +110,7 @@ typedef enum {
     reg_type_dreg,
 } disasm_reg_type;
 
-const char *reg_names_AL[] = {"AL", "CL", "DL", "BL", "AH", "CH", "DH", "BL" };
+const char *reg_names_AL[] = {"AL", "CL", "DL", "BL", "AH", "CH", "DH", "BH" };
 const char *reg_names_AX[] = {"AX", "CX", "DX", "BX", "SP", "BP", "SI", "DI" };
 const char *reg_names_EAX[] = {"EAX", "ECX", "EDX", "EBX", "ESP", "EBP", "ESI", "EDI" };
 const char *reg_names_sreg[] = {"ES", "CS", "SS", "DS", "FS", "GS", "???", "???" };

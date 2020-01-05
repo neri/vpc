@@ -365,7 +365,6 @@ i1005:
 i100B:
 i100C:
 i100D:
-i1010:
 i1011:
 i1012:
 i1014:
@@ -380,6 +379,30 @@ i101D:
 i101E:
 i101F:
     ; db 0xF1
+    ret
+
+i1010:
+    cmp al, 0x12
+    jz _set_pal_block
+    ret
+_set_pal_block:
+    mov dx, 0x03C8
+    mov ax, [bp+STK_BX]
+    out dx, al
+    inc dx
+    dec cx
+    xor ch, ch
+    inc cx
+    mov ds, [bp+STK_ES]
+    mov si, [bp+STK_DX]
+.loop:
+    lodsb
+    out dx, al
+    lodsb
+    out dx, al
+    lodsb
+    out dx, al
+    loop .loop
     ret
 
 i101A:
@@ -448,11 +471,11 @@ i100F:
 
 i1006:
 i1007:
-    or al, al
-    jz .cls
-    ; TODO:
-    ret
-.cls:
+;     or al, al
+;     jz .cls
+;     ; TODO:
+;     ret
+; .cls:
     add dx, 0x0001
     call _bios_cursor_addr
     mov dx, cx
@@ -1149,6 +1172,16 @@ _INIT:
     mov ax, 0xF000
     stosw
     loop .loop3
+
+    mov di, 0x0100
+    mov cx, 64
+.loop4:
+    mov ax, _iret
+    movsw
+    mov ax, cs
+    stosw
+    loop .loop4
+
 
     ;; BIOS Data Area
     mov di, 0x0400

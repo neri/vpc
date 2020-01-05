@@ -487,7 +487,6 @@ static inline uint16_t READ_MEM16(sreg_t *sreg, uint32_t offset) {
 }
 
 static inline uint32_t READ_MEM32(sreg_t *sreg, uint32_t offset) {
-    return READ_LE32(mem + sreg->base + offset);
     uint32_t linear = sreg->base + offset;
     if (linear < max_mem) {
         return READ_LE32(mem + linear);
@@ -908,6 +907,7 @@ static int INVOKE_INT(cpu_state *cpu, int n, int_cause_t cause) {
         int idt_offset = cpu->IDT.base + n * 4;
         uint32_t new_eip = READ_LE16(mem + idt_offset);
         uint16_t new_csel = READ_LE16(mem + idt_offset + 2);
+        if (new_csel == 0 && new_eip == 0) return RAISE_GPF(0);
 
         PUSHW(cpu, cpu->eflags);
         PUSHW(cpu, cpu->CS.sel);
@@ -917,7 +917,6 @@ static int INVOKE_INT(cpu_state *cpu, int n, int_cause_t cause) {
         cpu->EIP = new_eip;
         cpu->eflags &= cpu->flags_mask_intrm;
 
-        if (new_csel == 0 && new_eip == 0) return RAISE_GPF(0);
         return CS_LIMIT_CHECK(cpu, 0);
     } else {
         uint16_t old_csel = cpu->CS.sel, old_ssel = cpu->SS.sel;
@@ -1046,7 +1045,7 @@ static inline int IRET(cpu_state *cpu) {
 }
 
 
-static int SETF8(cpu_state *cpu, int value) {
+static inline int SETF8(cpu_state *cpu, int value) {
     int8_t v = value;
     cpu->OF = (value != v);
     cpu->SF = (v < 0);
@@ -1055,7 +1054,7 @@ static int SETF8(cpu_state *cpu, int value) {
     return value;
 }
 
-static int SETF16(cpu_state *cpu, int value) {
+static inline int SETF16(cpu_state *cpu, int value) {
     int16_t v = value;
     cpu->OF = (value != v);
     cpu->SF = (v < 0);
@@ -1064,7 +1063,7 @@ static int SETF16(cpu_state *cpu, int value) {
     return value;
 }
 
-static int SETF32(cpu_state *cpu, int value) {
+static inline int SETF32(cpu_state *cpu, int value) {
     int64_t v = value;
     cpu->OF = (value != v);
     cpu->SF = (v < 0);
@@ -1130,7 +1129,7 @@ typedef struct {
     int32_t opr2;
 } operand_set;
 
-static int MODRM(cpu_state *cpu, sreg_t *seg_ovr, modrm_t *result) {
+static inline int MODRM(cpu_state *cpu, sreg_t *seg_ovr, modrm_t *result) {
     modrm_t modrm;
     uint32_t rip = cpu->CS.base + cpu->EIP;
     modrm.modrm = mem[rip];
@@ -1253,7 +1252,7 @@ static int MODRM(cpu_state *cpu, sreg_t *seg_ovr, modrm_t *result) {
     return 0;
 }
 
-static void MODRM_W_D(cpu_state *cpu, sreg_t *seg, int w, int d, operand_set *set) {
+static inline void MODRM_W_D(cpu_state *cpu, sreg_t *seg, int w, int d, operand_set *set) {
     modrm_t modrm;
     void *opr1;
     void *opr2;
@@ -1302,7 +1301,7 @@ static void MODRM_W_D(cpu_state *cpu, sreg_t *seg, int w, int d, operand_set *se
     }
 }
 
-static int MODRM_W(cpu_state *cpu, sreg_t *seg, int w, operand_set *set) {
+static inline int MODRM_W(cpu_state *cpu, sreg_t *seg, int w, operand_set *set) {
     int result = 0;
     modrm_t modrm;
     if (MODRM(cpu, seg, &modrm)) {
@@ -1328,7 +1327,7 @@ static int MODRM_W(cpu_state *cpu, sreg_t *seg, int w, operand_set *set) {
     return result;
 }
 
-static void OPR(cpu_state *cpu, sreg_t *seg, uint8_t opcode, operand_set *set) {
+static inline void OPR(cpu_state *cpu, sreg_t *seg, uint8_t opcode, operand_set *set) {
     int w = opcode & 1;
     if (opcode & 4) {
         if (w) {
@@ -1357,7 +1356,7 @@ static void OPR(cpu_state *cpu, sreg_t *seg, uint8_t opcode, operand_set *set) {
     }
 }
 
-static void ADD(cpu_state *cpu, operand_set *set, int c) {
+static inline void ADD(cpu_state *cpu, operand_set *set, int c) {
     int value;
     int src = set->opr2;
     switch (set->size) {
@@ -1392,14 +1391,14 @@ static void ADD(cpu_state *cpu, operand_set *set, int c) {
     }
 }
 
-static void INC(cpu_state *cpu, operand_set *set) {
+static inline void INC(cpu_state *cpu, operand_set *set) {
     int saved_cf = cpu->CF;
     set->opr2 = 1;
     ADD(cpu, set, 0);
     cpu->CF = saved_cf;
 }
 
-static void SUB(cpu_state *cpu, operand_set *set, int c, int cmp) {
+static inline void SUB(cpu_state *cpu, operand_set *set, int c, int cmp) {
     int value;
     int src = set->opr2;
     switch (set->size) {
@@ -1437,14 +1436,14 @@ static void SUB(cpu_state *cpu, operand_set *set, int c, int cmp) {
     }
 }
 
-static void DEC(cpu_state *cpu, operand_set *set) {
+static inline void DEC(cpu_state *cpu, operand_set *set) {
     int saved_cf = cpu->CF;
     set->opr2 = 1;
     SUB(cpu, set, 0, 0);
     cpu->CF = saved_cf;
 }
 
-static void OR(cpu_state *cpu, operand_set *set) {
+static inline void OR(cpu_state *cpu, operand_set *set) {
     switch (set->size) {
         case 0:
         {
@@ -1469,7 +1468,7 @@ static void OR(cpu_state *cpu, operand_set *set) {
     cpu->OF = 0;
 }
 
-static void AND(cpu_state *cpu, operand_set *set, int test) {
+static inline void AND(cpu_state *cpu, operand_set *set, int test) {
     switch (set->size) {
         case 0:
         {
@@ -1497,7 +1496,7 @@ static void AND(cpu_state *cpu, operand_set *set, int test) {
     cpu->OF = 0;
 }
 
-static void XOR(cpu_state *cpu, operand_set *set) {
+static inline void XOR(cpu_state *cpu, operand_set *set) {
     switch (set->size) {
         case 0:
         {
@@ -1522,7 +1521,7 @@ static void XOR(cpu_state *cpu, operand_set *set) {
     cpu->OF = 0;
 }
 
-static int JUMP_IF(cpu_state *cpu, int disp, int cc) {
+static inline int JUMP_IF(cpu_state *cpu, int disp, int cc) {
     if (cc) {
         if (cpu->cpu_context & CPU_CTX_DATA32) {
             cpu->EIP = cpu->EIP + disp;
@@ -1534,7 +1533,7 @@ static int JUMP_IF(cpu_state *cpu, int disp, int cc) {
 }
 
 // Evaluate Conditions for Jcc, SETcc, CMOVcc
-static int EVAL_CC(cpu_state *cpu, int cc) {
+static inline int EVAL_CC(cpu_state *cpu, int cc) {
     switch (cc & 0xF) {
         case 0: // xO
             return (cpu->OF);
@@ -4510,18 +4509,18 @@ WASM_EXPORT int run(cpu_state *cpu, int speed_status) {
             if (cpu->IF) {
                 return cpu_status_halt;
             } else {
-                println("**** SYSTEM HALTED");
+                println("#### SYSTEM HALTED");
                 dump_regs(cpu, cpu->EIP);
                 return cpu_status_exit;
             }
         case cpu_status_div:
-            println("**** DIVIDE ERROR");
+            println("#### DIVIDE ERROR");
             dump_regs(cpu, cpu->EIP);
             return status;
 
         case cpu_status_ud:
             if (!cpu->VM) {
-                println("**** PANIC: UNDEFINED INSTRUCTION");
+                println("#### PANIC: UNDEFINED INSTRUCTION");
                 dump_regs(cpu, cpu->EIP);
                 return status;
             }
@@ -4541,7 +4540,7 @@ WASM_EXPORT int run(cpu_state *cpu, int speed_status) {
                     return 0;
                 }
             }
-            println("**** PANIC: TRIPLE FAULT!!!");
+            println("#### PANIC: TRIPLE FAULT!!!");
             dump_regs(cpu, cpu->EIP);
             return status;
     }

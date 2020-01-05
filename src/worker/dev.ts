@@ -130,10 +130,10 @@ export class VPIT {
         this.cntPhases = [0, 0, 0];
         this.cntValues = new Uint8Array(6);
         this.p0061_data = 0;
-    
-        env.iomgr.on(0x40, (_, data) => this.outCntReg(0, data));
-        env.iomgr.on(0x41, (_, data) => this.outCntReg(1, data));
-        env.iomgr.on(0x42, (_, data) => this.outCntReg(2, data));
+
+        env.iomgr.on(0x40, (_, data) => this.outCntReg(0, data), _ => this.readCntReg(0));
+        env.iomgr.on(0x41, (_, data) => this.outCntReg(1, data), _ => this.readCntReg(1));
+        env.iomgr.on(0x42, (_, data) => this.outCntReg(2, data), _ => this.readCntReg(2));
         env.iomgr.on(0x43, (_, data) => {
             const counter = (data >> 6) & 3;
             const format = (data >> 4) & 3;
@@ -172,6 +172,9 @@ export class VPIT {
     private p61(): number {
         this.p0061_data ^= 0x10;
         return this.p0061_data;
+    }
+    private readCntReg(counter: number): number {
+        return (Math.random() * 255) | 0;
     }
     private outCntReg(counter: number, data: number): void {
         if (this.cntPhases[counter] != 1) {
