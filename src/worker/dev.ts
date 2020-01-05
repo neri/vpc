@@ -208,8 +208,8 @@ export class VPIT {
         return count_value;
     }
     public clearTimer(): void {
-        this.env.setTimer(0);
         this.env.pic.clearPendingIRQ(0);
+        this.env.setTimer(0);
     }
     public setTimer(): void {
         this.env.setTimer(this.getCounter(0) / 1193.181);

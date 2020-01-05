@@ -94,9 +94,6 @@ const startEmu = () => {
     $('#keyFocusButton').addEventListener('click', e => {
         term.focus();
     });
-    // $('#mouseFocusButton').addEventListener('click', e => {
-    //     // TODO:
-    // });
     setTimeout(() => term.focus(), 100);
     term.focus();
 
@@ -685,7 +682,7 @@ window.addEventListener('DOMContentLoaded', () => {
     window.beep = new i8254Sound(window.devmgr);
     window.midi = new VirtualMidiDevice(window.devmgr, $('#cpMidi'));
     window.vga = new VideoDevice(window.devmgr, $('#canvasVGA'), Math.ceil(window.devicePixelRatio) | 1);
-    window.vpad = new VirtualTrackPad(window.devmgr, $('#screen_container'), $('#vPadBtnL'), $('#vPadBtnR'), $('#terminal'));
+    window.vpad = new VirtualTrackPad(window.devmgr, $('#screen_container'), $('#vPadBtnL'), $('#vPadBtnR'), $('#terminal'), $('#virtualTrackpad'), $('#mouseFocusButton'));
 
     $('#click_to_start').addEventListener('click', e => {
         if (!window.WebAssembly) {
@@ -780,11 +777,13 @@ window.addEventListener('DOMContentLoaded', () => {
 
 class VirtualTrackPad {
 
-    constructor(devmgr, dom, domL, domR, domTerm) {
+    constructor(devmgr, dom, domL, domR, domTerm, domPad, domButton) {
         this.mouseDown = false;
-        this.touchCoord = null;
+        this.touchCoords = null;
         this.touchIdentifier = null;
+        this.pointerCoords = null;
         this.mouseEnabled = false;
+        this.capturePointerId = null;
 
         dom.addEventListener('click', (e) => {
             if (this.mouseEnabled) return;
@@ -792,9 +791,47 @@ class VirtualTrackPad {
             domTerm.focus();
         });
 
+        dom.addEventListener('pointerenter', e => {
+            if (!this.mouseEnabled) return;
+            if (!this.isPointerMouse(e)) return;
+            this.pointerCoords = this.getPointerCoords(e);
+            e.preventDefault();
+        });
+        dom.addEventListener('pointerdown', e => {
+            if (!this.mouseEnabled) return;
+            if (!this.isPointerMouse(e)) return;
+            this.pointerCoords = this.getPointerCoords(e);
+            dom.setPointerCapture(e.pointerId);
+            this.capturePointerId = e.pointerId;
+            this.sendButtonStateChanged(this.convertPointerButton(e), true);
+            e.preventDefault();
+        });
+        dom.addEventListener('pointermove', e => {
+            if (!this.mouseEnabled) return;
+            if (!this.isPointerMouse(e)) return;
+            this.sendPointerChanged(this.convertPointerCursor(this.getPointerCoords(e)));
+            e.preventDefault();
+        });
+        dom.addEventListener('pointerup', e => {
+            if (!this.mouseEnabled) return;
+            if (!this.isPointerMouse(e)) return;
+            this.sendButtonStateChanged(this.convertPointerButton(e), false);
+            dom.releasePointerCapture(e.pointerId);
+            this.capturePointerId = null;
+            e.preventDefault();
+        });
+        dom.addEventListener('pointercancel', e => {
+            if (!this.mouseEnabled) return;
+            if (!this.isPointerMouse(e)) return;
+            dom.releasePointerCapture(e.pointerId);
+            this.capturePointerId = null;
+            this.pointerCoords = null;
+            e.preventDefault();
+        });
+
         dom.addEventListener('touchstart', (e) => {
             if (!this.mouseEnabled) return;
-            this.touchCoord = this.convertTouchEvent(e, true);
+            this.touchCoords = this.convertTouchEvent(e, true);
             e.preventDefault();
         }, false);
         dom.addEventListener('touchmove', (e) => {
@@ -803,13 +840,13 @@ class VirtualTrackPad {
             e.preventDefault();
         }, false);
         dom.addEventListener('touchend', (e) => {
-            this.touchCoord = null;
+            this.touchCoords = null;
             this.touchIdentifier = null;
             if (!this.mouseEnabled) return;
             e.preventDefault();
         }, false);
         dom.addEventListener('touchcancel', (e) => {
-            this.touchCoord = null;
+            this.touchCoords = null;
             this.touchIdentifier = null;
             if (!this.mouseEnabled) return;
             e.preventDefault();
@@ -841,6 +878,17 @@ class VirtualTrackPad {
             e.preventDefault();
         }, false);
 
+        devmgr.onCommand('mouse', args => {
+            const enabled = args.enabled;
+            this.mouseEnabled = enabled;
+            if (!enabled && this.capturePointerId) {
+                dom.releasePointerCapture(this.capturePointerId);
+                this.capturePointerId = null;
+            }
+        });
+    }
+    isPointerMouse(e) {
+        return e.pointerType === 'mouse'
     }
     sendPointerChanged(array) {
         if (window.worker && array) {
@@ -848,15 +896,29 @@ class VirtualTrackPad {
         }
     }
     sendButtonStateChanged(button, pressed) {
-        if (window.worker) {
+        if (window.worker && button) {
             worker.postMessage({command: 'pointer', button: button, pressed: pressed});
         } 
     }
-    convertMouseEvent(e) {
+    getPointerCoords(e) {
         const tr = e.target.getBoundingClientRect();
         const ex = (e.clientX - tr.left) | 0;
         const ey = (e.clientY - tr.top) | 0;
         return {ex, ey};
+    }
+    convertPointerCursor(coords) {
+        if (coords) {
+            const  { ex, ey } = coords;
+            if (this.pointerCoords && (ex || ey)) {
+                const retVal = [ex - this.pointerCoords[0], ey - this.pointerCoords[1]];
+                this.pointerCoords = [ex, ey];
+                return retVal;
+            }
+        }
+        return undefined;
+    }
+    convertPointerButton(e) {
+        return "LMR"[e.button];
     }
     convertTouchEvent(e, is_start = false) {
         const tr = e.target.getBoundingClientRect();
@@ -876,9 +938,9 @@ class VirtualTrackPad {
     convertTouchCursor(coords) {
         if (coords) {
             const { ex, ey } = coords;
-            if (this.touchCoord && (ex || ey)) {
-                const retVal = [ex - this.touchCoord[0], ey - this.touchCoord[1]];
-                this.touchCoord = [ex, ey];
+            if (this.touchCoords && (ex || ey)) {
+                const retVal = [ex - this.touchCoords[0], ey - this.touchCoords[1]];
+                this.touchCoords = [ex, ey];
                 return retVal;
             }
         }

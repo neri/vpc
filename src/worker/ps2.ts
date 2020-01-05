@@ -196,17 +196,17 @@ export class PS2 {
                         this.postMouseACK(0);
                         break;
                     case 0xF4:
-                        this.isMouseEnabled = true;
+                        this.setMouseEnabled(true);
                         this.postMouseACK(PS2_ACK);
                         break;
                     case 0xF5:
-                        this.isMouseEnabled = false;
+                        this.setMouseEnabled(false);
                         this.postMouseACK(PS2_ACK);
                         break;
                     case 0xFF:
                         this.env.pic.clearPendingIRQ(IRQ_MOUSE);
                         this.m_fifo = [];
-                        this.isMouseEnabled = false;
+                        this.setMouseEnabled(false);
                         this.postMouseACK(0xAA);
                         break;
                     }
@@ -240,6 +240,10 @@ export class PS2 {
     private postKeyData(data: number): void {
         this.k_fifo.push(data);
         this.env.pic.raiseIRQ(IRQ_KEY);
+    }
+    private setMouseEnabled(enabled: boolean): void {
+        this.isMouseEnabled = enabled;
+        this.env.worker.postCommand('mouse', {enabled: enabled});
     }
     private postMouseACK(data: number): void {
         this.m_fifo.push(data);
