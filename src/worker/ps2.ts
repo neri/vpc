@@ -250,9 +250,14 @@ export class PS2 {
         this.env.pic.raiseIRQ(IRQ_MOUSE);
     }
     private postMouseData(point: Point, buttons: Buttons): void {
-        this.m_fifo.push(buttons.toInt() | (point.x < 0 ? 0x10 : 0) | (point.y < 0 ? 0x20 : 0));
-        this.m_fifo.push(point.x & 0xFF);
-        this.m_fifo.push(point.y & 0xFF);
+        let px = point.x, py = point.y;
+        if (px > 255) px = 255;
+        if (px < -255) px = -255
+        if (py > 255) py = 255;
+        if (py < -255) py = -255;
+        this.m_fifo.push(buttons.toInt() | (px < 0 ? 0x10 : 0) | (py < 0 ? 0x20 : 0));
+        this.m_fifo.push(px & 0xFF);
+        this.m_fifo.push(py & 0xFF);
         this.env.pic.raiseIRQ(IRQ_MOUSE);
         this.env.pic.raiseIRQ(IRQ_MOUSE);
         this.env.pic.raiseIRQ(IRQ_MOUSE);

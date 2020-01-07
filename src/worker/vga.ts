@@ -3,7 +3,7 @@
 import { WorkerInterface, RuntimeEnvironment } from './env';
 // import { IOManager } from './iomgr';
 
-const actualFPS = 60;
+const actualFPS = 10;
 const vtInterval = (1000 / actualFPS) | 0;
 
 const GRAPHICS_MODE = 0x01;

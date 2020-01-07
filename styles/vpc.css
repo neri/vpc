@@ -46,7 +46,7 @@ html, body {
     margin: 0;
     padding: 0;
     display: none;
-    cursor: text;
+    cursor: crosshair;
     width: var(--main-screen-width);
     min-height: var(--main-screen-height);
     line-height: 0;

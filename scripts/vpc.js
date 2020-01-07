@@ -629,12 +629,14 @@ class VideoDevice {
     }
     renderMode13(src) {
         const { ctx, scale } = this;
-        const size = this.canvas.width * this.canvas.height;
+        const { width, height } = this.canvas;
+        const size = width * height;
         const image = this.gvram;
         let dst = new Uint32Array(image.data.buffer);
         for (let i = 0; i < size; i++) {
             dst[i] = this.pal[src[i]];
         }
+        ctx.clearRect(0, 0, width, height);
         ctx.putImageData(image, 0, 0);
     }
     renderModeCGA(src) {
@@ -660,11 +662,13 @@ class VideoDevice {
                 }
             }
         }
+        ctx.clearRect(0, 0, width, height);
         ctx.putImageData(image, 0, 0);
     }
     renderMode11(src) {
         const { ctx, scale, BLACK, WHITE } = this;
-        const size = this.canvas.width * this.canvas.height / 8;
+        const { width, height } = this.canvas;
+        const size = (width * height) >> 3;
         const image = this.gvram;
         let dst = new Uint32Array(image.data.buffer);
         let j = 0;
@@ -674,6 +678,7 @@ class VideoDevice {
                 dst[j++] = (c & k) ? WHITE : BLACK;
             }
         }
+        ctx.clearRect(0, 0, width, height);
         ctx.putImageData(image, 0, 0);
     }
 }
@@ -781,9 +786,7 @@ class VirtualTrackPad {
         this.mouseDown = false;
         this.touchCoords = null;
         this.touchIdentifier = null;
-        this.pointerCoords = null;
         this.mouseEnabled = false;
-        this.capturePointerId = null;
 
         dom.addEventListener('click', (e) => {
             if (this.mouseEnabled) return;
@@ -792,40 +795,27 @@ class VirtualTrackPad {
         });
 
         dom.addEventListener('pointerenter', e => {
-            if (!this.mouseEnabled) return;
             if (!this.isPointerMouse(e)) return;
-            this.pointerCoords = this.getPointerCoords(e);
             e.preventDefault();
         });
         dom.addEventListener('pointerdown', e => {
-            if (!this.mouseEnabled) return;
             if (!this.isPointerMouse(e)) return;
-            this.pointerCoords = this.getPointerCoords(e);
-            dom.setPointerCapture(e.pointerId);
-            this.capturePointerId = e.pointerId;
+            dom.requestPointerLock();
             this.sendButtonStateChanged(this.convertPointerButton(e), true);
             e.preventDefault();
         });
         dom.addEventListener('pointermove', e => {
-            if (!this.mouseEnabled) return;
             if (!this.isPointerMouse(e)) return;
-            this.sendPointerChanged(this.convertPointerCursor(this.getPointerCoords(e)));
+            this.sendPointerChanged(this.getPointerMovements(e));
             e.preventDefault();
         });
         dom.addEventListener('pointerup', e => {
-            if (!this.mouseEnabled) return;
             if (!this.isPointerMouse(e)) return;
             this.sendButtonStateChanged(this.convertPointerButton(e), false);
-            dom.releasePointerCapture(e.pointerId);
-            this.capturePointerId = null;
             e.preventDefault();
         });
         dom.addEventListener('pointercancel', e => {
-            if (!this.mouseEnabled) return;
             if (!this.isPointerMouse(e)) return;
-            dom.releasePointerCapture(e.pointerId);
-            this.capturePointerId = null;
-            this.pointerCoords = null;
             e.preventDefault();
         });
 
@@ -881,14 +871,11 @@ class VirtualTrackPad {
         devmgr.onCommand('mouse', args => {
             const enabled = args.enabled;
             this.mouseEnabled = enabled;
-            if (!enabled && this.capturePointerId) {
-                dom.releasePointerCapture(this.capturePointerId);
-                this.capturePointerId = null;
-            }
+            try { dom.exitPointerLock(); } catch(e) { }
         });
     }
     isPointerMouse(e) {
-        return e.pointerType === 'mouse'
+        return this.mouseEnabled && e.pointerType === 'mouse'
     }
     sendPointerChanged(array) {
         if (window.worker && array) {
@@ -900,22 +887,9 @@ class VirtualTrackPad {
             worker.postMessage({command: 'pointer', button: button, pressed: pressed});
         } 
     }
-    getPointerCoords(e) {
-        const tr = e.target.getBoundingClientRect();
-        const ex = (e.clientX - tr.left) | 0;
-        const ey = (e.clientY - tr.top) | 0;
-        return {ex, ey};
-    }
-    convertPointerCursor(coords) {
-        if (coords) {
-            const  { ex, ey } = coords;
-            if (this.pointerCoords && (ex || ey)) {
-                const retVal = [ex - this.pointerCoords[0], ey - this.pointerCoords[1]];
-                this.pointerCoords = [ex, ey];
-                return retVal;
-            }
-        }
-        return undefined;
+    getPointerMovements(e) {
+        const ex = e.movementX | 0, ey = e.movementY | 0;
+        return [ex, ey];
     }
     convertPointerButton(e) {
         return "LMR"[e.button];
@@ -948,5 +922,3 @@ class VirtualTrackPad {
     }
 
 }
-
-
