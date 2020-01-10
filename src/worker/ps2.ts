@@ -5,7 +5,6 @@ import { WorkerInterface, RuntimeEnvironment } from './env';
 
 const IRQ_KEY = 1;
 const IRQ_MOUSE = 12;
-const SCAN_DUMMY = 0x6F;
 const PS2_ACK = 0xFA;
 const PS2_NAK = 0xFE;
 
@@ -258,9 +257,7 @@ export class PS2 {
         this.m_fifo.push(buttons.toInt() | (px < 0 ? 0x10 : 0) | (py < 0 ? 0x20 : 0));
         this.m_fifo.push(px & 0xFF);
         this.m_fifo.push(py & 0xFF);
-        this.env.pic.raiseIRQ(IRQ_MOUSE);
-        this.env.pic.raiseIRQ(IRQ_MOUSE);
-        this.env.pic.raiseIRQ(IRQ_MOUSE);
+        this.env.pic.raiseIRQ(IRQ_MOUSE, 3);
     }
     private onKey(e: any): void {
         if (!this.isKeyboardEnabled) return;
@@ -292,10 +289,6 @@ export class PS2 {
         if (altKey) {
             scancode &= 0x7F;
         }
-
-        // if (scancode === 0 && ascii !== 0) {
-        //     scancode = SCAN_DUMMY;
-        // }
 
         switch (type) {
         case 'keydown':

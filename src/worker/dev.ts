@@ -90,9 +90,9 @@ export class VPIC {
             }
         }
     }
-    public raiseIRQ(n: number): void {
+    public raiseIRQ(n: number, count: number = 1): void {
         // if (n) console.log('raise', n, this.irq.length);
-        this.intCount[n]++;
+        this.intCount[n] += count;
         this.enqueue(0);
     }
     public clearPendingIRQ(n: number): void {
