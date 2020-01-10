@@ -778,6 +778,14 @@ window.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    $('#optionNNI').addEventListener('change', e => {
+        if (e.target.checked) {
+            $('#canvasVGA').classList.add('nearest_neighbor');
+        } else {
+            $('#canvasVGA').classList.remove('nearest_neighbor');
+        }
+    });
+
 });
 
 class VirtualTrackPad {

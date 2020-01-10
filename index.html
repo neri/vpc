@@ -23,8 +23,15 @@
         <div id="biosPanel" style="display: none;">
             <article>
                 <div class="controlFrame">
+                    System
+                    <br>
                     <label>
-                        CPU Mode:
+                        Performance:
+                        <input type="range" min="0" max="10" step="1" value="5" disabled>
+                    </label>
+                    <br>
+                    <label>
+                        CPU:
                         <select id="selCpuGen">
                             <option value="0">8086</option>
                             <option value="1">80186</option>
@@ -41,6 +48,19 @@
                             <option value="16384" selected>16MB</option>
                             <option value="65536">64MB</option>
                         </select>
+                    </label>
+                </div>
+                <div class="controlFrame">
+                    Video Option
+                    <br>
+                    <label>
+                        Performance:
+                        <input type="range" min="0" max="10" step="1" value="5" disabled>
+                    </label>
+                    <br>
+                    <label>
+                        <input type="checkbox" value="1" id="optionNNI">
+                        Nearest Neighbor Interpolation
                     </label>
                 </div>
                 <div id="cpMidi"></div>

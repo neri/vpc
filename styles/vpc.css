@@ -99,7 +99,7 @@ html, body {
     color: #CCC;
     border-radius: 8px;
     min-height: 24px;
-    vertical-align: middle;
+    vertical-align: top;
     border: transparent dashed 2px;
     font-size: 14px;
 }
@@ -273,4 +273,10 @@ input[readonly] {
     text-align: center;
     color: black;
     border-radius: 8px;
+}
+
+.nearest_neighbor {
+    image-rendering: -moz-crisp-edges;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
 }
