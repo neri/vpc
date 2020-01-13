@@ -903,6 +903,7 @@ static inline int INVOKE_INT_MAIN(cpu_state *cpu, int n, int_cause_t cause) {
 }
 
 static int INVOKE_INT(cpu_state *cpu, int n, int_cause_t cause) {
+    cpu->cpu_context = cpu->default_context;
     if (!cpu->CR0.PE) {
         int idt_offset = cpu->IDT.base + n * 4;
         uint32_t new_eip = READ_LE16(mem + idt_offset);
@@ -3723,8 +3724,20 @@ static int cpu_step(cpu_state *cpu) {
                                 if (!is_kernel(cpu)) return RAISE_GPF(0);
                                 uint16_t new_sel = READ_LE16(set.opr1);
                                 return LOAD_DESCRIPTOR(cpu, &cpu->TSS, new_sel, type_bitmap_TSS32, 0, NULL);
-                            // case 4: // VERR
-                            // case 5: // VERW
+                            case 4: // VERR
+                            {
+                                sreg_t temp;
+                                uint16_t sel = READ_LE16(set.opr1);
+                                cpu->ZF = (LOAD_DESCRIPTOR(cpu, &temp, sel, type_bitmap_SEG_READ, 0, NULL) == 0);
+                                return 0;
+                            }
+                            case 5: // VERW
+                            {
+                                sreg_t temp;
+                                uint16_t sel = READ_LE16(set.opr1);
+                                cpu->ZF = (LOAD_DESCRIPTOR(cpu, &temp, sel, type_bitmap_SEG_WRITE, 0, NULL) == 0);
+                                return 0;
+                            }
                         }
                         return cpu_status_ud;
                     }
@@ -3781,7 +3794,13 @@ static int cpu_step(cpu_state *cpu) {
                                 WRITE_LE16(set.opr1, cpu->CR[0]);
                                 return 0;
                             }
-                            // case 6: // LMSW
+                            case 6: // LMSW
+                            {
+                                if (cpu->cpu_gen < cpu_gen_80286) return cpu_status_ud;
+                                uint32_t value = cpu->CR0.value & 0xFFFF0000;
+                                value |= READ_LE16(set.opr1);
+                                return MOV_CR(cpu, 0, value);
+                            }
                             case 7: // INVLPG (NOP)
                                 return 0;
                         }

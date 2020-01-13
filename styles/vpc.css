@@ -280,3 +280,12 @@ input[readonly] {
     image-rendering: pixelated;
     image-rendering: crisp-edges;
 }
+
+/* #videoOverlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: var(--main-screen-width);
+    height: var(--main-screen-height);
+    background: url('interlace.png') repeat;
+} */

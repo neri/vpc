@@ -471,11 +471,11 @@ i100F:
 
 i1006:
 i1007:
-;     or al, al
-;     jz .cls
-;     ; TODO:
-;     ret
-; .cls:
+    or al, al
+    jz .cls
+    ; TODO:
+    ret
+.cls:
     add dx, 0x0001
     call _bios_cursor_addr
     mov dx, cx
@@ -516,6 +516,7 @@ i1002:
 i1003:
     mov ax, [BDA_VGA_CURSOR]
     mov [bp+STK_DX], ax
+    mov word [bp+STK_CX], 0x0607
     ret
 
 
@@ -706,8 +707,8 @@ _chk_scroll:
     mul bh
     mov cx, ax
     xor bh, bh
-    add bx, bx
     mov si, bx
+    add si, si
     xor di, di
     rep movsw
     mov cl, bl
@@ -1173,14 +1174,14 @@ _INIT:
     stosw
     loop .loop3
 
-    mov di, 0x0100
-    mov cx, 64
-.loop4:
-    mov ax, _iret
-    movsw
-    mov ax, cs
-    stosw
-    loop .loop4
+;     mov di, 0x0100
+;     mov cx, 64
+; .loop4:
+;     mov ax, _iret
+;     movsw
+;     mov ax, cs
+;     stosw
+;     loop .loop4
 
 
     ;; BIOS Data Area
@@ -1190,7 +1191,7 @@ _INIT:
     xor ax, ax
     mov cx, 7
     rep stosw
-    mov ax, 0x0201
+    mov ax, 0x0225
     stosw
     xor al, al
     stosb
@@ -1207,9 +1208,12 @@ _INIT:
     stosb
     mov ax, 80
     stosw
-    mov ax, 80 * 50
+    mov ax, 0x1000
     stosw
     xor ax, ax
+    stosw
+    mov di, 0x463
+    mov ax, 0x3D4
     stosw
     mov di, 0x400 + BDA_VGA_CONSOLE_ROWSm1
     mov al, 24
