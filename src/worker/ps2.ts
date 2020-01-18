@@ -109,7 +109,7 @@ const scanTable: number[] = [
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 ];
 
-class Point {
+class Coords {
     public x = 0;
     public y = 0;
 }
@@ -131,7 +131,7 @@ export class PS2 {
     private k_fifo: number[] = [];
     private m_fifo: number[] = [];
     private i_fifo: number[] = [];
-    private pointer = new Point();
+    private coords = new Coords();
     private buttons = new Buttons();
     private isKeyboardEnabled = true;
     private isMouseEnabled = false;
@@ -248,7 +248,7 @@ export class PS2 {
         this.m_fifo.push(data);
         this.env.pic.raiseIRQ(IRQ_MOUSE);
     }
-    private postMouseData(point: Point, buttons: Buttons): void {
+    private postMouseData(point: Coords, buttons: Buttons): void {
         let px = point.x, py = point.y;
         if (px > 255) px = 255;
         if (px < -255) px = -255
@@ -309,15 +309,15 @@ export class PS2 {
     private onPointer(move?: number[], button?: string, pressed?: boolean) {
         if (!this.isMouseEnabled) return;
         if (move) {
-            this.pointer.x += move[0];
-            this.pointer.y -= move[1];
+            this.coords.x += move[0];
+            this.coords.y -= move[1];
         }
         if (button) {
             (this.buttons as any)[button] = pressed ? true : false;
         }
         if (move || button) {
-            this.postMouseData(this.pointer, this.buttons);
-            this.pointer = new Point();
+            this.postMouseData(this.coords, this.buttons);
+            this.coords = new Coords();
         }
     }
 }

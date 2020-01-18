@@ -29,6 +29,7 @@ export class VGA {
     private vram_base: number = 0;
     private vram_size: number = 0;
     private vram_sign: number = 0;
+    private vtrace_time = 0;
     private vtrace = false;
 
     constructor (env: RuntimeEnvironment) {
@@ -94,7 +95,9 @@ export class VGA {
     }
     readVtrace(): number {
         if (this.vtrace) {
-            this.vtrace = false;
+            if (new Date().valueOf() - this.vtrace_time > 0) {
+                this.vtrace = false;
+            }
             return 0x08;
         } else {
             return 0x01;
@@ -177,6 +180,7 @@ export class VGA {
         }
     }
     transferVGA() {
+        this.vtrace_time = new Date().valueOf();
         this.vtrace = true;
         this.updateCursor();
         const sign: number = this.env.getVramSignature(this.vram_base, this.vram_size);

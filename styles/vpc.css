@@ -205,10 +205,11 @@ address {
 }
 
 select {
+    display: inline-block;
     -webkit-appearance: none;
     appearance: none;
     border-radius: 4px;
-    padding: 0 4px;
+    padding: 0 8px;
     line-height: var(--button-height);
     border: none;
     box-shadow: 1px 1px 4px 2px var(--shadow-color);
@@ -289,3 +290,7 @@ input[readonly] {
     height: var(--main-screen-height);
     background: url('interlace.png') repeat;
 } */
+
+#devTerminal {
+    width: 95%;
+}
