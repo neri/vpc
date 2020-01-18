@@ -141,6 +141,9 @@ const startSecond = () => {
                 terminal.scrollTop = terminal.scrollHeight;
                 break;
             }
+            case 'debugReaction':
+                $('#devTool').open = true;
+                break;
             default:
                 window.devmgr.dispatchMessage(message.data.command, message.data.data);
         }
@@ -704,12 +707,6 @@ window.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    $('#buttonNMI').addEventListener('click', e => {
-        if (window.worker) {
-            worker.postMessage({command: 'nmi' });
-        }
-    });
-
     $('#labelLocal').addEventListener('click', e => {
         $('#fileLocal').click();
     });
@@ -763,11 +760,23 @@ window.addEventListener('DOMContentLoaded', () => {
     $('#buttonDevCLS').addEventListener('click', e => {
         $('#devTerminal').value = '';
     });
+    const debugCommand = cmdline => {
+        if (window.worker) {
+            worker.postMessage({command: 'debug', cmdline: cmdline});
+            $('#debugCmdline').value = '';
+        }
+    }
     $('#debugCmdline').addEventListener('keypress', e => {
         if (e.keyCode == 13) {
             e.preventDefault();
-            alert(e);
+            debugCommand($('#debugCmdline').value);
         }
+    });
+    $('#debugEnter').addEventListener('click', e => {
+        debugCommand($('#debugCmdline').value);
+    });
+    $('#buttonStep').addEventListener('click', e => {
+        debugCommand('t');
     });
 
     $('#biosButton').addEventListener('click', e => {

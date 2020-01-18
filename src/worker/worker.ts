@@ -6,6 +6,7 @@ import { PS2 } from './ps2';
 import { VGA } from './vga';
 import { VFD } from './vfd';
 import { MPU401 } from './mpu';
+import { Debugger } from './debug';
 
 const ctx: Worker = self as any;
 class WI implements WorkerInterface {
@@ -80,7 +81,7 @@ class WI implements WorkerInterface {
         if (handler) {
             handler(args);
         } else {
-            console.log('worker.onmessage', command, args);
+            console.error('worker.onmessage', command, args);
         }
     }
 }
@@ -91,3 +92,4 @@ const env = new RuntimeEnvironment(wi);
 (self as any).ps2 = new PS2(env);
 (self as any).floppy = new VFD(env);
 (self as any).vga = new VGA(env);
+(self as any).db = new Debugger(wi, env);

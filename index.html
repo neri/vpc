@@ -65,6 +65,18 @@
                     </label>
                 </div>
                 <div id="cpMidi"></div>
+                <!-- <div class="controlFrame">
+                    Debug Option
+                    <br>
+                    <label>
+                        <input type="checkbox" value="1" id="optionDebugMBR">
+                        Break on MBR
+                    </label>
+                    <label>
+                        <input type="checkbox" value="1" disabled>
+                        Break on Exception
+                    </label>
+                </div> -->
             </article>
         </div>
     </div>
@@ -98,14 +110,14 @@
             </label>
         </span>
 
-        <details>
+        <details id="devTool">
             <summary class="buttonFace">DevTool</summary>
             <article>
-                    <a id="buttonNMI" class="buttonFace">Step</a>
+                    <a id="buttonStep" class="buttonFace">Step</a>
                     <a id="buttonDevCLS" class="buttonFace destructiveButton">&#x1f5d1;</a>
                     <input id="debugCmdline" type="text" list="cmdSuggestion" placeholder="COMMAND" size="40">
-                    <a id="" class="buttonFace activeButton">Enter</a>
-                    <datalist id="cmdSuggestion">
+                    <a id="debugEnter" class="buttonFace activeButton">Enter</a>
+                    <!-- <datalist id="cmdSuggestion">
                         <option value="t">Step</option>
                         <option value="c">Continue</option>
                         <option value="e">Edit &lt;Address&gt; &lt;Values...&gt;</option>
@@ -113,7 +125,7 @@
                         <option value="d">Dump &lt;Range&gt;</option>
                         <option value="r">ShowRegister</option>
                         <option value="u">DisAssemble &lt;Range&gt;</option>
-                    </datalist>
+                    </datalist> -->
                     <br>
                     <textarea id="devTerminal" cols="80" rows="20" readonly></textarea>
             </article>

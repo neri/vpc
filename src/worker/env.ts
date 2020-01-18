@@ -12,7 +12,10 @@ export interface WorkerInterface {
     bind(command: string, handler: WorkerMessageHandler): void;
 }
 
+const STATUS_ICEBP = 4;
+const STATUS_HALT = 0x1000;
 const STATUS_EXCEPTION = 0x10000;
+
 export class RuntimeEnvironment {
 
     public worker: WorkerInterface;
@@ -80,7 +83,6 @@ export class RuntimeEnvironment {
         this.iomgr.onw(0xFC02, undefined, (_) => this.memoryConfig[1]);
 
         worker.bind('reset', (args) => this.reset(args.gen));
-        worker.bind('nmi', (_) => this.NMI());
     }
     public loadCPU(wasm: WebAssembly.Instance): void {
         this.instance = wasm;
@@ -172,7 +174,6 @@ export class RuntimeEnvironment {
     }
     private cont(): void {
         if (!this.instance) return;
-        const STATUS_ICEBP = 4;
         if (this.period > 0) {
             const now = new Date().valueOf();
             for (let expected = this.lastTick + this.period; now >= expected; expected += this.period) {
@@ -199,10 +200,11 @@ export class RuntimeEnvironment {
             this.isRunning = false;
             this.isDebugging = true;
             this.instance.exports.debug_dump(this.cpu);
+            this.worker.postCommand('debugReaction', {});
         } else {
             let timer = 1;
             switch (status) {
-                case 0x1000:
+                case STATUS_HALT:
                     const now = new Date().valueOf();
                     const expected = this.lastTick + this.period;
                     timer = expected - now;
@@ -222,8 +224,10 @@ export class RuntimeEnvironment {
             }
         }
     }
-    public NMI(): void {
+    public step(): void {
         if (!this.instance) return;
+        this.dequeueUART();
+        this.worker.postCommand('debugReaction', {});
         if (!this.isRunning) {
             let status: number = this.instance.exports.step(this.cpu);
             if (status >= STATUS_EXCEPTION) {
@@ -233,7 +237,23 @@ export class RuntimeEnvironment {
         } else {
             this.isDebugging = true;
         }
+    }
+    public stepOver(): void {
+        if (!this.instance) return;
         this.dequeueUART();
+        if (this.instance.exports.prepare_step_over(this.cpu)) {
+            this.debugContinue();
+        } else {
+            let status: number = this.instance.exports.step(this.cpu);
+            if (status >= STATUS_EXCEPTION) {
+                this.worker.print(`#### Exception Occurred (${status.toString(16)})`);
+            }
+            this.instance.exports.debug_dump(this.cpu);
+        }
+    }
+    public showRegs(): void {
+        if (!this.instance) return;
+        this.instance.exports.debug_dump(this.cpu);
     }
     public debugContinue(): void {
         if (this.isDebugging) {
@@ -254,6 +274,10 @@ export class RuntimeEnvironment {
         let a = new Uint32Array(this.env.memory.buffer, reg, 1);
         return a[0];
     }
+    public getSegmentBase(selector: number): number {
+        if (!this.instance) return 0;
+        return this.instance.exports.debug_get_segment_base(this.cpu, selector);
+    }
     public regOrValue(_token: string): number {
         let token = _token.toUpperCase();
         if (Object.keys(this.regmap).indexOf(token) >= 0) {
@@ -266,22 +290,13 @@ export class RuntimeEnvironment {
             throw new Error('BAD TOKEN');
         }
     }
-    public dump(seg_off: string): void {
+    public dump(base: number, count: number): number|undefined {
         if (!this.instance) return;
-        const a = seg_off.split(/:/);
-        let seg: number, off: number;
-        if (a.length == 2) {
-            seg = this.regOrValue(a[0]);
-            off = this.regOrValue(a[1]);
-        } else {
-            seg = 0;
-            off = this.regOrValue(a[0]);
-        }
-        const base: number = this.instance.exports.debug_get_segment_base(this.cpu, seg) + off;
         const addrToHex = (n: number) => ('00000000' + n.toString(16)).substr(-8);
         const toHex = (n: number) => ('00' + n.toString(16)).substr(-2);
         let lines: string[] = [];
-        for (let i = 0; i < 16; i++) {
+        const limit = (count + 15) >> 4;
+        for (let i = 0; i < limit; i++) {
             const offset = base + i * 16;
             let line = [addrToHex(offset)];
             let chars: string[] = [];
@@ -298,19 +313,11 @@ export class RuntimeEnvironment {
             lines.push(line.join(' '));
         }
         this.worker.print(lines.join('\n'));
+        return base + limit * 16;
     }
-    public disasm(seg_off: string, count: number): void {
+    public disasm(seg: number, off: number, count: number): number|undefined {
         if (!this.instance) return;
-        const a = seg_off.split(/:/);
-        let seg: number, off: number;
-        if (a.length == 2) {
-            seg = this.regOrValue(a[0]);
-            off = this.regOrValue(a[1]);
-        } else {
-            seg = this.getReg('CS');
-            off = this.regOrValue(a[0]);
-        }
-        this.instance.exports.disasm(this.cpu, seg, off, count);
+        return this.instance.exports.disasm(this.cpu, seg, off, count);
     }
     public getVramSignature(base: number, size: number): number {
         if (!this.instance) return 0;
