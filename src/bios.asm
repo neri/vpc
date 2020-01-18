@@ -53,6 +53,7 @@
 %define BDA_VGA_CURRENT_MODE    0x0049
 %define BDA_VGA_CONSOLE_COLS    0x004A
 %define BDA_VGA_CURSOR      0x0050
+%define BDA_VGA_ACTIVE_PAGE 0x0062
 %define BDA_TIME_STAMP      0x006C
 %define BDA_MIDNIGHT_FLAG        0x0070
 %define BDA_VGA_CONSOLE_ROWSm1  0x0084
@@ -465,7 +466,10 @@ i1000: ;; SET VIDEO MODE
 
 i100F:
     mov al, [BDA_VGA_CURRENT_MODE]
-    mov [bp+STK_AX], al
+    mov ah, [BDA_VGA_CONSOLE_COLS]
+    mov [bp+STK_AX], ax
+    mov bh, [BDA_VGA_ACTIVE_PAGE]
+    mov [bp+STK_BX + 1], bh
     ret
 
 
@@ -525,8 +529,6 @@ i1013:
     jae .end
     cmp dl, 80
     jae .end
-    xor bx, bx
-    mov es, bx
     mov ds, [bp + STK_ES]
     mov si, [bp + STK_BP]
 .loop:
