@@ -247,6 +247,7 @@ typedef union {
 typedef struct {
     uint32_t offset;
     uint16_t sel;
+    uint8_t replacement;
 } bp_vec_t;
 
 typedef struct cpu_state {
@@ -4522,48 +4523,91 @@ static int cpu_block(cpu_state *cpu, int speed_status) {
     }
     int i = 0;
     int is_debug = cpu->n_bps;
-    for (; i < periodic; i++) {
-        // if (is_debug && cpu->bps[0].offset == cpu->EIP && cpu->bps[0].sel == cpu->CS.sel) {
-        //     cpu->n_bps = 0;
-        //     return cpu_status_icebp;
-        // }
-        uint32_t last_known_eip = cpu->EIP;
-        int status = cpu_step(cpu);
-        if (status == cpu_status_periodic) continue;
-
-        if (status == cpu_status_inta) {
-            status = check_irq(cpu);
-            if (status) return status;
-            if (cpu->TF) {
-                last_known_eip = cpu->EIP;
-                status = cpu_step(cpu);
-                if (status) goto check;
-                has_to_trace = 0;
-                status = INVOKE_INT(cpu, 1, exception);
-                if (status) return status;
+    if (is_debug) {
+        for (; i < periodic; i++) {
+            if (cpu->bps[0].offset == cpu->EIP && cpu->bps[0].sel == cpu->CS.sel) {
+                cpu->n_bps = 0;
+                return cpu_status_icebp;
             }
-            continue;
-        }
-check:
-        switch (status) {
-            case cpu_status_pause:
-                return cpu_status_periodic;
-            case cpu_status_div:
-                if (cpu->cpu_gen >= cpu_gen_80286) {
-                    cpu->EIP = last_known_eip;
-                }
-                status = INVOKE_INT(cpu, 0, exception); // #DE
+            uint32_t last_known_eip = cpu->EIP;
+            int status = cpu_step(cpu);
+            if (status == cpu_status_periodic) continue;
+
+            if (status == cpu_status_inta) {
+                status = check_irq(cpu);
                 if (status) return status;
+                if (cpu->TF) {
+                    last_known_eip = cpu->EIP;
+                    status = cpu_step(cpu);
+                    if (status) goto check1;
+                    has_to_trace = 0;
+                    status = INVOKE_INT(cpu, 1, exception);
+                    if (status) return status;
+                }
                 continue;
-            case cpu_status_halt:
-            case cpu_status_icebp:
-                return status;
-            case cpu_status_fpu:
+            }
+    check1:
+            switch (status) {
+                case cpu_status_pause:
+                    return cpu_status_periodic;
+                case cpu_status_div:
+                    if (cpu->cpu_gen >= cpu_gen_80286) {
+                        cpu->EIP = last_known_eip;
+                    }
+                    status = INVOKE_INT(cpu, 0, exception); // #DE
+                    if (status) return status;
+                    continue;
+                case cpu_status_halt:
+                case cpu_status_icebp:
+                    return status;
+                case cpu_status_fpu:
+                    continue;
+                case cpu_status_ud:
+                default:
+                    cpu->EIP = last_known_eip;
+                    return status;
+            }
+        }
+    } else {
+        for (; i < periodic; i++) {
+            uint32_t last_known_eip = cpu->EIP;
+            int status = cpu_step(cpu);
+            if (status == cpu_status_periodic) continue;
+
+            if (status == cpu_status_inta) {
+                status = check_irq(cpu);
+                if (status) return status;
+                if (cpu->TF) {
+                    last_known_eip = cpu->EIP;
+                    status = cpu_step(cpu);
+                    if (status) goto check2;
+                    has_to_trace = 0;
+                    status = INVOKE_INT(cpu, 1, exception);
+                    if (status) return status;
+                }
                 continue;
-            case cpu_status_ud:
-            default:
-                cpu->EIP = last_known_eip;
-                return status;
+            }
+    check2:
+            switch (status) {
+                case cpu_status_pause:
+                    return cpu_status_periodic;
+                case cpu_status_div:
+                    if (cpu->cpu_gen >= cpu_gen_80286) {
+                        cpu->EIP = last_known_eip;
+                    }
+                    status = INVOKE_INT(cpu, 0, exception); // #DE
+                    if (status) return status;
+                    continue;
+                case cpu_status_halt:
+                case cpu_status_icebp:
+                    return status;
+                case cpu_status_fpu:
+                    continue;
+                case cpu_status_ud:
+                default:
+                    cpu->EIP = last_known_eip;
+                    return status;
+            }
         }
     }
 
@@ -4646,6 +4690,7 @@ WASM_EXPORT int run(cpu_state *cpu, int speed_status) {
  * When an exception occurs during `step`, the status code is returned but no interrupt is generated.
  *
  * @returns Status Code, see below.
+ * 
  * |Status Code|Cause|Continuity|Description|
  * |-|-|-|-|
  * |0|Periodic|Y|Periodic return|
@@ -4678,30 +4723,90 @@ WASM_EXPORT int step(cpu_state *cpu) {
 }
 
 
+static inline void cpu_set_bp(cpu_state *cpu, bp_vec_t bp) {
+    cpu->bps[0] = bp;
+    cpu->n_bps = 1;
+}
+
+
 /**
- * Prepare step over
+ * Set Breakpoint
+ */
+WASM_EXPORT void set_breakpoint(cpu_state *cpu, uint16_t sel, uint32_t off) {
+    bp_vec_t bp = {
+        .offset = off,
+        .sel = sel,
+    };
+    cpu_set_bp(cpu, bp);
+}
+
+
+/**
+ * Prepare Step Over
  * 
- * @retval true next instruction needs breakpoint
- * @retval false next instruction can step
+ * @return Next instruction's state
+ * @retval true The next instruction needs breakpoint and `run`
+ * @retval false The next instruction needs `step`
  */
 WASM_EXPORT int prepare_step_over(cpu_state *cpu) {
-    return 0;
-    // TODO:
+    int needs_breakpoint = 0;
+    uint32_t rip = cpu->CS.base + cpu->EIP;
+    uint32_t len = 0;
+    for (;;) {
+        uint8_t opcode = mem[rip + len];
+        len++;
+        opmap_t map1 = opcode1[opcode];
+        switch (map1.optype) {
+            case optype_prefix:
+            case optype_prefix66:
+            case optype_prefix67:
+                continue;
+            default: break;
+        }
+        switch (opcode) {
+            case 0x9A: // CALLF Ap
+            case 0xE8: // CALL Jz
+            case 0xCC: // INT3
+            case 0xCD: // INT Ib
+            case 0xCE: // INTO
+            case 0xE0: // LOOPNZ Jbs
+            case 0xE1: // LOOPZ Jbs
+            case 0xE2: // LOOP Jbs
+                needs_breakpoint = 1;
+                break;
 
-    // bp_vec_t bp = {
-    //     .offset = cpu->EIP + get_inst_len(cpu),
-    //     .sel = cpu->CS.sel,
-    // };
-    // cpu->bps[0] = bp;
-    // cpu->n_bps = 1;
-    // return 1;
+            case 0xFF: // group
+            {
+                modrm_t modrm;
+                modrm.modrm = mem[rip + len];
+                switch (modrm.reg) {
+                    case 2: // CALLN Ev
+                    case 3: // CALLF Mp
+                        needs_breakpoint = 1;
+                        break;
+                }
+                break;
+            }
+
+            // default:
+            //     return 0;
+        }
+        if (needs_breakpoint) {
+            bp_vec_t bp = {
+                .offset = cpu->EIP + get_inst_len(cpu),
+                .sel = cpu->CS.sel,
+            };
+            cpu_set_bp(cpu, bp);
+        }
+        return needs_breakpoint;
+    }
 }
 
 
 /**
  * Dump state of CPU.
  */
-WASM_EXPORT void debug_dump(cpu_state *cpu) {
+WASM_EXPORT void show_regs(cpu_state *cpu) {
     dump_regs(cpu, cpu->EIP);
 }
 

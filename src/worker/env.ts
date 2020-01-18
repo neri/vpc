@@ -188,7 +188,7 @@ export class RuntimeEnvironment {
         } catch (e) {
             console.error(e);
             status = STATUS_EXCEPTION;
-            this.instance.exports.debug_dump(this.cpu);
+            this.instance.exports.show_regs(this.cpu);
         }
         // const diff = Date.now() - time0;
         // this.speed_status = (diff < 5) ? 1 : -1;
@@ -199,7 +199,7 @@ export class RuntimeEnvironment {
         } else if (this.isDebugging || status == STATUS_ICEBP) {
             this.isRunning = false;
             this.isDebugging = true;
-            this.instance.exports.debug_dump(this.cpu);
+            this.instance.exports.show_regs(this.cpu);
             this.worker.postCommand('debugReaction', {});
         } else {
             let timer = 1;
@@ -233,7 +233,7 @@ export class RuntimeEnvironment {
             if (status >= STATUS_EXCEPTION) {
                 this.worker.print(`#### Exception Occurred (${status.toString(16)})`);
             }
-            this.instance.exports.debug_dump(this.cpu);
+            this.instance.exports.show_regs(this.cpu);
         } else {
             this.isDebugging = true;
         }
@@ -241,6 +241,7 @@ export class RuntimeEnvironment {
     public stepOver(): void {
         if (!this.instance) return;
         this.dequeueUART();
+        this.worker.postCommand('debugReaction', {});
         if (this.instance.exports.prepare_step_over(this.cpu)) {
             this.debugContinue();
         } else {
@@ -248,12 +249,12 @@ export class RuntimeEnvironment {
             if (status >= STATUS_EXCEPTION) {
                 this.worker.print(`#### Exception Occurred (${status.toString(16)})`);
             }
-            this.instance.exports.debug_dump(this.cpu);
+            this.instance.exports.show_regs(this.cpu);
         }
     }
     public showRegs(): void {
         if (!this.instance) return;
-        this.instance.exports.debug_dump(this.cpu);
+        this.instance.exports.show_regs(this.cpu);
     }
     public debugContinue(): void {
         if (this.isDebugging) {

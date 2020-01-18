@@ -7,10 +7,11 @@ type Vector = [number, number];
 const HELP_MESSAGE = `\
 Continue    G
 Step        T
+Step Over   P
+Register    R [register [value]]
 Dump Memory D [range]
 Disassemble U [range]`;
 
-// Step Over   P
 // Edit Memory E address values
 // Fill Memory F range values
 
@@ -36,37 +37,65 @@ export class Debugger {
         this.worker.print(`# ${cmd} ${args.join(' ')}`);
         this.lastCmd = undefined;
         switch (cmd.toLowerCase()) {
+            // Help
             case '?':
                 this.worker.print(HELP_MESSAGE);
                 break;
 
+            // Step by step
             case 't':
                 this.env.step();
                 this.lastCmd = cmd;
+                this.lastDisAVec = undefined;
                 break;
+
+            // Step over
             case 'p':
                 this.env.stepOver();
                 this.lastCmd = cmd;
-                break;
-            case 'g':
-                this.env.debugContinue();
-                break;
-            case 'r':
-                this.env.showRegs();
+                this.lastDisAVec = undefined;
                 break;
 
+            // Continue
+            case 'g':
+                this.env.debugContinue();
+                this.lastDisAVec = undefined;
+                break;
+
+            // Register
+            case 'r':
+                {
+                    let regName = args.shift();
+                    if (regName) {
+                        regName = regName.toUpperCase();
+                        const oldValue = this.env.getReg(regName);
+                        let _newValue = args.shift();
+                        if (_newValue) {
+                            const newValue = this.getScalar(_newValue);
+                            this.env.setReg(regName, newValue);
+                            this.worker.print(`${regName}: ${ oldValue.toString(16).padStart(8, '0') } => ${ this.env.getReg(regName).toString(16).padStart(8, '0') }`);
+                        } else {
+                            this.worker.print(`${regName}: ${ oldValue.toString(16).padStart(8, '0') }`);
+                        }
+                    } else {
+                        this.env.showRegs();
+                        this.lastDisAVec = this.getCSIP();
+                    }
+                    break;
+                }
+
+            // Dump
             case 'd':
                 {
                     const DEFAULT_COUNT = 256;
-                    let base: number;
+                    let base: number, count: number;
                     const seg_off = args.shift();
                     if (seg_off) {
                         base = this.getVectorToLinear(seg_off, 0);
                     } else {
                         base = this.lastDumpLA || 0;
                     }
-                    let count: number;
-                    let arg_count = args.shift();
+                    const arg_count = args.shift();
                     if (arg_count) {
                         count = this.getScalar(arg_count);
                     } else {
@@ -76,19 +105,19 @@ export class Debugger {
                     this.lastCmd = cmd;
                     break;
                 }
-
+            
+            // Disassemble
             case 'u':
                 {
-                    let vec: Vector;
                     const DEFAULT_COUNT = 10;
+                    let vec: Vector, count: number;
                     const seg_off = args.shift();
                     if (seg_off) {
-                        vec = this.getVector(seg_off);
+                        vec = this.getVector(seg_off, this.env.getReg('CS'));
                     } else {
-                        vec = this.lastDisAVec || [this.env.getReg('IP'), this.env.getReg('CS')];
+                        vec = this.lastDisAVec || this.getCSIP();
                     }
-                    let count: number;
-                    let arg_count = args.shift();
+                    const arg_count = args.shift();
                     if (arg_count) {
                         count = this.getScalar(arg_count);
                     } else {
@@ -120,19 +149,22 @@ export class Debugger {
         }
         return this.env.getSegmentBase(seg) + off;
     }
-    getVector(seg_off: string): Vector {
+    getVector(seg_off: string, def_seg: number): Vector {
         const a = seg_off.split(/:/);
         let seg: number, off: number;
         if (a.length == 2) {
             seg = this.env.regOrValue(a[0]);
             off = this.env.regOrValue(a[1]);
         } else {
-            seg = this.env.getReg('CS');
+            seg = def_seg;
             off = this.env.regOrValue(a[0]);
         }
         return [off, seg];
     }
     getScalar(val: string): number {
         return this.env.regOrValue(val);
+    }
+    getCSIP(): Vector {
+        return [this.env.getReg('IP'), this.env.getReg('CS')];
     }
 }
