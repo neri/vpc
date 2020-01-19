@@ -111,7 +111,7 @@ export class RuntimeEnvironment {
     public setSound(freq: number): void {
         this.worker.postCommand('beep', freq);
     }
-    public emit(to: number, from: any): void {
+    public emit(to: number, from: Array<any>): void {
         const l = from.length;
         let p = this.vmem + to;
         for (let i = 0; i < l; i++) {
@@ -129,12 +129,12 @@ export class RuntimeEnvironment {
             }
         }
     }
-    public dmaWrite(ptr: number, data: ArrayBuffer): void {
+    public dmaWrite(base: number, data: ArrayBuffer): void {
         const a = new Uint8Array(data);
-        this._memory.set(a, this.vmem + ptr);
+        this._memory.set(a, this.vmem + base);
     }
-    public dmaRead(ptr: number, size: number): Uint8Array {
-        const offset = this.vmem + ptr;
+    public dmaRead(base: number, size: number): Uint8Array {
+        const offset = this.vmem + base;
         return this._memory.slice(offset, offset + size);
     }
     public strlen(at: number): number {
@@ -182,7 +182,6 @@ export class RuntimeEnvironment {
             }
         }
         let status: number;
-        // const time0 = Date.now();
         try {
             status = this.instance.exports.run(this.cpu, this.speed_status);
         } catch (e) {
@@ -190,8 +189,6 @@ export class RuntimeEnvironment {
             status = STATUS_EXCEPTION;
             this.instance.exports.show_regs(this.cpu);
         }
-        // const diff = Date.now() - time0;
-        // this.speed_status = (diff < 5) ? 1 : -1;
         this.dequeueUART();
         if (status >= STATUS_EXCEPTION) {
             this.isRunning = false;
@@ -244,17 +241,23 @@ export class RuntimeEnvironment {
         this.worker.postCommand('debugReaction', {});
         if (this.instance.exports.prepare_step_over(this.cpu)) {
             this.debugContinue();
-        } else {
+        } else if (!this.isRunning) {
             let status: number = this.instance.exports.step(this.cpu);
             if (status >= STATUS_EXCEPTION) {
                 this.worker.print(`#### Exception Occurred (${status.toString(16)})`);
             }
             this.instance.exports.show_regs(this.cpu);
+        } else {
+            this.isDebugging = true;
         }
     }
     public showRegs(): void {
         if (!this.instance) return;
         this.instance.exports.show_regs(this.cpu);
+    }
+    public showDesc(): void {
+        if (!this.instance) return;
+        this.instance.exports.dump_regs(this.cpu);
     }
     public debugContinue(): void {
         if (this.isDebugging) {
@@ -286,22 +289,34 @@ export class RuntimeEnvironment {
         } else if (token[0] === 'E' && Object.keys(this.regmap).indexOf(token.substr(1)) >= 0) {
             return this.getReg(token.substr(1));
         } else if (token.match(/^([\dABCDEF]+)$/)) {
-            return parseInt(`0x0${token}`) | 0;
+            return parseInt(token, 16) | 0;
         } else {
             throw new Error('BAD TOKEN');
         }
     }
-    public dump(base: number, count: number): number|undefined {
+    public dump(address: number, count: number): number|undefined {
         if (!this.instance) return;
         const addrToHex = (n: number) => ('00000000' + n.toString(16)).substr(-8);
         const toHex = (n: number) => ('00' + n.toString(16)).substr(-2);
         let lines: string[] = [];
-        const limit = (count + 15) >> 4;
+        const base = address & 0xFFFFFFF0;
+        const bias = address - base;
+        const lastCount = ((address + count - 1) & 15) + 1;
+        const limit = (count + bias + 15) >> 4;
+        const lastLine = limit - 1;
         for (let i = 0; i < limit; i++) {
             const offset = base + i * 16;
             let line = [addrToHex(offset)];
             let chars: string[] = [];
-            for (let j = 0; j < 16; j++) {
+            let j = 0;
+            if (i === 0) {
+                for (; j < bias; j++) {
+                    line.push('  ');
+                    chars.push(' ');
+                }
+            }
+            const lc = (i === lastLine) ? lastCount : 16;
+            for (; j < lc; j++) {
                 const c = this._memory[this.vmem + offset + j];
                 line.push(toHex(c));
                 if (c >= 0x20 && c < 0x7F) {
@@ -310,11 +325,15 @@ export class RuntimeEnvironment {
                     chars.push('.');
                 }
             }
+            for (; j < 16; j++) {
+                line.push('  ');
+                chars.push(' ');
+            }
             line.push(chars.join(''));
             lines.push(line.join(' '));
         }
         this.worker.print(lines.join('\n'));
-        return base + limit * 16;
+        return address + count;
     }
     public disasm(seg: number, off: number, count: number): number|undefined {
         if (!this.instance) return;
