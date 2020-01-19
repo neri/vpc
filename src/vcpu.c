@@ -45,7 +45,7 @@ void *memcpy(void *p, const void *q, size_t n) {
 typedef struct cpu_state cpu_state;
 typedef struct sreg_t sreg_t;
 WASM_EXPORT void cpu_reset(cpu_state *cpu, int gen);
-WASM_EXPORT void dump_regs(cpu_state *cpu, uint32_t eip);
+WASM_EXPORT void cpu_show_regs(cpu_state *cpu, uint32_t eip);
 char *dump_disasm(char *p, cpu_state *cpu, uint32_t eip);
 int get_inst_len(cpu_state *cpu);
 
@@ -4322,7 +4322,7 @@ char *dump_segment(char *p, sreg_t *seg) {
     return p;
 }
 
-void dump_regs(cpu_state *cpu, uint32_t eip) {
+void cpu_show_regs(cpu_state *cpu, uint32_t eip) {
     static char buff[1024];
     char *p = buff;
 
@@ -4389,44 +4389,90 @@ void dump_regs(cpu_state *cpu, uint32_t eip) {
     *p++ = cpu->CF ? 'C' : '-';
 
     if (cpu->cpu_gen >= cpu_gen_80386) {
-        if (cpu->CR0.PE) {
-            p = dump_string(p, "\nCS ");
-            p = dump_segment(p, &cpu->CS);
-            p = dump_string(p, " SS ");
-            p = dump_segment(p, &cpu->SS);
-            p = dump_string(p, "\nDS ");
-            p = dump_segment(p, &cpu->DS);
-            p = dump_string(p, " ES ");
-            p = dump_segment(p, &cpu->ES);
-            p = dump_string(p, "\nFS ");
-            p = dump_segment(p, &cpu->FS);
-            p = dump_string(p, " GS ");
-            p = dump_segment(p, &cpu->GS);
-            p = dump_string(p, "\nGDT ");
-            p = dump_segment(p, &cpu->GDT);
-            p = dump_string(p, " IDT ");
-            p = dump_segment(p, &cpu->IDT);
-            p = dump_string(p, "\nLDT ");
-            p = dump_segment(p, &cpu->LDT);
-            p = dump_string(p, " TSS ");
-            p = dump_segment(p, &cpu->TSS);
-        } else {
-            p = dump_string(p, "\nCS ");
-            p = dump16(p, cpu->CS.sel);
-            p = dump_string(p, " SS ");
-            p = dump16(p, cpu->SS.sel);
-            p = dump_string(p, " DS ");
-            p = dump16(p, cpu->DS.sel);
-            p = dump_string(p, " ES ");
-            p = dump16(p, cpu->ES.sel);
-            p = dump_string(p, " FS ");
-            p = dump16(p, cpu->FS.sel);
-            p = dump_string(p, " GS ");
-            p = dump16(p, cpu->GS.sel);
-        }
+        p = dump_string(p, "\nCS ");
+        p = dump16(p, cpu->CS.sel);
+        p = dump_string(p, " SS ");
+        p = dump16(p, cpu->SS.sel);
+        p = dump_string(p, " DS ");
+        p = dump16(p, cpu->DS.sel);
+        p = dump_string(p, " ES ");
+        p = dump16(p, cpu->ES.sel);
+        p = dump_string(p, " FS ");
+        p = dump16(p, cpu->FS.sel);
+        p = dump_string(p, " GS ");
+        p = dump16(p, cpu->GS.sel);
     }
+
+
     *p++ = '\n';
     p = dump_disasm(p, cpu, eip);
+    *p = 0;
+    println(buff);
+}
+
+WASM_EXPORT void dump_regs(cpu_state *cpu) {
+    static char buff[1024];
+    char *p = buff;
+
+    p = dump_string(p, "EAX ");
+    p = dump32(p, cpu->EAX);
+    p = dump_string(p, " EBX ");
+    p = dump32(p, cpu->EBX);
+    p = dump_string(p, " ECX ");
+    p = dump32(p, cpu->ECX);
+    p = dump_string(p, " EDX ");
+    p = dump32(p, cpu->EDX);
+    p = dump_string(p, " ESP ");
+    p = dump32(p, cpu->ESP);
+    p = dump_string(p, " EBP ");
+    p = dump32(p, cpu->EBP);
+    p = dump_string(p, "\nESI ");
+    p = dump32(p, cpu->ESI);
+    p = dump_string(p, " EDI ");
+    p = dump32(p, cpu->EDI);
+    p = dump_string(p, " EIP ");
+    p = dump32(p, cpu->EIP);
+    p = dump_string(p, " EFLAGS ");
+    p = dump32(p, cpu->eflags);
+    *p++ = ' ';
+    *p++ = cpu->OF ? 'O' : '-';
+    *p++ = cpu->DF ? 'D' : 'U';
+    *p++ = cpu->IF ? 'I' : '-';
+    *p++ = cpu->SF ? 'S' : '-';
+    *p++ = cpu->ZF ? 'Z' : '-';
+    *p++ = cpu->PF ? 'P' : '-';
+    *p++ = cpu->CF ? 'C' : '-';
+
+    p = dump_string(p, "\nCS ");
+    p = dump_segment(p, &cpu->CS);
+    p = dump_string(p, " SS ");
+    p = dump_segment(p, &cpu->SS);
+    p = dump_string(p, "\nDS ");
+    p = dump_segment(p, &cpu->DS);
+    p = dump_string(p, " ES ");
+    p = dump_segment(p, &cpu->ES);
+    p = dump_string(p, "\nFS ");
+    p = dump_segment(p, &cpu->FS);
+    p = dump_string(p, " GS ");
+    p = dump_segment(p, &cpu->GS);
+    p = dump_string(p, "\nGDT ");
+    p = dump_segment(p, &cpu->GDT);
+    p = dump_string(p, " IDT ");
+    p = dump_segment(p, &cpu->IDT);
+    p = dump_string(p, "\nLDT ");
+    p = dump_segment(p, &cpu->LDT);
+    p = dump_string(p, " TSS ");
+    p = dump_segment(p, &cpu->TSS);
+
+    p = dump_string(p, "\nCR0 ");
+    p = dump32(p, cpu->CR0.value);
+    p = dump_string(p, " CR2 ");
+    p = dump32(p, cpu->CR2);
+    p = dump_string(p, " CR3 ");
+    p = dump32(p, cpu->CR3);
+
+    // *p++ = '\n';
+    // p = dump_disasm(p, cpu, eip);
     *p = 0;
     println(buff);
 }
@@ -4647,18 +4693,18 @@ WASM_EXPORT int run(cpu_state *cpu, int speed_status) {
                 return cpu_status_halt;
             } else {
                 println("#### SYSTEM HALTED");
-                dump_regs(cpu, cpu->EIP);
+                cpu_show_regs(cpu, cpu->EIP);
                 return cpu_status_exit;
             }
         case cpu_status_div:
             println("#### DIVIDE ERROR");
-            dump_regs(cpu, cpu->EIP);
+            cpu_show_regs(cpu, cpu->EIP);
             return status;
 
         case cpu_status_ud:
             if (!cpu->VM) {
                 println("#### PANIC: UNDEFINED INSTRUCTION");
-                dump_regs(cpu, cpu->EIP);
+                cpu_show_regs(cpu, cpu->EIP);
                 return status;
             }
         default:
@@ -4678,7 +4724,7 @@ WASM_EXPORT int run(cpu_state *cpu, int speed_status) {
             //     }
             // }
             println("#### PANIC: TRIPLE FAULT!!!");
-            dump_regs(cpu, cpu->EIP);
+            cpu_show_regs(cpu, cpu->EIP);
             return status;
     }
 }
@@ -4807,7 +4853,7 @@ WASM_EXPORT int prepare_step_over(cpu_state *cpu) {
  * Dump state of CPU.
  */
 WASM_EXPORT void show_regs(cpu_state *cpu) {
-    dump_regs(cpu, cpu->EIP);
+    cpu_show_regs(cpu, cpu->EIP);
 }
 
 /**

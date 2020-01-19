@@ -5,14 +5,15 @@ import { RuntimeEnvironment, WorkerInterface } from './env';
 type Vector = [number, number];
 
 const HELP_MESSAGE = `\
-Continue    G
-Step        T
-Step Over   P
-Register    R [register [value]]
-Dump Memory D [range]
-Disassemble U [range]`;
+Continue        G
+Step Into       T
+Step Over       P
+Register        R [register [value]]
+Reg Details     RD
+Edit Memory     E address values
+Dump Memory     D [range]
+Disassemble     U [range]`;
 
-// Edit Memory E address values
 // Fill Memory F range values
 
 export class Debugger {
@@ -36,6 +37,7 @@ export class Debugger {
         if (!cmd) return;
         this.worker.print(`# ${cmd} ${args.join(' ')}`);
         this.lastCmd = undefined;
+        try{
         switch (cmd.toLowerCase()) {
             // Help
             case '?':
@@ -81,6 +83,27 @@ export class Debugger {
                         this.env.showRegs();
                         this.lastDisAVec = this.getCSIP();
                     }
+                    break;
+                }
+
+            case 'rd':
+                this.env.showDesc();
+                break;
+
+            // Edit
+            case 'e':
+                {
+                    const seg_off = args.shift();
+                    if (!seg_off) throw new Error('Missing address');
+                    const base = this.getVectorToLinear(seg_off, 0);
+                    if (!args.length) throw new Error('Missing arguments');
+                    let array = [];
+                    args.forEach((arg, index) => {
+                        let v = parseInt(arg, 16);
+                        if (isNaN(v) || v < -128 || v > 255) throw new Error(`Invalid argument ${index}:${arg}`);
+                        array.push(v);
+                    });
+                    this.env.emit(base, array);
                     break;
                 }
 
@@ -135,6 +158,10 @@ export class Debugger {
             default:
                 this.worker.print('command?');
                 break;
+        }
+        }catch(e) {
+            console.error(e);
+            this.worker.print(e.message);
         }
     }
     getVectorToLinear(seg_off: string, def_seg: number): number {
