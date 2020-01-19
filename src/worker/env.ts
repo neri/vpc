@@ -1,15 +1,21 @@
 // Runtime Environment for Virtual Playground
 
 import { IOManager } from './iomgr';
-import { VPIC, VPIT, UART, RTC } from './dev';
+import { VPIC, VPIT, UART, RTC, PCI } from './dev';
+
+export type WorkerMessageHandler = (args: { [key: string]: any }) => void;
 
 export interface WorkerInterface {
     print(s: string): void;
     postCommand(cmd: string, data: any): void;
     hasClass(className: string): boolean;
+    bind(command: string, handler: WorkerMessageHandler): void;
 }
 
+const STATUS_ICEBP = 4;
+const STATUS_HALT = 0x1000;
 const STATUS_EXCEPTION = 0x10000;
+
 export class RuntimeEnvironment {
 
     public worker: WorkerInterface;
@@ -18,6 +24,7 @@ export class RuntimeEnvironment {
     public pit: VPIT;
     public uart: UART;
     public rtc: RTC;
+    public pci: PCI;
 
     private period: number;
     private lastTick: number;
@@ -31,6 +38,7 @@ export class RuntimeEnvironment {
     private memoryConfig: Uint16Array = new Uint16Array(2);
     private isDebugging: boolean = false;
     private isRunning: boolean = false;
+    private speed_status = 0x200000;
 
     constructor(worker: WorkerInterface) {
         this.worker = worker;
@@ -66,6 +74,7 @@ export class RuntimeEnvironment {
         this.pic = new VPIC(this.iomgr);
         this.pit = new VPIT(this);
         this.rtc = new RTC(this);
+        this.pci = new PCI(this);
         // this.uart = new UART(this, 0x3F8, 4);
 
         this.iomgr.onw(0x0000, undefined, (_) => Math.random() * 65535);
@@ -73,6 +82,7 @@ export class RuntimeEnvironment {
         this.iomgr.onw(0xFC00, undefined, (_) => this.memoryConfig[0]);
         this.iomgr.onw(0xFC02, undefined, (_) => this.memoryConfig[1]);
 
+        worker.bind('reset', (args) => this.reset(args.gen));
     }
     public loadCPU(wasm: WebAssembly.Instance): void {
         this.instance = wasm;
@@ -164,7 +174,6 @@ export class RuntimeEnvironment {
     }
     private cont(): void {
         if (!this.instance) return;
-        const STATUS_ICEBP = 4;
         if (this.period > 0) {
             const now = new Date().valueOf();
             for (let expected = this.lastTick + this.period; now >= expected; expected += this.period) {
@@ -173,13 +182,16 @@ export class RuntimeEnvironment {
             }
         }
         let status: number;
+        // const time0 = Date.now();
         try {
-            status = this.instance.exports.run(this.cpu);
+            status = this.instance.exports.run(this.cpu, this.speed_status);
         } catch (e) {
             console.error(e);
             status = STATUS_EXCEPTION;
-            this.instance.exports.debug_dump(this.cpu);
+            this.instance.exports.show_regs(this.cpu);
         }
+        // const diff = Date.now() - time0;
+        // this.speed_status = (diff < 5) ? 1 : -1;
         this.dequeueUART();
         if (status >= STATUS_EXCEPTION) {
             this.isRunning = false;
@@ -187,29 +199,17 @@ export class RuntimeEnvironment {
         } else if (this.isDebugging || status == STATUS_ICEBP) {
             this.isRunning = false;
             this.isDebugging = true;
-            this.instance.exports.debug_dump(this.cpu);
+            this.instance.exports.show_regs(this.cpu);
+            this.worker.postCommand('debugReaction', {});
         } else {
             let timer = 1;
             switch (status) {
-                case 0x1000:
+                case STATUS_HALT:
                     const now = new Date().valueOf();
                     const expected = this.lastTick + this.period;
                     timer = expected - now;
                     if (timer < 0) timer = 0;
                     break;
-                // case 1:
-                //     const cr0 = this.getReg('CR0');
-                //     let mode: string[] = [];
-                //     if (cr0 & 0x80000000) {
-                //         mode.push('Paged');
-                //     }
-                //     if (cr0 & 0x00000001) {
-                //         mode.push('Protected Mode');
-                //     } else {
-                //         mode.push('Real Mode');
-                //     }
-                //     console.log(`CPU Mode Change: ${('00000000' + cr0.toString(16)).slice(-8)} ${mode.join(' ')}`);
-                //     break;
                 default:
                     // timer = 1;
             }
@@ -224,18 +224,37 @@ export class RuntimeEnvironment {
             }
         }
     }
-    public nmi(): void {
+    public step(): void {
         if (!this.instance) return;
+        this.dequeueUART();
+        this.worker.postCommand('debugReaction', {});
         if (!this.isRunning) {
             let status: number = this.instance.exports.step(this.cpu);
             if (status >= STATUS_EXCEPTION) {
                 this.worker.print(`#### Exception Occurred (${status.toString(16)})`);
             }
-            this.instance.exports.debug_dump(this.cpu);
+            this.instance.exports.show_regs(this.cpu);
         } else {
             this.isDebugging = true;
         }
+    }
+    public stepOver(): void {
+        if (!this.instance) return;
         this.dequeueUART();
+        this.worker.postCommand('debugReaction', {});
+        if (this.instance.exports.prepare_step_over(this.cpu)) {
+            this.debugContinue();
+        } else {
+            let status: number = this.instance.exports.step(this.cpu);
+            if (status >= STATUS_EXCEPTION) {
+                this.worker.print(`#### Exception Occurred (${status.toString(16)})`);
+            }
+            this.instance.exports.show_regs(this.cpu);
+        }
+    }
+    public showRegs(): void {
+        if (!this.instance) return;
+        this.instance.exports.show_regs(this.cpu);
     }
     public debugContinue(): void {
         if (this.isDebugging) {
@@ -256,45 +275,29 @@ export class RuntimeEnvironment {
         let a = new Uint32Array(this.env.memory.buffer, reg, 1);
         return a[0];
     }
-    private reg_or_value(_token: string): number {
+    public getSegmentBase(selector: number): number {
+        if (!this.instance) return 0;
+        return this.instance.exports.debug_get_segment_base(this.cpu, selector);
+    }
+    public regOrValue(_token: string): number {
         let token = _token.toUpperCase();
         if (Object.keys(this.regmap).indexOf(token) >= 0) {
             return this.getReg(token);
         } else if (token[0] === 'E' && Object.keys(this.regmap).indexOf(token.substr(1)) >= 0) {
             return this.getReg(token.substr(1));
-        } else {
+        } else if (token.match(/^([\dABCDEF]+)$/)) {
             return parseInt(`0x0${token}`) | 0;
+        } else {
+            throw new Error('BAD TOKEN');
         }
     }
-    public disasm(seg_off: string, count: number): void {
+    public dump(base: number, count: number): number|undefined {
         if (!this.instance) return;
-        const a = seg_off.split(/:/);
-        let seg: number, off: number;
-        if (a.length == 2) {
-            seg = this.reg_or_value(a[0]);
-            off = this.reg_or_value(a[1]);
-        } else {
-            seg = this.getReg('CS');
-            off = this.reg_or_value(a[0]);
-        }
-        this.instance.exports.disasm(this.cpu, seg, off, count);
-    }
-    public dump(seg_off: string): void {
-        if (!this.instance) return;
-        const a = seg_off.split(/:/);
-        let seg: number, off: number;
-        if (a.length == 2) {
-            seg = this.reg_or_value(a[0]);
-            off = this.reg_or_value(a[1]);
-        } else {
-            seg = 0;
-            off = this.reg_or_value(a[0]);
-        }
-        const base: number = this.instance.exports.debug_get_segment_base(this.cpu, seg) + off;
         const addrToHex = (n: number) => ('00000000' + n.toString(16)).substr(-8);
         const toHex = (n: number) => ('00' + n.toString(16)).substr(-2);
         let lines: string[] = [];
-        for (let i = 0; i < 16; i++) {
+        const limit = (count + 15) >> 4;
+        for (let i = 0; i < limit; i++) {
             const offset = base + i * 16;
             let line = [addrToHex(offset)];
             let chars: string[] = [];
@@ -311,8 +314,13 @@ export class RuntimeEnvironment {
             lines.push(line.join(' '));
         }
         this.worker.print(lines.join('\n'));
+        return base + limit * 16;
     }
-    public get_vram_signature(base: number, size: number): number {
+    public disasm(seg: number, off: number, count: number): number|undefined {
+        if (!this.instance) return;
+        return this.instance.exports.disasm(this.cpu, seg, off, count);
+    }
+    public getVramSignature(base: number, size: number): number {
         if (!this.instance) return 0;
         return this.instance.exports.get_vram_signature(base, size);
     }

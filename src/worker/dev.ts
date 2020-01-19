@@ -77,7 +77,7 @@ export class VPIC {
             if (this.irq.length) return;
             const global_irq = port * 8 + i;
             const mask = (1 << i);
-            if (port == 0 && i == this.ICW[0] && (this.IMR[0] & mask) == 0) {
+            if ((port == 0) && (i == this.ICW[6]) && ((this.IMR[0] & mask) == 0)) {
                 this.enqueue(1);
                 break;
             }
@@ -90,9 +90,9 @@ export class VPIC {
             }
         }
     }
-    public raiseIRQ(n: number): void {
+    public raiseIRQ(n: number, count: number = 1): void {
         // if (n) console.log('raise', n, this.irq.length);
-        this.intCount[n]++;
+        this.intCount[n] += count;
         this.enqueue(0);
     }
     public clearPendingIRQ(n: number): void {
@@ -130,10 +130,10 @@ export class VPIT {
         this.cntPhases = [0, 0, 0];
         this.cntValues = new Uint8Array(6);
         this.p0061_data = 0;
-    
-        env.iomgr.on(0x40, (_, data) => this.outCntReg(0, data));
-        env.iomgr.on(0x41, (_, data) => this.outCntReg(1, data));
-        env.iomgr.on(0x42, (_, data) => this.outCntReg(2, data));
+
+        env.iomgr.on(0x40, (_, data) => this.outCntReg(0, data), _ => this.readCntReg(0));
+        env.iomgr.on(0x41, (_, data) => this.outCntReg(1, data), _ => this.readCntReg(1));
+        env.iomgr.on(0x42, (_, data) => this.outCntReg(2, data), _ => this.readCntReg(2));
         env.iomgr.on(0x43, (_, data) => {
             const counter = (data >> 6) & 3;
             const format = (data >> 4) & 3;
@@ -173,6 +173,9 @@ export class VPIT {
         this.p0061_data ^= 0x10;
         return this.p0061_data;
     }
+    private readCntReg(counter: number): number {
+        return (Math.random() * 255) | 0;
+    }
     private outCntReg(counter: number, data: number): void {
         if (this.cntPhases[counter] != 1) {
             this.cntValues[counter * 2] = data;
@@ -205,8 +208,8 @@ export class VPIT {
         return count_value;
     }
     public clearTimer(): void {
-        this.env.setTimer(0);
         this.env.pic.clearPendingIRQ(0);
+        this.env.setTimer(0);
     }
     public setTimer(): void {
         this.env.setTimer(this.getCounter(0) / 1193.181);
@@ -263,11 +266,6 @@ export class RTC {
     writeRTC(data: number): void {
         this.ram[this.index] = data;
     }
-    // readRTC(): number {
-    //     const result = this._readRTC();
-    //     console.log('read_rtc', this.index, ('00' + result.toString(16)).slice(-2));
-    //     return result;
-    // }
     readRTC(): number {
         const toBCD = (n: number) => {
             const a1 = n % 10;
@@ -295,5 +293,18 @@ export class RTC {
         default:
             return this.ram[this.index];
         }
+    }
+}
+
+/**
+ * Peripheral Component Interconnect
+ */
+export class PCI {
+    private lastAddress = 0;
+
+    constructor (env: RuntimeEnvironment) {
+        // TODO: everything
+        env.iomgr.ond(0xCF8, (_, data) => this.lastAddress = data, (_) => this.lastAddress);
+        env.iomgr.ond(0xCFC, (_, _data) => {}, (_) => 0xFFFFFFFF);
     }
 }

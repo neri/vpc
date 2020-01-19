@@ -2,6 +2,7 @@
 :root {
     --main-screen-width: 640px;
     --main-screen-height: 400px;
+    --button-height: 20px;
     --shadow-color: rgba(0, 0, 0, 0.125);
 
     --bg-color: rgb(255, 255, 255);
@@ -45,7 +46,7 @@ html, body {
     margin: 0;
     padding: 0;
     display: none;
-    cursor: text;
+    cursor: crosshair;
     width: var(--main-screen-width);
     min-height: var(--main-screen-height);
     line-height: 0;
@@ -67,6 +68,20 @@ html, body {
     vertical-align: middle;
 }
 
+#biosPanel {
+    position: absolute;
+    left: 0px;
+    top: 0px;
+    width: 100%;
+    height: 100%;
+    height: var(--main-screen-height);
+    background: rgba(0, 0, 0, 0.5);
+}
+
+#biosPanel article {
+    padding: 16px;
+}
+
 #controlPanel {
     width: var(--main-screen-width);
     min-height: 32px;
@@ -76,21 +91,15 @@ html, body {
     color: var(--fg-color);
 }
 
-@media screen and (min-height: 432px) and (max-height: 440px) {
-    #controlPanel {
-        position: fixed;
-        bottom: 0;
-    }
-}
-
 .controlFrame {
     display: inline-block;
-    margin: 1px 3px;
-    padding: 1px 3px;
-    background: var(--system-gray5);
+    margin: 4px;
+    padding: 4px 8px;
+    background: rgba(63, 63, 63, 0.9);
+    color: #CCC;
     border-radius: 8px;
     min-height: 24px;
-    vertical-align: middle;
+    vertical-align: top;
     border: transparent dashed 2px;
     font-size: 14px;
 }
@@ -136,7 +145,7 @@ address a:hover {
 }
 
 summary {
-    float: right;
+    /* float: right; */
     margin: 4px 8px;
 }
 
@@ -161,10 +170,10 @@ address {
     background: transparent;
 }
 
-.buttonFace {
+.buttonFace, .thinButton {
     display: inline-block;
-    padding: 0 8px;
-    min-height: 16px;
+    /* min-height: 16px; */
+    line-height: var(--button-height);
     vertical-align: middle;
     font-size: 12px;
     border: solid 1px transparent;
@@ -173,6 +182,14 @@ address {
     border-radius: 4px;
     cursor: pointer;
     box-shadow: 1px 1px 4px 2px var(--shadow-color);
+}
+
+.buttonFace {
+    padding: 0 8px;
+}
+
+.thinButton {
+    padding: 0 2px;
 }
 
 .buttonFace:hover {
@@ -188,19 +205,17 @@ address {
 }
 
 select {
+    display: inline-block;
     -webkit-appearance: none;
     appearance: none;
     border-radius: 4px;
-    padding: 4px 12px 4px 4px;
-    line-height: 1em;
+    padding: 0 8px;
+    line-height: var(--button-height);
     border: none;
     box-shadow: 1px 1px 4px 2px var(--shadow-color);
 
     background: transparent;
     color: var(--fg-color);
-}
-select::before {
-    content: "-";
 }
 
 select[disabled] {
@@ -210,6 +225,7 @@ select[disabled] {
 input[type=text], textarea {
     -webkit-appearance: none;
     appearance: none;
+    line-height: var(--button-height);
     border: var(--fg-color) solid 1px;
     background: var(--bg-color);
     color: var(--fg-color);
@@ -221,10 +237,60 @@ input[readonly] {
     color: var(--system-gray1);
 }
 
+.controlFrame select {
+    color: #FFF;
+    background: #333;
+}
+
+.controlFrame select[disabled] {
+    color: #777;
+}
+
+#labelLocal {
+    cursor: pointer;
+}
+
 #midiMode {
     font-weight: bold;
 }
 
 #devTerminal {
     font: 10px 'TerminalWebFont', 'Menlo', 'Monaco', 'Consolas', 'Courier New', 'Courier', monospace;
+}
+
+#virtualTrackpad {
+    position: fixed;
+    width: var(--main-screen-width);
+    top: 350px;
+    text-align: center;
+}
+.vPadButton {
+    display: inline-block;
+    margin: 4px;
+    width: 150px;
+    line-height: 40px;
+    background: rgba(160, 160, 160, 0.5);
+    cursor: pointer;
+    text-align: center;
+    color: black;
+    border-radius: 8px;
+}
+
+.nearest_neighbor {
+    image-rendering: -moz-crisp-edges;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+}
+
+/* #videoOverlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: var(--main-screen-width);
+    height: var(--main-screen-height);
+    background: url('interlace.png') repeat;
+} */
+
+#devTerminal {
+    width: 95%;
 }

@@ -16,10 +16,10 @@ A PC Emulator implemented by WebAssembly.
 
 - [WebAssembly](https://caniuse.com/#feat=wasm)
 
-## Implemented hardware
+## Emulated Hardware
 
 - IBM PC compatible
-- CPU: 486SX
+- CPU: 486SX without Paging
 - Memory: 640KB ought to be enough for anybody.
 - I/O:
   - **i8259** PIC
@@ -39,6 +39,7 @@ A PC Emulator implemented by WebAssembly.
 |Protected Mode| ☑️ |
 |Segmentation| Partial |
 |Segment Limit| Partial |
+|CPL,DPL,RPL,IOPL| Partial |
 |TSS|32bit Only|
 |LDT| ☑️ |
 |Task Gate| - |
@@ -46,6 +47,12 @@ A PC Emulator implemented by WebAssembly.
 |Call Gate| - |
 |Virtual 8086 Mode| WIP |
 |Paging| - |
+|CR0| works |
+|CR2,3,4| present |
+|DRn| - |
+|TRn| never |
+|TSC| present |
+|MSR| - |
 
 ### How to detect this software in the virtual machine
 
@@ -61,6 +68,7 @@ A PC Emulator implemented by WebAssembly.
 |haribote OS|System|It seems working|
 |elks|System|failed|
 |BootChess|Game|buggy|
+|[bootRogue](https://github.com/nanochess/bootRogue)|Game|It seems working|
 |[Floppy Bird](https://github.com/icebreaker/floppybird)|Game|Needs a [patch](https://github.com/neri/floppybird/commit/6db932489afd6bbb5bddcdf0185d9f9051914459)|
 |[Invaders game in 512 bytes](https://github.com/nanochess/Invaders)|Game|It seems working|
 

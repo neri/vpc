@@ -110,7 +110,7 @@ typedef enum {
     reg_type_dreg,
 } disasm_reg_type;
 
-const char *reg_names_AL[] = {"AL", "CL", "DL", "BL", "AH", "CH", "DH", "BL" };
+const char *reg_names_AL[] = {"AL", "CL", "DL", "BL", "AH", "CH", "DH", "BH" };
 const char *reg_names_AX[] = {"AX", "CX", "DX", "BX", "SP", "BP", "SI", "DI" };
 const char *reg_names_EAX[] = {"EAX", "ECX", "EDX", "EBX", "ESP", "EBP", "ESI", "EDI" };
 const char *reg_names_sreg[] = {"ES", "CS", "SS", "DS", "FS", "GS", "???", "???" };
@@ -490,8 +490,8 @@ opmap_t opcode1[256] = {
     { NULL, NULL, optype_shEvIb, },
     { "RET", NULL, optype_Iw },
     { "RET", NULL, optype_implied },
-    { "LES", NULL, optype_GvM, NULL, 1, "ES" },
-    { "LDS", NULL, optype_GvM, NULL, 1, "DS" },
+    { "LES", NULL, optype_GvM },
+    { "LDS", NULL, optype_GvM },
     { "MOV", NULL, optype_EbIb },
     { "MOV", NULL, optype_EvIv },
     { "ENTER", NULL, optype_IwIb },

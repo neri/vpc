@@ -68,6 +68,15 @@ export class VFD {
         env.iomgr.on(base + 7, (_, data) => this.HEAD = data, (_) => this.HEAD);
         env.iomgr.on(base + 8, (_, data) => this.SEC = data, (_) => this.SEC);
         env.iomgr.on(base + 9, (_, data) => this.CYL = data, (_) => this.CYL);
+
+        env.worker.bind('attach', (args) => {
+            try {
+                this.attachImage(args.blob);
+            } catch (e) {
+                env.worker.postCommand('alert', e.toString());
+            }
+        });
+
     }
     private readSectors(): number {
         if (this.maxLBA == 0) return STATUS_NOT_READY;

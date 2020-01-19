@@ -86,7 +86,12 @@ export class IOManager {
         if (handler) {
             return handler(port) & 0xFFFF;
         } else {
-            return 0xFFFF | 0;
+            // fall back
+            if (port < 1024) {
+                return this.inb(port) | (this.inb(port + 1) << 8);
+            } else {
+                return 0xFFFF | 0;
+            }
         }
     }
     public ind(port: number): number {

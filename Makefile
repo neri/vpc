@@ -16,12 +16,12 @@ lib:
 	mkdir lib
 
 lib/vcpu.wasm: src/vcpu.c src/disasm.h
-	npx wa-compile -O $< -o $@
+	wa-compile -O $< -o $@
 
 lib/bios.bin: src/bios.asm
 	nasm -f bin $? -o $@
 
-tmp/worker.js: src/worker.ts src/iomgr.ts src/env.ts src/dev.ts src/vfd.ts src/ps2.ts src/vga.ts src/mpu.ts
+tmp/worker.js: src/worker/worker.ts src/worker/iomgr.ts src/worker/env.ts src/worker/dev.ts src/worker/vfd.ts src/worker/ps2.ts src/worker/vga.ts src/worker/mpu.ts src/worker/debug.ts
 	npx tsc $< --outDir tmp
 
 lib/worker.js: tmp/worker.js
