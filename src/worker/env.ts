@@ -82,7 +82,7 @@ export class RuntimeEnvironment {
         this.iomgr.onw(0xFC00, undefined, (_) => this.memoryConfig[0]);
         this.iomgr.onw(0xFC02, undefined, (_) => this.memoryConfig[1]);
 
-        worker.bind('reset', (args) => this.reset(args.gen));
+        worker.bind('reset', (args) => this.reset(args.gen, args.br_mbr));
     }
     public loadCPU(wasm: WebAssembly.Instance): void {
         this.instance = wasm;
@@ -153,22 +153,28 @@ export class RuntimeEnvironment {
             return String.fromCharCode.apply(String, bytes);
         }
     }
-    public reset(gen: number): void {
+    public reset(gen: number, br_mbr: boolean = false): void {
         if (!this.instance) return;
         console.log(`CPU restarted (${gen})`);
         this.loadBIOS();
         this.instance.exports.reset(this.cpu, gen);
+        if (br_mbr) {
+            this.instance.exports.set_breakpoint(this.cpu, 0, 0x7C00);
+        }
         if (!this.isRunning || this.isDebugging) {
             this.isDebugging = false;
             this.isRunning = true;
             this.cont();
         }
     }
-    public run(gen: number): void {
+    public run(gen: number, br_mbr: boolean = false): void {
         if (!this.instance) throw new Error('Instance not initialized');
         this.cpu = this.instance.exports.alloc_cpu(gen);
         this.regmap = JSON.parse(this.getCString(this.instance.exports.debug_get_register_map(this.cpu)));
         console.log(`CPU started (${gen})`);
+        if (br_mbr) {
+            this.instance.exports.set_breakpoint(this.cpu, 0, 0x7C00);
+        }
         this.isRunning = true;
         this.cont();
     }

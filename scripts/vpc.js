@@ -117,6 +117,7 @@ const startSecond = () => {
                     let cmd = { command: 'start',
                         gen: parseInt($('#selCpuGen').value),
                         mem: parseInt($('#selMemory').value),
+                        br_mbr: $('#optionDebugMBR').checked,
                     };
                     if (window.attach) {
                         window.worker.postMessage({command: 'attach', blob: window.attach});
@@ -702,7 +703,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
     $('#buttonReset').addEventListener('click', e => {
         if (window.worker) {
-            worker.postMessage({command: 'reset', gen: parseInt($('#selCpuGen').value)});
+            worker.postMessage({command: 'reset', gen: parseInt($('#selCpuGen').value), br_mbr: $('#optionDebugMBR').checked});
             window.term.focus();
         }
     });
