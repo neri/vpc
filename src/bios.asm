@@ -45,6 +45,7 @@
 
 %define BDA_SEG             0x0040
 %define BDA_COMPORT         0x0000
+%define BDA_MEMORY          0x0013
 %define BDA_KBD_SHIFT       0x0017
 %define BDA_KBD_BUFF_HEAD   0x001A
 %define BDA_KBD_BUFF_TAIL   0x001C
@@ -740,10 +741,11 @@ _int11:
 
 ;; Get Memory Size
 _int12:
-    push dx
-    mov dx, VPC_MEM_PORT
-    in ax, dx
-    pop dx
+    push ds
+    mov ax, BDA_SEG
+    mov ds, ax
+    mov ax, [BDA_MEMORY]
+    pop ds
     iret
 
 
