@@ -141,8 +141,10 @@ export class VFD {
             const image = new Uint8Array(blob);
             if (blob.byteLength == 512) {
                 // Boot Sector Only
-                this.image = image;
-                this.maxLBA = 1;
+                const fullImage = new Uint8Array(2880*512);
+                fullImage.set(image);
+                this.image = fullImage;
+                this.maxLBA = 2880;
                 this.driveType = 4;
                 this.n_heads = 2;
                 this.n_sectors = 18;

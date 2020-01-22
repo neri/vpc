@@ -557,6 +557,12 @@ static inline uint8_t FETCH8(cpu_state *cpu) {
     return result;
 }
 
+static inline int FETCHSB(cpu_state *cpu) {
+    uint8_t result = mem[cpu->CS.base + cpu->EIP];
+    cpu->EIP += 1;
+    return MOVSXB(result);
+}
+
 static inline uint16_t FETCH16(cpu_state *cpu) {
     uint16_t result = READ_MEM16(&cpu->CS, cpu->EIP);
     cpu->EIP += 2;
@@ -574,6 +580,14 @@ static inline uint32_t FETCHW(cpu_state *cpu) {
         return FETCH32(cpu);
     } else {
         return FETCH16(cpu);
+    }
+}
+
+static inline int FETCHSW(cpu_state *cpu) {
+    if (cpu->cpu_context & CPU_CTX_DATA32) {
+        return FETCH32(cpu);
+    } else {
+        return MOVSXW(FETCH16(cpu));
     }
 }
 
@@ -2670,12 +2684,12 @@ static int cpu_step(cpu_state *cpu) {
                 return 0;
 
             case 0x6A: // PUSH imm8
-                PUSHW(cpu, MOVSXB(FETCH8(cpu)));
+                PUSHW(cpu, FETCHSB(cpu));
                 return 0;
 
             case 0x6B: // IMUL reg, r/m, imm8
                 MODRM_W(cpu, seg, 1, &set);
-                IMUL3(cpu, &set, MOVSXB(FETCH8(cpu)));
+                IMUL3(cpu, &set, FETCHSB(cpu));
                 return 0;
 
             case 0x6C: // INSB
@@ -2763,7 +2777,10 @@ static int cpu_step(cpu_state *cpu) {
             case 0x7D: // JNL d8
             case 0x7E: // JLE d8
             case 0x7F: // JG d8
-                return JUMP_IF(cpu, MOVSXB(FETCH8(cpu)), EVAL_CC(cpu, inst));
+            {
+                int disp = FETCHSB(cpu);
+                return JUMP_IF(cpu, disp, EVAL_CC(cpu, inst));
+            }
 
             case 0x80: // alu r/m8, imm8
             case 0x81: // alu r/m16, imm16
@@ -2775,7 +2792,7 @@ static int cpu_step(cpu_state *cpu) {
                 if (inst == 0x81) {
                     set.opr2 = FETCHW(cpu);
                 } else {
-                    set.opr2 = MOVSXB(FETCH8(cpu));
+                    set.opr2 = FETCHSB(cpu);
                 }
                 switch (opc) {
                     case 0: // ADD
@@ -3282,7 +3299,7 @@ static int cpu_step(cpu_state *cpu) {
 
             case 0xE0: // LOOPNZ
             {
-                int disp = MOVSXB(FETCH8(cpu));
+                int disp = FETCHSB(cpu);
                 if (cpu->cpu_context & CPU_CTX_ADDR32) {
                     cpu->ECX--;
                     return JUMP_IF(cpu, disp, (cpu->ECX != 0 && cpu->ZF == 0));
@@ -3294,7 +3311,7 @@ static int cpu_step(cpu_state *cpu) {
 
             case 0xE1: // LOOPZ
             {
-                int disp = MOVSXB(FETCH8(cpu));
+                int disp = FETCHSB(cpu);
                 if (cpu->cpu_context & CPU_CTX_ADDR32) {
                     cpu->ECX--;
                     return JUMP_IF(cpu, disp, (cpu->ECX != 0 && cpu->ZF != 0));
@@ -3306,7 +3323,7 @@ static int cpu_step(cpu_state *cpu) {
 
             case 0xE2: // LOOP
             {
-                int disp = MOVSXB(FETCH8(cpu));
+                int disp = FETCHSB(cpu);
                 if (cpu->cpu_context & CPU_CTX_ADDR32) {
                     cpu->ECX--;
                     return JUMP_IF(cpu, disp, (cpu->ECX != 0));
@@ -3317,11 +3334,14 @@ static int cpu_step(cpu_state *cpu) {
             }
 
             case 0xE3: // JCXZ
+            {
+                int disp = FETCHSB(cpu);
                 if (cpu->cpu_context & CPU_CTX_ADDR32) {
-                    return JUMP_IF(cpu, MOVSXB(FETCH8(cpu)), cpu->ECX == 0);
+                    return JUMP_IF(cpu, disp, cpu->ECX == 0);
                 } else {
-                    return JUMP_IF(cpu, MOVSXB(FETCH8(cpu)), cpu->CX == 0);
+                    return JUMP_IF(cpu, disp, cpu->CX == 0);
                 }
+            }
 
             case 0xE4: // IN AL, imm8
                 cpu->AL = vpc_inb(FETCH8(cpu));
@@ -3349,14 +3369,14 @@ static int cpu_step(cpu_state *cpu) {
 
             case 0xE8: // call imm16
             {
-                int disp = FETCHW(cpu);
+                int disp = FETCHSW(cpu);
                 PUSHW(cpu, cpu->EIP);
                 return JUMP_IF(cpu, disp, 1);
             }
 
             case 0xE9: // jmp imm16
             {
-                int disp = FETCHW(cpu);
+                int disp = FETCHSW(cpu);
                 return JUMP_IF(cpu, disp, 1);
             }
 
@@ -3369,7 +3389,7 @@ static int cpu_step(cpu_state *cpu) {
 
             case 0xEB: // jmp d8
             {
-                int disp = MOVSXB(FETCH8(cpu));
+                int disp = FETCHSB(cpu);
                 if (disp == -2) {
                     // Reduce CPU power of forever loop
                     cpu->EIP += disp;
@@ -4002,7 +4022,10 @@ static int cpu_step(cpu_state *cpu) {
                     case 0x8D:
                     case 0x8E:
                     case 0x8F:
-                        return JUMP_IF(cpu, FETCHW(cpu), EVAL_CC(cpu, inst));
+                    {
+                        int disp = FETCHSW(cpu);
+                        return JUMP_IF(cpu, disp, EVAL_CC(cpu, inst));
+                    }
 
                     case 0x90: // SETcc r/m8
                     case 0x91:

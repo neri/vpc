@@ -193,7 +193,9 @@ export class RuntimeEnvironment {
         } catch (e) {
             console.error(e);
             status = STATUS_EXCEPTION;
+            this.worker.print(`#### Exception: ${ e.message }`);
             this.instance.exports.show_regs(this.cpu);
+            this.worker.postCommand('debugReaction', {});
         }
         this.dequeueUART();
         if (status >= STATUS_EXCEPTION) {

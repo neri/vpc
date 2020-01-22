@@ -475,26 +475,87 @@ i100F:
 
 
 i1006:
+    mov ah, bh
+    push ax
+    push cx
+    push dx
+    call _scroll@6
+    ret
+
 i1007:
     or al, al
     jz .cls
-    ; TODO:
+    ;; TODO:
     ret
 .cls:
-    add dx, 0x0001
-    call _bios_cursor_addr
-    mov dx, cx
-    xchg ax, cx
-    call _bios_cursor_addr
-    mov di, ax
-    sub cx, di
-    shr cx, 1
-    mov dx, 0xB800
-    mov es, dx
     mov ah, bh
-    mov al, 0x20
-    rep stosw
+    push ax
+    push cx
+    push dx
+    call _scroll@6
     ret
+
+
+; 4 xy2 6 xy1 8 lines 9 color
+_scroll@6:
+    push bp
+    mov bp, sp
+    mov ax, 0xB800
+    mov es, ax
+
+    mov bx, [bp + 4]
+    add bx, 0x0101
+    sub bl, [bp + 6]
+    sub bh, [bp + 7]
+    sub bh, [bp + 8]
+
+    mov dx, [bp + 6]
+    call _bios_cursor_addr
+    xchg ax, di
+    cmp byte [bp + 8], 0
+    jz .skip
+    add dh, [bp + 8]
+    call _bios_cursor_addr
+    xchg ax, si
+
+    mov al, [BDA_VGA_CONSOLE_COLS]
+    sub al, bl
+    xor ah, ah
+    add ax, ax
+    xor ch, ch
+.loop1:
+    mov cl, bl
+    es
+    rep movsw
+    add si, ax
+    add di, ax
+    dec bh
+    jnz .loop1
+
+.skip:
+    mov dl, [BDA_VGA_CONSOLE_COLS]
+    sub dl, bl
+    xor dh, dh
+    add dx, dx
+    mov bh, [bp + 8]
+    or bh, bh
+    jnz .skip2
+    mov bh, [bp + 5]
+    sub bh, [bp + 7]
+    inc bh
+.skip2:
+    mov ah, [bp + 9]
+    mov al, 0x20
+    xor ch, ch
+.loop2:
+    mov cl, bl
+    rep stosw
+    add di, dx
+    dec bh
+    jnz .loop2
+
+    pop bp
+    ret 6
 
 
 i1001:
@@ -526,19 +587,44 @@ i1003:
 
 
 i1013:
-    cmp dh, 25
+    cmp dh, [BDA_VGA_CONSOLE_ROWSm1]
+    ja .end
+    cmp dl, [BDA_VGA_CONSOLE_COLS]
     jae .end
-    cmp dl, 80
-    jae .end
+    mov bl, al
     mov ds, [bp + STK_ES]
     mov si, [bp + STK_BP]
 .loop:
     lodsb
+    cmp al, 8
+    jz .bs
+    cmp al, 10
+    jz .lf
+    cmp al, 13
+    jz .cr
     call _bios_write_char
+.tail:
     loop .loop
+    test bl, 0x01
+    jz .end
     call i1002
 .end:
     ret
+
+.bs:
+    or dl, dl
+    jz .tail
+    dec dl
+    jmp .tail
+.lf:
+    xor dl, dl
+    inc dh
+    jmp .tail
+.cr:
+    xor dl, dl
+    jmp .tail
+
+
 
 
 i1008:
@@ -1392,6 +1478,12 @@ __set_vram:
     xor di, di
     mov cx, 80 * 25
     mov ax, 0x0720
+    rep stosw
+
+    mov ax, 0xFFFF
+    mov es, ax
+    mov di, 0x0010
+    mov cx, 0xFFF0 / 2
     rep stosw
 
     ; mov si, banner
