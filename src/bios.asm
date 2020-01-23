@@ -591,21 +591,21 @@ i1013:
     ja .end
     cmp dl, [BDA_VGA_CONSOLE_COLS]
     jae .end
-    mov bl, al
-    mov ds, [bp + STK_ES]
+    mov bh, al
+    ; mov es, [bp + STK_ES]
     mov si, [bp + STK_BP]
 .loop:
-    lodsb
+    es lodsb
     cmp al, 8
     jz .bs
     cmp al, 10
     jz .lf
     cmp al, 13
     jz .cr
-    call _bios_write_char
+    call _bios_write_char2
 .tail:
     loop .loop
-    test bl, 0x01
+    test bh, 0x01
     jz .end
     call i1002
 .end:
