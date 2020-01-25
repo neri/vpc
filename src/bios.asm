@@ -1338,13 +1338,19 @@ _clear_vram:
     mov es, dx
     mov cx, 0x8000
 .loop:
-    in ax, 0
+    in ax, 0x40
     stosw
     loop .loop
     mov bx, 0x1000
     add dx, bx
     cmp dx, 0xF000
     jb .loop0
+
+    mov ax, 0xFFFF
+    mov es, ax
+    mov di, 0x0010
+    mov cx, 0xFFF0 / 2
+    rep stosw
 
 
     ;; init PIC
@@ -1471,20 +1477,6 @@ _init_palette:
     loop .loop0
     dec bx
     jnz .loop1
-
-__set_vram:
-    mov ax, 0xB800
-    mov es, ax
-    xor di, di
-    mov cx, 80 * 25
-    mov ax, 0x0720
-    rep stosw
-
-    mov ax, 0xFFFF
-    mov es, ax
-    mov di, 0x0010
-    mov cx, 0xFFF0 / 2
-    rep stosw
 
     ; mov si, banner
     ; call puts
@@ -1765,7 +1757,7 @@ _palette_data:
     db 0x00,0x00,0x00, 0x00,0x00,0x00, 0x00,0x00,0x00, 0x00,0x00,0x00,
     db 0x00,0x00,0x00, 0x00,0x00,0x00, 0x00,0x00,0x00, 0x00,0x00,0x00
 
-    times SIZE_BIOS - 16 - ($-$$) db 0
+    times SIZE_BIOS - 16 - ($-$$) db 0xFF
 __RESET:
     jmp SEG_BIOS:_INIT
     db "06/16/19"

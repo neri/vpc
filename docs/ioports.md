@@ -4,7 +4,6 @@
 
 |Address|Size|Read/Write|Standard?|Description|
 |-|-|-|-|-|
-|0000|WORD|RO|NO|Random Number Generator|
 |0020-0021|BYTE|R/W|YES|i8259 PIC #1|
 |0040-0043|BYTE|R/W|YES|i8254 Timer|
 |0060|BYTE|R/W|YES|PS/2 Data (Dummy)|
@@ -20,12 +19,6 @@
 |FDxx|VARY|R/W|NO|Floppy|
 
 ## Original devices
-
-### 0000: Random Number Generator
-
-|Address|Size|Read/Write|Description|
-|-|-|-|-|
-|0000|WORD|RO|Read Random Number|
 
 ### 0064: PS/2 Native Data
 

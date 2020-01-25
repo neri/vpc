@@ -51,13 +51,13 @@ int get_inst_len(cpu_state *cpu);
 
 enum {
     cpu_gen_8086 = 0,
-    cpu_gen_80186,
-    cpu_gen_80286,
-    cpu_gen_80386,
-    cpu_gen_80486,
-    cpu_gen_P5,
-    cpu_gen_P6,
-    cpu_gen_P7,
+    cpu_gen_80186 = 1,
+    cpu_gen_80286 = 2,
+    cpu_gen_80386 = 3,
+    cpu_gen_80486 = 4,
+    cpu_gen_P5 = 5,
+    cpu_gen_P6 = 6,
+    cpu_gen_P7 = 7,
 } cpu_gen;
 
 typedef enum cpu_status_t {
@@ -84,6 +84,8 @@ typedef enum cpu_status_t {
 
 typedef uint32_t paddr_t;
 
+
+// Internal Segment Register
 typedef struct sreg_t {
     union {
         uint16_t sel;
@@ -116,6 +118,8 @@ typedef struct sreg_t {
 
 typedef desc_t sreg_t;
 
+
+// Segment Descriptor
 typedef struct {
     uint16_t limit_1;
     uint16_t base_1;
@@ -145,6 +149,8 @@ typedef struct {
     uint8_t base_3;
 } seg_desc_t;
 
+
+// Gate Descriptor
 typedef struct {
     uint16_t offset_1;
     uint16_t sel;
@@ -160,6 +166,7 @@ typedef struct {
     };
     uint16_t offset_2;
 } gate_desc_t;
+
 
 enum {
     type_unavailable,
@@ -194,6 +201,7 @@ typedef enum {
 } desc_type_bitmap_t;
 
 
+// Control Register 0
 typedef union {
     uint32_t value;
     struct {
@@ -217,6 +225,8 @@ typedef union {
     };
 } control_register_0_t;
 
+
+// Control Register 4
 typedef union {
     uint32_t value;
     struct {
@@ -243,12 +253,34 @@ typedef union {
     };
 } control_register_4_t;
 
+
+// 32bit Task State Segment
+typedef struct {
+    union {
+        uint16_t link;
+        uint32_t _reserved;
+    };
+    uint32_t ESP0;
+    uint32_t SS0;
+    uint32_t ESP1;
+    uint32_t SS1;
+    uint32_t ESP2;
+    uint32_t SS2;
+    uint32_t CR3;
+    uint32_t EIP, eflags, EAX, ECX, EDX, EBX, ESP, EBP, ESI, EDI;
+    uint32_t ES, CS, SS, DS, FS, GS;
+    uint32_t LDT;
+    uint16_t _reserved64;
+    uint16_t IOPB;
+} tss32_t;
+
+
 #define MAX_BREAKPOINTS 1
 typedef struct {
     uint32_t offset;
     uint16_t sel;
-    uint8_t replacement;
 } bp_vec_t;
+
 
 typedef struct cpu_state {
 
@@ -747,28 +779,9 @@ static int POP_SEG(cpu_state *cpu, desc_t *desc, desc_type_bitmap_t bitmap, int 
     return status;
 }
 
-typedef struct {
-    union {
-        uint16_t link;
-        uint32_t _reserved;
-    };
-    uint32_t ESP0;
-    uint32_t SS0;
-    uint32_t ESP1;
-    uint32_t SS1;
-    uint32_t ESP2;
-    uint32_t SS2;
-    uint32_t CR3;
-    uint32_t EIP, eflags, EAX, ECX, EDX, EBX, ESP, EBP, ESI, EDI;
-    uint32_t ES, CS, SS, DS, FS, GS;
-    uint32_t LDT;
-    uint16_t _reserved64;
-    uint16_t IOPB;
-} tss_t;
-
 static int TSS_switch_context(cpu_state *cpu, desc_t *new_tss, int link) {
-    tss_t *current = (tss_t *)(mem + cpu->TSS.base);
-    tss_t *next = (tss_t *)(mem + new_tss->base);
+    tss32_t *current = (tss32_t *)(mem + cpu->TSS.base);
+    tss32_t *next = (tss32_t *)(mem + new_tss->base);
 
     // cpu->time_stamp_counter += 500;
 
@@ -906,7 +919,7 @@ static inline int INVOKE_INT_MAIN(cpu_state *cpu, int n, int_cause_t cause) {
     cpu->EIP = new_eip;
 
     if (has_to_switch_esp) {
-        tss_t *tss = (tss_t *)(mem + cpu->TSS.base);
+        tss32_t *tss = (tss32_t *)(mem + cpu->TSS.base);
         new_esp = tss->ESP0;
         new_ssel = tss->SS0;
         status = LOAD_DESCRIPTOR(cpu, &cpu->SS, new_ssel, type_bitmap_SEG_WRITE, 0, NULL);
@@ -4731,21 +4744,21 @@ WASM_EXPORT int run(cpu_state *cpu, int speed_status) {
                 return status;
             }
         default:
-            // if (cpu->CR0.PE && status > cpu_status_exception_base) {
-            //     int status2 = INVOKE_INT(cpu, status >> 16, exception);
-            //     if (status2) { // DOUBLE FAULT
-            //         status2 = INVOKE_INT(cpu, 8, exception);
-            //         if (status2 == 0) {
-            //             PUSHW(cpu, 0);
-            //             return 0;
-            //         }
-            //     } else {
-            //         if (status > cpu_status_ud) {
-            //             PUSHW(cpu, status & UINT16_MAX);
-            //         }
-            //         return 0;
-            //     }
-            // }
+            if (cpu->CR0.PE && status > cpu_status_exception_base) {
+                int status2 = INVOKE_INT(cpu, status >> 16, exception);
+                if (status2) { // DOUBLE FAULT
+                    status2 = INVOKE_INT(cpu, 8, exception);
+                    if (status2 == 0) {
+                        PUSHW(cpu, 0);
+                        return 0;
+                    }
+                } else {
+                    if (status > cpu_status_ud) {
+                        PUSHW(cpu, status & UINT16_MAX);
+                    }
+                    return 0;
+                }
+            }
             println("#### PANIC: TRIPLE FAULT!!!");
             cpu_show_regs(cpu, cpu->EIP);
             return status;
@@ -5563,7 +5576,7 @@ char *dump_disasm(char *p, cpu_state *cpu, uint32_t eip) {
 WASM_EXPORT int disasm(cpu_state *cpu, uint32_t sel, uint32_t _offset, int count) {
     static char buff[1024];
     int len;
-    sreg_t seg;
+    sreg_t seg = {0};
     if (LOAD_DESCRIPTOR(cpu, &seg, sel, type_bitmap_SEG_ALL, 1, NULL)) {
         seg.attr_D = cpu->CS.attr_D;
         seg.base = 0;

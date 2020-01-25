@@ -170,7 +170,7 @@ export class VPIT {
         }, (_) => this.p61());
     }
     private p61(): number {
-        this.p0061_data ^= 0x10;
+        this.p0061_data ^= 0x30;
         return this.p0061_data;
     }
     private readCntReg(counter: number): number {
