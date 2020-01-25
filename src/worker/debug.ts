@@ -1,8 +1,8 @@
-// Debugger Front End Interface
+// Debugger Frontend Interface
 
 import { RuntimeEnvironment, WorkerInterface } from './env';
 
-type Vector = [number, number];
+type Vector = [number, number]; // [offset, selector]
 
 const HELP_MESSAGE = `\
 Continue        G
@@ -20,8 +20,8 @@ export class Debugger {
     private worker: WorkerInterface;
     private env: RuntimeEnvironment;
     private lastCmd?: string;
-    private lastDumpLA?: number;
-    private lastDisAVec?: Vector;
+    private cursor_d?: number;
+    private cursor_u?: Vector;
 
     constructor(worker: WorkerInterface, env: RuntimeEnvironment) {
         this.worker = worker;
@@ -48,20 +48,20 @@ export class Debugger {
             case 't':
                 this.env.step();
                 this.lastCmd = cmd;
-                this.lastDisAVec = undefined;
+                this.cursor_u = undefined;
                 break;
 
             // Step over
             case 'p':
                 this.env.stepOver();
                 this.lastCmd = cmd;
-                this.lastDisAVec = undefined;
+                this.cursor_u = undefined;
                 break;
 
             // Continue
             case 'g':
                 this.env.debugContinue();
-                this.lastDisAVec = undefined;
+                this.cursor_u = undefined;
                 break;
 
             // Register
@@ -81,7 +81,7 @@ export class Debugger {
                         }
                     } else {
                         this.env.showRegs();
-                        this.lastDisAVec = this.getCSIP();
+                        this.cursor_u = this.getCSIP();
                     }
                     break;
                 }
@@ -116,7 +116,7 @@ export class Debugger {
                     if (seg_off) {
                         base = this.getVectorToLinear(seg_off, 0);
                     } else {
-                        base = this.lastDumpLA || 0;
+                        base = this.cursor_d || 0;
                     }
                     const arg_count = args.shift();
                     if (arg_count) {
@@ -124,7 +124,7 @@ export class Debugger {
                     } else {
                         count = DEFAULT_COUNT;
                     }
-                    this.lastDumpLA = this.env.dump(base, count);
+                    this.cursor_d = this.env.dump(base, count);
                     this.lastCmd = cmd;
                     break;
                 }
@@ -138,7 +138,7 @@ export class Debugger {
                     if (seg_off) {
                         vec = this.getVector(seg_off, this.env.getReg('CS'));
                     } else {
-                        vec = this.lastDisAVec || this.getCSIP();
+                        vec = this.cursor_u || this.getCSIP();
                     }
                     const arg_count = args.shift();
                     if (arg_count) {
@@ -149,7 +149,7 @@ export class Debugger {
                     const len = this.env.disasm(vec[1], vec[0], count);
                     if (len) {
                         vec[0] += len;
-                        this.lastDisAVec = vec;
+                        this.cursor_u = vec;
                     }
                     this.lastCmd = cmd;
                 }

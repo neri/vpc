@@ -12,6 +12,22 @@ export interface WorkerInterface {
     bind(command: string, handler: WorkerMessageHandler): void;
 }
 
+export interface RuntimeEnvironmentInterface {
+    memoryBase: number;
+    memory: WebAssembly.Memory;
+
+    TRAP_NORETURN(): never;
+    println(at: number): void;
+    vpc_outb(port: number, data: number): void;
+    vpc_inb(port: number): number;
+    vpc_outw(port: number, data: number): void;
+    vpc_inw(port: number): number;
+    vpc_outd(port: number, data: number): void;
+    vpc_ind(port: number): number;
+    vpc_irq(): number;
+    vpc_grow(n: number): number;
+}
+
 const STATUS_ICEBP = 4;
 const STATUS_HALT = 0x1000;
 const STATUS_EXCEPTION = 0x10000;
@@ -26,11 +42,11 @@ export class RuntimeEnvironment {
     public rtc: RTC;
     public pci: PCI;
 
-    private period: number;
+    private period = 0;
     private lastTick: number;
-    private env: any;
+    private env: RuntimeEnvironmentInterface;
     private _memory: Uint8Array;
-    private instance: WebAssembly.Instance | undefined;
+    private instance?: WebAssembly.Instance;
     private vmem: number = 0;
     private cpu: number = 0;
     private regmap: { [key: string]: number } = {};
@@ -42,33 +58,34 @@ export class RuntimeEnvironment {
 
     constructor(worker: WorkerInterface) {
         this.worker = worker;
-        this.period = 0;
         this.lastTick = new Date().valueOf();
         this.env = {
             memoryBase: 0,
             memory: new WebAssembly.Memory({ initial: 1, maximum: 1030 }),
             // tableBase: 0,
             // table: new WebAssembly.Table({ initial: 2, element: "anyfunc" }),
+            TRAP_NORETURN: (): never => {
+                throw new Error('UNEXPECTED CONTROL FLOW');
+            },
+            println: (at: number): void => {
+                const str = this.getCString(at);
+                worker.print(str);
+                // console.log(str);
+            },
+            vpc_outb: (port: number, data: number): void => this.iomgr.outb(port, data),
+            vpc_inb: (port: number): number => this.iomgr.inb(port),
+            vpc_outw: (port: number, data: number): void => this.iomgr.outw(port, data),
+            vpc_inw: (port: number): number => this.iomgr.inw(port),
+            vpc_outd: (port: number, data: number): void => this.iomgr.outd(port, data),
+            vpc_ind: (port: number): number => this.iomgr.ind(port),
+            vpc_irq: (): number => this.pic.dequeueIRQ(),
+            vpc_grow: (n: number): number => {
+                const result = this.env.memory.grow(n);
+                this._memory = new Uint8Array(this.env.memory.buffer);
+                return result;
+            },
         }
         this._memory = new Uint8Array(this.env.memory.buffer);
-        this.env.println = (at: number): void => {
-            const str = this.getCString(at);
-            worker.print(str);
-            // console.log(str);
-        }
-        this.env.vpc_outb = (port: number, data: number): void => this.iomgr.outb(port, data);
-        this.env.vpc_inb = (port: number): number => this.iomgr.inb(port);
-        this.env.vpc_outw = (port: number, data: number): void => this.iomgr.outw(port, data);
-        this.env.vpc_inw = (port: number): number => this.iomgr.inw(port);
-        this.env.vpc_outd = (port: number, data: number): void => this.iomgr.outd(port, data);
-        this.env.vpc_ind = (port: number): number => this.iomgr.ind(port);
-        this.env.vpc_irq = () => this.pic.dequeueIRQ();
-        this.env.TRAP_NORETURN = (): never => { throw new Error('UNEXPECTED CONTROL FLOW'); };
-        this.env.vpc_grow = (n: number): number => {
-            const result = this.env.memory.grow(n);
-            this._memory = new Uint8Array(this.env.memory.buffer);
-            return result;
-        }
 
         this.iomgr = new IOManager(worker);
         this.pic = new VPIC(this.iomgr);
@@ -82,7 +99,7 @@ export class RuntimeEnvironment {
         this.iomgr.onw(0xFC00, undefined, (_) => this.memoryConfig[0]);
         this.iomgr.onw(0xFC02, undefined, (_) => this.memoryConfig[1]);
 
-        worker.bind('reset', (args) => this.reset(args.gen));
+        worker.bind('reset', (args) => this.reset(args.gen, args.br_mbr));
     }
     public loadCPU(wasm: WebAssembly.Instance): void {
         this.instance = wasm;
@@ -153,22 +170,28 @@ export class RuntimeEnvironment {
             return String.fromCharCode.apply(String, bytes);
         }
     }
-    public reset(gen: number): void {
+    public reset(gen: number, br_mbr: boolean = false): void {
         if (!this.instance) return;
         console.log(`CPU restarted (${gen})`);
         this.loadBIOS();
         this.instance.exports.reset(this.cpu, gen);
+        if (br_mbr) {
+            this.instance.exports.set_breakpoint(this.cpu, 0, 0x7C00);
+        }
         if (!this.isRunning || this.isDebugging) {
             this.isDebugging = false;
             this.isRunning = true;
             this.cont();
         }
     }
-    public run(gen: number): void {
+    public run(gen: number, br_mbr: boolean = false): void {
         if (!this.instance) throw new Error('Instance not initialized');
         this.cpu = this.instance.exports.alloc_cpu(gen);
         this.regmap = JSON.parse(this.getCString(this.instance.exports.debug_get_register_map(this.cpu)));
         console.log(`CPU started (${gen})`);
+        if (br_mbr) {
+            this.instance.exports.set_breakpoint(this.cpu, 0, 0x7C00);
+        }
         this.isRunning = true;
         this.cont();
     }
@@ -187,7 +210,9 @@ export class RuntimeEnvironment {
         } catch (e) {
             console.error(e);
             status = STATUS_EXCEPTION;
+            this.worker.print(`#### Exception: ${ e.message }`);
             this.instance.exports.show_regs(this.cpu);
+            this.worker.postCommand('debugReaction', {});
         }
         this.dequeueUART();
         if (status >= STATUS_EXCEPTION) {

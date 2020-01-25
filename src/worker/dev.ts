@@ -170,7 +170,7 @@ export class VPIT {
         }, (_) => this.p61());
     }
     private p61(): number {
-        this.p0061_data ^= 0x10;
+        this.p0061_data ^= 0x30;
         return this.p0061_data;
     }
     private readCntReg(counter: number): number {
@@ -259,21 +259,23 @@ export class RTC {
     private ram: Uint8Array;
 
     constructor (env: RuntimeEnvironment) {
-        this.ram = new Uint8Array(256);
-        env.iomgr.on(0x70, (_, data) => this.index = data, (port) => this.index);
+        this.ram = new Uint8Array(128);
+        this.ram[0x0B] = 0x02;
+        env.iomgr.on(0x70, (_, data) => this.index = data, (_) => this.index);
         env.iomgr.on(0x71, (_, data) => this.writeRTC(data), (_) => this.readRTC());
     }
     writeRTC(data: number): void {
-        this.ram[this.index] = data;
+        this.ram[this.index & 0x7F] = data;
     }
     readRTC(): number {
-        const toBCD = (n: number) => {
+        const toBCD = (n: number): number => {
             const a1 = n % 10;
             const a2 = (n / 10) | 0;
             return a1 + (a2 << 4);
         }
+        const index = this.index & 0x7F;
         const now = new Date();
-        switch (this.index) {
+        switch (index) {
         case 0:
             return toBCD(now.getSeconds());
         case 2:
@@ -291,7 +293,7 @@ export class RTC {
         case 0x32:
                 return toBCD(Math.floor(now.getFullYear() / 100));
         default:
-            return this.ram[this.index];
+            return this.ram[index];
         }
     }
 }

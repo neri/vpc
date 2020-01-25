@@ -45,6 +45,7 @@
 
 %define BDA_SEG             0x0040
 %define BDA_COMPORT         0x0000
+%define BDA_MEMORY          0x0013
 %define BDA_KBD_SHIFT       0x0017
 %define BDA_KBD_BUFF_HEAD   0x001A
 %define BDA_KBD_BUFF_TAIL   0x001C
@@ -474,26 +475,87 @@ i100F:
 
 
 i1006:
+    mov ah, bh
+    push ax
+    push cx
+    push dx
+    call _scroll@6
+    ret
+
 i1007:
     or al, al
     jz .cls
-    ; TODO:
+    ;; TODO:
     ret
 .cls:
-    add dx, 0x0001
-    call _bios_cursor_addr
-    mov dx, cx
-    xchg ax, cx
-    call _bios_cursor_addr
-    mov di, ax
-    sub cx, di
-    shr cx, 1
-    mov dx, 0xB800
-    mov es, dx
     mov ah, bh
-    mov al, 0x20
-    rep stosw
+    push ax
+    push cx
+    push dx
+    call _scroll@6
     ret
+
+
+; 4 xy2 6 xy1 8 lines 9 color
+_scroll@6:
+    push bp
+    mov bp, sp
+    mov ax, 0xB800
+    mov es, ax
+
+    mov bx, [bp + 4]
+    add bx, 0x0101
+    sub bl, [bp + 6]
+    sub bh, [bp + 7]
+    sub bh, [bp + 8]
+
+    mov dx, [bp + 6]
+    call _bios_cursor_addr
+    xchg ax, di
+    cmp byte [bp + 8], 0
+    jz .skip
+    add dh, [bp + 8]
+    call _bios_cursor_addr
+    xchg ax, si
+
+    mov al, [BDA_VGA_CONSOLE_COLS]
+    sub al, bl
+    xor ah, ah
+    add ax, ax
+    xor ch, ch
+.loop1:
+    mov cl, bl
+    es
+    rep movsw
+    add si, ax
+    add di, ax
+    dec bh
+    jnz .loop1
+
+.skip:
+    mov dl, [BDA_VGA_CONSOLE_COLS]
+    sub dl, bl
+    xor dh, dh
+    add dx, dx
+    mov bh, [bp + 8]
+    or bh, bh
+    jnz .skip2
+    mov bh, [bp + 5]
+    sub bh, [bp + 7]
+    inc bh
+.skip2:
+    mov ah, [bp + 9]
+    mov al, 0x20
+    xor ch, ch
+.loop2:
+    mov cl, bl
+    rep stosw
+    add di, dx
+    dec bh
+    jnz .loop2
+
+    pop bp
+    ret 6
 
 
 i1001:
@@ -525,19 +587,44 @@ i1003:
 
 
 i1013:
-    cmp dh, 25
+    cmp dh, [BDA_VGA_CONSOLE_ROWSm1]
+    ja .end
+    cmp dl, [BDA_VGA_CONSOLE_COLS]
     jae .end
-    cmp dl, 80
-    jae .end
-    mov ds, [bp + STK_ES]
+    mov bh, al
+    ; mov es, [bp + STK_ES]
     mov si, [bp + STK_BP]
 .loop:
-    lodsb
-    call _bios_write_char
+    es lodsb
+    cmp al, 8
+    jz .bs
+    cmp al, 10
+    jz .lf
+    cmp al, 13
+    jz .cr
+    call _bios_write_char2
+.tail:
     loop .loop
+    test bh, 0x01
+    jz .end
     call i1002
 .end:
     ret
+
+.bs:
+    or dl, dl
+    jz .tail
+    dec dl
+    jmp .tail
+.lf:
+    xor dl, dl
+    inc dh
+    jmp .tail
+.cr:
+    xor dl, dl
+    jmp .tail
+
+
 
 
 i1008:
@@ -740,10 +827,11 @@ _int11:
 
 ;; Get Memory Size
 _int12:
-    push dx
-    mov dx, VPC_MEM_PORT
-    in ax, dx
-    pop dx
+    push ds
+    mov ax, BDA_SEG
+    mov ds, ax
+    mov ax, [BDA_MEMORY]
+    pop ds
     iret
 
 
@@ -1250,13 +1338,19 @@ _clear_vram:
     mov es, dx
     mov cx, 0x8000
 .loop:
-    in ax, 0
+    in ax, 0x40
     stosw
     loop .loop
     mov bx, 0x1000
     add dx, bx
     cmp dx, 0xF000
     jb .loop0
+
+    mov ax, 0xFFFF
+    mov es, ax
+    mov di, 0x0010
+    mov cx, 0xFFF0 / 2
+    rep stosw
 
 
     ;; init PIC
@@ -1383,14 +1477,6 @@ _init_palette:
     loop .loop0
     dec bx
     jnz .loop1
-
-__set_vram:
-    mov ax, 0xB800
-    mov es, ax
-    xor di, di
-    mov cx, 80 * 25
-    mov ax, 0x0720
-    rep stosw
 
     ; mov si, banner
     ; call puts
@@ -1671,7 +1757,7 @@ _palette_data:
     db 0x00,0x00,0x00, 0x00,0x00,0x00, 0x00,0x00,0x00, 0x00,0x00,0x00,
     db 0x00,0x00,0x00, 0x00,0x00,0x00, 0x00,0x00,0x00, 0x00,0x00,0x00
 
-    times SIZE_BIOS - 16 - ($-$$) db 0
+    times SIZE_BIOS - 16 - ($-$$) db 0xFF
 __RESET:
     jmp SEG_BIOS:_INIT
     db "06/16/19"

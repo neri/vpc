@@ -31,6 +31,7 @@ export class VGA {
     private vram_sign: number = 0;
     private vtrace_time = 0;
     private vtrace = false;
+    private vtrace_toggle = 0;
 
     constructor (env: RuntimeEnvironment) {
         this.env = env;
@@ -94,13 +95,14 @@ export class VGA {
 
     }
     readVtrace(): number {
+        this.vtrace_toggle ^= 0x01;
         if (this.vtrace) {
             if (new Date().valueOf() - this.vtrace_time > 0) {
                 this.vtrace = false;
             }
-            return 0x08;
+            return 0x08 | this.vtrace_toggle;
         } else {
-            return 0x01;
+            return this.vtrace_toggle;
         }
     }
     crtcDataWrite(index: number, data: number): void {

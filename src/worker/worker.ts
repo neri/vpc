@@ -21,7 +21,7 @@ class WI implements WorkerInterface {
             if (args.midi) {
                 (self as any).midi = new MPU401(env, 0x330);
             }
-            setTimeout(() => env.run(args.gen), 100);
+            setTimeout(() => env.run(args.gen, args.br_mbr), 100);
         });
 
         (async function() {
