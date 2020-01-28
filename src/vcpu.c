@@ -3286,7 +3286,9 @@ static int cpu_step(cpu_state *cpu) {
                 return 0;
             }
 
-            // case 0xD6: // SETALC (undocumented)
+            // case 0xD6: // SALC (undocumented)
+            //     cpu->AL = 0 - cpu->CF;
+            //     return 0;
 
             case 0xD7: // XLAT
                 if (cpu->cpu_context & CPU_CTX_ADDR32) {
@@ -3971,7 +3973,7 @@ static int cpu_step(cpu_state *cpu) {
                     case 0x30: // WRMSR
                     case 0x32: // RDMSR
                     // case 0x33: // RDPMC
-                    case 0x34: // SYSENTER
+                    // case 0x34: // SYSENTER
                     // case 0x35: // SYSEXIT
                     // case 0x37: // GETSEC
                         if (!is_kernel(cpu)) return RAISE_GPF(0);
@@ -4250,7 +4252,7 @@ static int cpu_step(cpu_state *cpu) {
                         switch (set.size) {
                             case 1:
                                 value = __builtin_ctz(READ_LE16(set.opr1));
-                                cpu->gpr[set.opr2] = value;
+                                WRITE_LE16(&cpu->gpr[set.opr2], value);
                                 cpu->ZF = (value == 0);
                                 return 0;
                             case 2:
@@ -4270,7 +4272,7 @@ static int cpu_step(cpu_state *cpu) {
                             case 1:
                                 src = READ_LE16(set.opr1);
                                 value = 31 ^ __builtin_clz(src);
-                                cpu->gpr[set.opr2] = value;
+                                WRITE_LE16(&cpu->gpr[set.opr2], value);
                                 cpu->ZF = (value == src);
                                 return 0;
                             case 2:
@@ -4303,7 +4305,7 @@ static int cpu_step(cpu_state *cpu) {
                             case 1:
                             {
                                 void *opr2 = &cpu->gpr[set.opr2];
-                                dst = MOVSXB(READ_LE16(set.opr1));
+                                dst = MOVSXW(READ_LE16(set.opr1));
                                 src = MOVSXW(READ_LE16(opr2));
                                 value = dst + src;
                                 cpu->AF = (dst & 15) + (src & 15) > 15;
@@ -4439,13 +4441,16 @@ void cpu_show_regs(cpu_state *cpu, uint32_t eip) {
         p = dump16(p, cpu->GS.sel);
     }
 
-
     *p++ = '\n';
     p = dump_disasm(p, cpu, eip);
     *p = 0;
     println(buff);
 }
 
+
+/**
+ * Show register's detail
+ */
 WASM_EXPORT void dump_regs(cpu_state *cpu) {
     static char buff[1024];
     char *p = buff;
@@ -4512,6 +4517,7 @@ WASM_EXPORT void dump_regs(cpu_state *cpu) {
     *p = 0;
     println(buff);
 }
+
 
 void cpu_reset(cpu_state *cpu, int gen) {
     int new_gen;
@@ -4586,6 +4592,10 @@ void cpu_reset(cpu_state *cpu, int gen) {
     cpu->EDX = cpu->cpuid_model_id;
 }
 
+
+/**
+ * Check and invoke IRQ if possible
+ */
 static int check_irq(cpu_state *cpu) {
     if (!cpu->IF) return 0;
     int vector = vpc_irq();
@@ -4593,6 +4603,10 @@ static int check_irq(cpu_state *cpu) {
     return INVOKE_INT(cpu, vector, external);
 }
 
+
+/**
+ * Run CPU for a while
+ */
 static int cpu_block(cpu_state *cpu, int speed_status) {
     int periodic = speed_status;
 
@@ -4706,6 +4720,9 @@ static int cpu_block(cpu_state *cpu, int speed_status) {
 
 /**
  * Allocate internal CPU structure.
+ * 
+ * @param gen Initial CPU Generation
+ * @returns CPU Context
  */
 WASM_EXPORT cpu_state *alloc_cpu(int gen) {
     static cpu_state cpu;
@@ -4715,6 +4732,10 @@ WASM_EXPORT cpu_state *alloc_cpu(int gen) {
 
 /**
  * Run CPU for a while.
+ * 
+ * @param cpu CPU context
+ * @param speed_status CPU Speed
+ * @return cpu status (see below)
  */
 WASM_EXPORT int run(cpu_state *cpu, int speed_status) {
     int status = cpu_block(cpu, speed_status);
@@ -4771,6 +4792,7 @@ WASM_EXPORT int run(cpu_state *cpu, int speed_status) {
  * 
  * When an exception occurs during `step`, the status code is returned but no interrupt is generated.
  *
+ * @param cpu CPU context
  * @returns Status Code, see below.
  * 
  * |Status Code|Cause|Continuity|Description|
@@ -4813,10 +4835,14 @@ static inline void cpu_set_bp(cpu_state *cpu, bp_vec_t bp) {
 
 /**
  * Set Breakpoint
+ * 
+ * @param cpu CPU context
+ * @param sel Segment Selector
+ * @param offset Offset Address
  */
-WASM_EXPORT void set_breakpoint(cpu_state *cpu, uint16_t sel, uint32_t off) {
+WASM_EXPORT void set_breakpoint(cpu_state *cpu, uint16_t sel, uint32_t offset) {
     bp_vec_t bp = {
-        .offset = off,
+        .offset = offset,
         .sel = sel,
     };
     cpu_set_bp(cpu, bp);
@@ -4826,6 +4852,7 @@ WASM_EXPORT void set_breakpoint(cpu_state *cpu, uint16_t sel, uint32_t off) {
 /**
  * Prepare Step Over
  * 
+ * @param cpu CPU context
  * @return Next instruction's state
  * @retval true The next instruction needs breakpoint and `run`
  * @retval false The next instruction needs `step`
@@ -4887,15 +4914,21 @@ WASM_EXPORT int prepare_step_over(cpu_state *cpu) {
 
 /**
  * Dump state of CPU.
+ * 
+ * @param cpu CPU context
  */
 WASM_EXPORT void show_regs(cpu_state *cpu) {
     cpu_show_regs(cpu, cpu->EIP);
 }
 
+
 /**
  * Reset CPU and change generation to specified value.
  * 
  * All registers are reset to predefined values.
+ * 
+ * @param cpu CPU context
+ * @param gen CPU Generation
  */
 WASM_EXPORT void reset(cpu_state *cpu, int gen) {
     cpu_reset(cpu, gen);
@@ -4903,12 +4936,24 @@ WASM_EXPORT void reset(cpu_state *cpu, int gen) {
 
 
 /**
- * Load Selector into specified Segment for debugging.
+ * Load Segment Selector into specified Segment Register.
+ * 
+ * @param cpu CPU context
+ * @param seg Target Segment Register
+ * @param selector Segment Selector
+ * @return 0 if succeeded, otherwise exception occurred
  */
 WASM_EXPORT int debug_load_selector(cpu_state *cpu, sreg_t *seg, uint16_t selector) {
     return LOAD_DESCRIPTOR(cpu, seg, selector, type_bitmap_SEG_ALL, 1, NULL);
 }
 
+/**
+ * Get Base Address of the specified Segment Selector.
+ * 
+ * @param cpu CPU context
+ * @param selector Segment Selector
+ * @return Segment base address or Zero
+ */
 WASM_EXPORT uint32_t debug_get_segment_base(cpu_state *cpu, uint16_t selector) {
     sreg_t temp;
     int status = LOAD_DESCRIPTOR(cpu, &temp, selector, type_bitmap_SEG_ALL, 1, NULL);
@@ -4918,6 +4963,9 @@ WASM_EXPORT uint32_t debug_get_segment_base(cpu_state *cpu, uint16_t selector) {
 
 /**
  * Get JSON of register map for debugging.
+ * 
+ * @param cpu CPU context
+ * @return JSON of register map
  */
 WASM_EXPORT const char *debug_get_register_map(cpu_state *cpu) {
     static char buffer[1024];
@@ -4967,11 +5015,16 @@ WASM_EXPORT const char *debug_get_register_map(cpu_state *cpu) {
     return buffer;
 }
 
+
 /**
- * get vram signature
+ * Get VRAM Signature
+ * 
+ * @param base Base Address
+ * @param size VRAM Size in Bytes
+ * @return Signature
  */
 WASM_EXPORT uint32_t get_vram_signature(uint32_t base, size_t size) {
-    int shift = 13;
+    const int shift = 13;
     uint32_t acc = 0;
     uint32_t *vram = (uint32_t *)(mem + base);
     const uint32_t max_vram = size / 4;

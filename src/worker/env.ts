@@ -12,7 +12,7 @@ export interface WorkerInterface {
     bind(command: string, handler: WorkerMessageHandler): void;
 }
 
-export interface RuntimeEnvironmentInterface {
+interface RuntimeEnvironmentInterface {
     memoryBase: number;
     memory: WebAssembly.Memory;
 
@@ -128,7 +128,7 @@ export class RuntimeEnvironment {
     public setSound(freq: number): void {
         this.worker.postCommand('beep', freq);
     }
-    public emit(to: number, from: Array<any>): void {
+    public emit(to: number, from: Array<number|string>): void {
         const l = from.length;
         let p = this.vmem + to;
         for (let i = 0; i < l; i++) {
@@ -208,6 +208,7 @@ export class RuntimeEnvironment {
         try {
             status = this.instance.exports.run(this.cpu, this.speed_status);
         } catch (e) {
+            this.isRunning = false;
             console.error(e);
             status = STATUS_EXCEPTION;
             this.worker.print(`#### Exception: ${ e.message }`);
@@ -307,12 +308,21 @@ export class RuntimeEnvironment {
         if (!this.instance) return 0;
         return this.instance.exports.debug_get_segment_base(this.cpu, selector);
     }
+    public getCanonicalRegName(_token: string): string|null {
+        const token = _token.toUpperCase();
+        if (Object.keys(this.regmap).indexOf(token) >= 0) {
+            return token;
+        } else if (token[0] === 'E' && Object.keys(this.regmap).indexOf(token.substr(1)) >= 0) {
+            return token.substr(1);
+        } else {
+            return null;
+        }
+    }
     public regOrValue(_token: string): number {
         let token = _token.toUpperCase();
-        if (Object.keys(this.regmap).indexOf(token) >= 0) {
-            return this.getReg(token);
-        } else if (token[0] === 'E' && Object.keys(this.regmap).indexOf(token.substr(1)) >= 0) {
-            return this.getReg(token.substr(1));
+        const regName = this.getCanonicalRegName(token);
+        if (regName) {
+            return this.getReg(regName);
         } else if (token.match(/^([\dABCDEF]+)$/)) {
             return parseInt(token, 16) | 0;
         } else {
