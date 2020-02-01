@@ -119,7 +119,8 @@ export class RuntimeEnvironment {
         this.loadBIOS();
     }
     public loadBIOS(): void {
-        const bios_base = (this.bios[0] | (this.bios[1] << 8)) << 4;
+        const bios_base = 0x100000 - this.bios.length;
+        // (this.bios[0] | (this.bios[1] << 8)) << 4;
         this.dmaWrite(bios_base, this.bios);
     }
     public setTimer(period: number): void {
@@ -219,6 +220,7 @@ export class RuntimeEnvironment {
         if (status >= STATUS_EXCEPTION) {
             this.isRunning = false;
             console.log(`CPU enters to shutdown (${status.toString(16)})`);
+            this.worker.postCommand('debugReaction', {});
         } else if (this.isDebugging || status == STATUS_ICEBP) {
             this.isRunning = false;
             this.isDebugging = true;
