@@ -142,10 +142,10 @@ _irq1:
     stc
     int 0x15
     jnc .loop
-    ; cmp al, 0xE1
-    ; jz .E1
-    ; cmp al, 0xE0
-    ; jz .E0
+    cmp al, 0xE1
+    jz .E1
+    cmp al, 0xE0
+    jz .E0
     mov bl, al
     and al, 0x7F
     cmp al, 0x1D
@@ -203,45 +203,6 @@ _irq1:
     out 0x20, al
     pop di
     pop bx
-    pop cx
-    pop ax
-    pop ds
-    iret
-
-
-;; TODO: deprecated
-_irq4:
-    push ds
-    push ax
-    push cx
-    push dx
-    push bx
-    mov ax, BDA_SEG
-    mov ds, ax
-.loop:
-    mov dx, [BDA_COMPORT]
-    add dl, 5
-    in al, dx
-    and al, 1
-    jz .end
-    mov ax, [BDA_KBD_BUFF_HEAD]
-    mov bx, [BDA_KBD_BUFF_TAIL]
-    lea cx, [bx + 2 - BDA_KBD_BUFF_BEGIN]
-    and cx, BDA_KBD_BUFF_MASK
-    add cx, BDA_KBD_BUFF_BEGIN
-    cmp ax, cx
-    jz .end
-    sub dl, 5
-    in al, dx
-    mov ah, al
-    mov [bx], ax
-    mov [BDA_KBD_BUFF_TAIL], cx
-    jmp .loop
-.end:
-    mov al, 0x20
-    out 0x20, al
-    pop bx
-    pop dx
     pop cx
     pop ax
     pop ds
@@ -596,6 +557,8 @@ i1013:
     mov si, [bp + STK_BP]
 .loop:
     es lodsb
+    cmp al, 7
+    jz .bel
     cmp al, 8
     jz .bs
     cmp al, 10
@@ -611,6 +574,9 @@ i1013:
 .end:
     ret
 
+.bel:
+    call _bios_cons_beep
+    jmp .tail
 .bs:
     or dl, dl
     jz .tail
@@ -652,6 +618,8 @@ i100A:
     ret
 
 i100E:
+    cmp al, 7
+    jz .bel
     cmp al, 8
     jz .bs
     cmp al, 10
@@ -670,6 +638,8 @@ i100E:
     mov dx, [BDA_VGA_CURSOR]
     call _bios_set_cursor
     ret
+.bel:
+    jmp _bios_cons_beep
 .bs:
     mov cl, [BDA_VGA_CURSOR]
     or cl, cl
@@ -811,6 +781,23 @@ _chk_scroll:
     pop cx
     pop ax
     pop es
+    pop ds
+    ret
+
+_bios_cons_beep:
+    push ds
+    push cx
+    push dx
+    push si
+
+    push cs
+    pop ds
+    mov si, _beep_sound_data
+    call _play_sound
+
+    pop si
+    pop dx
+    pop cx
     pop ds
     ret
 
@@ -1032,6 +1019,7 @@ i1600:
     hlt
     jmp .loop
 .has_data:
+    cli
     mov ax, [bx]
     lea cx, [bx + 2 - BDA_KBD_BUFF_BEGIN]
     and cx, BDA_KBD_BUFF_MASK
@@ -1041,6 +1029,8 @@ i1600:
     ret
 
 i1601:
+    sti
+    cli
     mov dl, [bp + STK_FLAGS]
     mov ax, [BDA_KBD_BUFF_TAIL]
     mov bx, [BDA_KBD_BUFF_HEAD]
@@ -1288,9 +1278,21 @@ _INIT:
     mov dx, VPC_MEM_PORT
     in ax, dx
     stosw
-    mov di, 0x400 + BDA_KBD_BUFF_HEAD
+
+    mov di, 0x400 + BDA_KBD_SHIFT
+    xor ax, ax
+    stosb
+    stosw
     mov ax, BDA_KBD_BUFF_BEGIN
     stosw
+    stosw
+    xor ax, ax
+    mov cx, 0x10
+    rep stosw
+    mov di, 0x480
+    mov ax, BDA_KBD_BUFF_BEGIN
+    stosw
+    mov ax, BDA_KBD_BUFF_BEGIN + BDA_KBD_BUFF_MASK + 1
     stosw
 
     mov di, 0x400 + BDA_VGA_CURRENT_MODE
@@ -1414,22 +1416,22 @@ _clear_vram:
 
 
     ;; Init UART
-    cli
-    xor ax, ax
-    mov es, ax
-    mov di, (8 + 4) * 4
-    mov ax, _irq4
-    stosw
-    mov ax, cs
-    stosw
-    in al, 0x21
-    and al, 0xEF
-    out 0x21, al
-    mov dx, [ss:0x0400]
-    inc dx
-    mov al, 0x01
-    out dx, al
-    sti
+    ; cli
+    ; xor ax, ax
+    ; mov es, ax
+    ; mov di, (8 + 4) * 4
+    ; mov ax, _irq4
+    ; stosw
+    ; mov ax, cs
+    ; stosw
+    ; in al, 0x21
+    ; and al, 0xEF
+    ; out 0x21, al
+    ; mov dx, [ss:0x0400]
+    ; inc dx
+    ; mov al, 0x01
+    ; out dx, al
+    ; sti
 
 
     ;; Init Video
@@ -1686,9 +1688,14 @@ boot_fail_msg:
     db 10, "Operating System not found", 10, 0
 
     alignb 2
+_beep_sound_data:
+    dw 1000, 100
+    dw 0xFFFF
+
 _boot_sound_data:
     dw 2000, 100, 1000, 100
     dw 0xFFFF
+
 
 _palette_data:
     db 0x00,0x00,0x00, 0x00,0x00,0x2a, 0x00,0x2a,0x00, 0x00,0x2a,0x2a,
