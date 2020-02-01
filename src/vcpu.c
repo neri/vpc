@@ -45,8 +45,8 @@ void *memcpy(void *p, const void *q, size_t n) {
 typedef struct cpu_state cpu_state;
 typedef struct sreg_t sreg_t;
 WASM_EXPORT void cpu_reset(cpu_state *cpu, int gen);
-WASM_EXPORT void cpu_show_regs(cpu_state *cpu, uint32_t eip);
-char *dump_disasm(char *p, cpu_state *cpu, uint32_t eip);
+WASM_EXPORT void cpu_show_regs(cpu_state *cpu);
+static inline char *disasm_main(char * p, uint16_t sel, uint32_t eip, uint32_t rip, int _use32, int *length);
 int get_inst_len(cpu_state *cpu);
 
 enum {
@@ -274,15 +274,40 @@ typedef struct {
     uint16_t IOPB;
 } tss32_t;
 
-
+typedef uint8_t * cpu_rip_t;
 #define MAX_BREAKPOINTS 1
-typedef struct {
-    uint32_t offset;
-    uint16_t sel;
-} bp_vec_t;
 
 
 typedef struct cpu_state {
+
+    cpu_rip_t rip;
+
+    union {
+        uint32_t eflags;
+        struct {
+            uint32_t CF:1;
+            uint32_t :1;
+            uint32_t PF:1;
+            uint32_t :1;
+            uint32_t AF:1;
+            uint32_t :1;
+            uint32_t ZF:1;
+            uint32_t SF:1;
+            uint32_t TF:1;
+            uint32_t IF:1;
+            uint32_t DF:1;
+            uint32_t OF:1;
+            uint32_t IOPL:2;
+            uint32_t NT:1;
+            uint32_t :1;
+            uint32_t RF:1;
+            uint32_t VM:1;
+            uint32_t AC:1;
+            uint32_t VIF:1;
+            uint32_t VIP:1;
+            uint32_t ID:1;
+        };
+    };
 
     union {
         uint32_t gpr[8];
@@ -324,35 +349,6 @@ typedef struct cpu_state {
         };
     };
 
-    uint32_t EIP;
-
-    union {
-        uint32_t eflags;
-        struct {
-            uint32_t CF:1;
-            uint32_t :1;
-            uint32_t PF:1;
-            uint32_t :1;
-            uint32_t AF:1;
-            uint32_t :1;
-            uint32_t ZF:1;
-            uint32_t SF:1;
-            uint32_t TF:1;
-            uint32_t IF:1;
-            uint32_t DF:1;
-            uint32_t OF:1;
-            uint32_t IOPL:2;
-            uint32_t NT:1;
-            uint32_t :1;
-            uint32_t RF:1;
-            uint32_t VM:1;
-            uint32_t AC:1;
-            uint32_t VIF:1;
-            uint32_t VIP:1;
-            uint32_t ID:1;
-        };
-    };
-
     union {
         sreg_t sregs[8];
         struct {
@@ -373,7 +369,7 @@ typedef struct cpu_state {
         };
     };
 
-    bp_vec_t bps[MAX_BREAKPOINTS];
+    cpu_rip_t bps[MAX_BREAKPOINTS];
     int n_bps;
 
     unsigned RPL, CPL;
@@ -382,6 +378,10 @@ typedef struct cpu_state {
     uint32_t cr0_valid, cr4_valid;
     uint32_t cpuid_model_id;
     unsigned cpu_gen, cpu_context, default_context;
+
+    cpu_rip_t last_known_rip;
+    cpu_rip_t cs_limit_rip;
+    uint32_t shadow_eip;
 
 } cpu_state;
 
@@ -578,32 +578,68 @@ static inline int64_t MOVSXD(uint32_t d) {
     return (int64_t)(int32_t)d;
 }
 
+static inline cpu_rip_t make_rip(uint32_t base, uint32_t index) {
+    return mem + base + index;
+}
+
+static inline cpu_rip_t make_rip_from_eip(cpu_state *cpu) {
+    return make_rip(cpu->CS.base, cpu->shadow_eip);
+}
+
+static inline uint32_t cpu_reflect_rip_to_eip(cpu_state *cpu) {
+    uintptr_t cs_base = (uintptr_t)mem + cpu->CS.base;
+    return (uintptr_t)cpu->rip - cs_base;
+}
+
+static inline void cpu_last_known_eip(cpu_state *cpu) {
+    cpu->last_known_rip = cpu->rip;
+}
+
+static inline void cpu_reflect_rip(cpu_state *cpu) {
+    cpu->rip = make_rip_from_eip(cpu);
+}
+
+static inline uint32_t cpu_update_eip(cpu_state *cpu) {
+    uint32_t new_eip = cpu_reflect_rip_to_eip(cpu);
+    cpu->shadow_eip = new_eip;
+    return new_eip;
+}
+
+static inline void cpu_recover_eip(cpu_state *cpu) {
+    cpu->rip = cpu->last_known_rip;
+    cpu_update_eip(cpu);
+}
+
+static inline void cpu_set_eip(cpu_state *cpu, uint32_t new_eip) {
+    cpu->shadow_eip = new_eip;
+    cpu_reflect_rip(cpu);
+}
+
+
 static inline int CS_LIMIT_CHECK(cpu_state *cpu, int default_value) {
-    if (cpu->EIP > cpu->CS.limit) return cpu_status_gpf;
+    // if (cpu->rip > cpu->cs_limit_rip) return RAISE_GPF(0);
     return default_value;
 }
 
 static inline uint8_t FETCH8(cpu_state *cpu) {
-    uint8_t result = mem[cpu->CS.base + cpu->EIP];
-    cpu->EIP += 1;
-    return result;
+    return *cpu->rip++;
 }
 
 static inline int FETCHSB(cpu_state *cpu) {
-    uint8_t result = mem[cpu->CS.base + cpu->EIP];
-    cpu->EIP += 1;
-    return MOVSXB(result);
+    return MOVSXB(FETCH8(cpu));
 }
 
 static inline uint16_t FETCH16(cpu_state *cpu) {
-    uint16_t result = READ_MEM16(&cpu->CS, cpu->EIP);
-    cpu->EIP += 2;
+    uint16_t *p = (uint16_t *)cpu->rip;
+    uint16_t result = *p++;
+    cpu->rip = (void *)p;
     return result;
 }
 
 static inline uint32_t FETCH32(cpu_state *cpu) {
-    uint32_t result = READ_MEM32(&cpu->CS, cpu->EIP);
-    cpu->EIP += 4;
+    uint32_t *p = (uint32_t *)cpu->rip;
+    uint32_t result = *p++;
+    cpu->rip = (void *)p;
     return result;
 }
 
@@ -760,7 +796,13 @@ static int LOAD_DESCRIPTOR(cpu_state *cpu, desc_t *target, uint16_t selector, de
             }
             set_flag_to(&cpu->default_context,
             CPU_CTX_ADDR32 | CPU_CTX_DATA32 | SEG_CTX_DEFAULT_ADDR32 | SEG_CTX_DEFAULT_DATA32,
-            cpu->CS.attr_D);
+            target->attr_D);
+
+            uint32_t limit_la = target->base + target->limit;
+            if (limit_la >= max_mem) {
+                limit_la = max_mem - 1;
+            }
+            cpu->cs_limit_rip = make_rip(limit_la, 0);
         }
     }
     if (cpu->CR0.PE && target == &cpu->SS) {
@@ -786,7 +828,7 @@ static int TSS_switch_context(cpu_state *cpu, desc_t *new_tss, int link) {
     // cpu->time_stamp_counter += 500;
 
     current->CR3 = cpu->CR3;
-    current->EIP = cpu->EIP;
+    current->EIP = cpu_reflect_rip_to_eip(cpu);
     current->eflags = cpu->eflags;
     current->EAX = cpu->EAX;
     current->ECX = cpu->ECX;
@@ -809,7 +851,6 @@ static int TSS_switch_context(cpu_state *cpu, desc_t *new_tss, int link) {
     }
     cpu->TSS = *new_tss;
 
-    cpu->EIP = next->EIP;
     cpu->eflags = next->eflags;
     cpu->EAX = next->EAX;
     cpu->ECX = next->ECX;
@@ -826,6 +867,7 @@ static int TSS_switch_context(cpu_state *cpu, desc_t *new_tss, int link) {
     LOAD_DESCRIPTOR(cpu, &cpu->DS, next->DS, 0, 1, NULL);
     LOAD_DESCRIPTOR(cpu, &cpu->FS, next->FS, 0, 1, NULL);
     LOAD_DESCRIPTOR(cpu, &cpu->GS, next->GS, 0, 1, NULL);
+    cpu_set_eip(cpu, next->EIP);
 
     cpu->CR0.TS = 1;
 
@@ -840,13 +882,13 @@ static int FAR_CALL(cpu_state *cpu, uint16_t new_csel, uint32_t new_eip) {
     if (cpu->CR0.PE && !cpu->VM) return cpu_status_ud;
 
     uint32_t old_csel = cpu->CS.sel;
-    uint32_t old_eip = cpu->EIP;
+    uint32_t old_eip = cpu_reflect_rip_to_eip(cpu);
     sreg_t new_cs;
     int status = LOAD_DESCRIPTOR(cpu, &new_cs, new_csel, type_bitmap_SEG_EXEC, 0, NULL);
     if (status) return status;
 
     LOAD_DESCRIPTOR(cpu, &cpu->CS, new_csel, 0, 0, NULL);
-    cpu->EIP = new_eip;
+    cpu_set_eip(cpu, new_eip);
     PUSHW(cpu, old_csel);
     PUSHW(cpu, old_eip);
 
@@ -854,10 +896,10 @@ static int FAR_CALL(cpu_state *cpu, uint16_t new_csel, uint32_t new_eip) {
 }
 
 static int FAR_JUMP(cpu_state *cpu, uint16_t new_sel, uint32_t new_eip) {
+    if (new_sel == 0 && new_eip == 0) return cpu_status_gpf;
     int status = LOAD_DESCRIPTOR(cpu, &cpu->CS, new_sel, type_bitmap_SEG_EXEC, 0, NULL);
     if (status == 0) {
-        cpu->EIP = new_eip;
-        if (new_sel == 0 && new_eip == 0) return cpu_status_gpf;
+        cpu_set_eip(cpu, new_eip);
         return CS_LIMIT_CHECK(cpu, 0);
     } else { // TSS
         desc_t new_tss;
@@ -881,7 +923,7 @@ static inline int INVOKE_INT_MAIN(cpu_state *cpu, int n, int_cause_t cause) {
     if (ext) errcode |= 1;
 
     uint16_t old_csel = cpu->CS.sel, old_ssel = cpu->SS.sel;
-    uint32_t old_eip = cpu->EIP, old_esp = cpu->ESP, old_eflags = cpu->eflags;
+    uint32_t old_eip = cpu->shadow_eip, old_esp = cpu->ESP, old_eflags = cpu->eflags;
 
     uint16_t new_csel, new_ssel;
     uint32_t new_eip, new_esp;
@@ -916,7 +958,7 @@ static inline int INVOKE_INT_MAIN(cpu_state *cpu, int n, int_cause_t cause) {
     if (new_csel == 0 && new_eip == 0) return RAISE_GPF(errcode | 1);
     int status = LOAD_DESCRIPTOR(cpu, &cpu->CS, new_csel, type_bitmap_SEG_EXEC, 0, NULL);
     if (status) return status | ext;
-    cpu->EIP = new_eip;
+    cpu_set_eip(cpu, new_eip);
 
     if (has_to_switch_esp) {
         tss32_t *tss = (tss32_t *)(mem + cpu->TSS.base);
@@ -957,6 +999,7 @@ static inline int INVOKE_INT_MAIN(cpu_state *cpu, int n, int_cause_t cause) {
 
 static int INVOKE_INT(cpu_state *cpu, int n, int_cause_t cause) {
     cpu->cpu_context = cpu->default_context;
+    uint32_t old_eip = cpu_reflect_rip_to_eip(cpu);
     if (!cpu->CR0.PE) {
         int idt_offset = cpu->IDT.base + n * 4;
         uint32_t new_eip = READ_LE16(mem + idt_offset);
@@ -965,25 +1008,25 @@ static int INVOKE_INT(cpu_state *cpu, int n, int_cause_t cause) {
 
         PUSHW(cpu, cpu->eflags);
         PUSHW(cpu, cpu->CS.sel);
-        PUSHW(cpu, cpu->EIP);
+        PUSHW(cpu, old_eip);
 
         LOAD_DESCRIPTOR(cpu, &cpu->CS, new_csel, 0, 0, NULL);
-        cpu->EIP = new_eip;
+        cpu_set_eip(cpu, new_eip);
         cpu->eflags &= cpu->flags_mask_intrm;
 
         return CS_LIMIT_CHECK(cpu, 0);
     } else {
         uint16_t old_csel = cpu->CS.sel, old_ssel = cpu->SS.sel;
-        uint32_t old_eip = cpu->EIP, old_esp = cpu->ESP, old_eflags = cpu->eflags;
+        uint32_t old_esp = cpu->ESP, old_eflags = cpu->eflags;
         int status = INVOKE_INT_MAIN(cpu, n, cause);
         if (status >= cpu_status_exception) {
             int status2;
             status2 = LOAD_DESCRIPTOR(cpu, &cpu->SS, old_ssel, 0, 0, NULL);
             if (status2 >= cpu_status_exception) return cpu_status_double;
-            cpu->ESP = old_eip;
+            cpu->ESP = old_esp;
             status2 = LOAD_DESCRIPTOR(cpu, &cpu->CS, old_csel, 0, 0, NULL);
             if (status2 >= cpu_status_exception) return cpu_status_double;
-            cpu->EIP = old_eip;
+            cpu_set_eip(cpu, old_eip);
             cpu->eflags = old_eflags;
             return status;
         }
@@ -999,7 +1042,7 @@ static int FAR_RETURN(cpu_state *cpu, uint16_t n, int is_iret) {
         new_eip = POPW(cpu);
         new_csel = POPW(cpu);
         LOAD_DESCRIPTOR(cpu, &cpu->CS, new_csel, 0, 0, NULL);
-        cpu->EIP = new_eip;
+        cpu_set_eip(cpu, new_eip);
         if (is_iret) {
             uint32_t new_fl = POPW(cpu);
             if (cpu->CR0.PE) {
@@ -1035,7 +1078,7 @@ static int FAR_RETURN(cpu_state *cpu, uint16_t n, int is_iret) {
 
                 LOAD_FLAGS(cpu, new_fl, 0);
                 LOAD_SEL8086(cpu, &cpu->CS, new_csel);
-                cpu->EIP = new_eip;
+                cpu_set_eip(cpu, new_eip);
                 LOAD_SEL8086(cpu, &cpu->SS, new_ssel);
                 cpu->ESP = new_esp;
                 LOAD_SEL8086(cpu, &cpu->ES, new_esel);
@@ -1074,7 +1117,7 @@ static int FAR_RETURN(cpu_state *cpu, uint16_t n, int is_iret) {
             cpu->ESP += n;
         }
         LOAD_DESCRIPTOR(cpu, &cpu->CS, new_csel, 0, 0, NULL);
-        cpu->EIP = new_eip;
+        cpu_set_eip(cpu, new_eip);
         if (is_iret) {
             if (old_rpl) {
                 LOAD_FLAGS(cpu, new_fl, cpu->flags_preserve_iret3);
@@ -1104,7 +1147,7 @@ static inline int SETF8(cpu_state *cpu, int value) {
     cpu->OF = (value != v);
     cpu->SF = (v < 0);
     cpu->ZF = (v == 0);
-    cpu->PF = 1 & ~__builtin_popcount((uint8_t)value);
+    cpu->PF = 1 & ~__builtin_popcount(value);
     return value;
 }
 
@@ -1113,16 +1156,16 @@ static inline int SETF16(cpu_state *cpu, int value) {
     cpu->OF = (value != v);
     cpu->SF = (v < 0);
     cpu->ZF = (v == 0);
-    cpu->PF = 1 & ~__builtin_popcount((uint8_t)value);
+    cpu->PF = 1 & ~__builtin_popcount(value & UINT8_MAX);
     return value;
 }
 
 static inline int SETF32(cpu_state *cpu, int value) {
     int64_t v = value;
     cpu->OF = (value != v);
-    cpu->SF = (v < 0);
-    cpu->ZF = (v == 0);
-    cpu->PF = 1 & ~__builtin_popcount((uint8_t)value);
+    cpu->SF = (value < 0);
+    cpu->ZF = (value == 0);
+    cpu->PF = 1 & ~__builtin_popcount(value & UINT8_MAX);
     return value;
 }
 
@@ -1185,11 +1228,9 @@ typedef struct {
 
 static inline int MODRM(cpu_state *cpu, sreg_t *seg_ovr, modrm_t *result) {
     modrm_t modrm;
-    uint32_t rip = cpu->CS.base + cpu->EIP;
-    modrm.modrm = mem[rip];
+    modrm.modrm = FETCH8(cpu);
     if (modrm.mod == 3) {
         result->modrm = modrm.modrm;
-        cpu->EIP++;
         return 3;
     }
 
@@ -1209,8 +1250,7 @@ static inline int MODRM(cpu_state *cpu, sreg_t *seg_ovr, modrm_t *result) {
                 offset = cpu->gpr[modrm.rm];
             }
         } else {
-            modrm.sib = mem[rip + skip];
-            skip++;
+            modrm.sib = FETCH8(cpu);
 
             if (modrm.base == index_EBP) {
                 if (mod == 0) {
@@ -1234,10 +1274,10 @@ static inline int MODRM(cpu_state *cpu, sreg_t *seg_ovr, modrm_t *result) {
         }
         switch (mod) {
             case 1:
-                offset += MOVSXB(mem[rip + skip]);
+                offset += FETCHSB(cpu);
                 break;
             case 4:
-                offset += READ_LE32(mem + rip + skip);
+                offset += FETCH32(cpu);
                 break;
         }
 
@@ -1277,15 +1317,14 @@ static inline int MODRM(cpu_state *cpu, sreg_t *seg_ovr, modrm_t *result) {
         }
         switch (mod) {
             case 1:
-                offset += MOVSXB(mem[rip + skip]);
+                offset += FETCHSB(cpu);
                 break;
             case 2:
-                offset += READ_LE16(mem + rip + skip);
+                offset += MOVSXW(FETCH16(cpu));
                 break;
         }
         offset &= UINT16_MAX;
     }
-    cpu->EIP += skip + mod;
 
     sreg_t *seg;
     if (seg_ovr) {
@@ -1578,9 +1617,11 @@ static inline void XOR(cpu_state *cpu, operand_set *set) {
 static inline int JUMP_IF(cpu_state *cpu, int disp, int cc) {
     if (cc) {
         if (cpu->cpu_context & CPU_CTX_DATA32) {
-            cpu->EIP = cpu->EIP + disp;
+            cpu->rip += disp;
         } else {
-            cpu->EIP = (cpu->EIP + disp) & 0xFFFF;
+            uint32_t new_eip = cpu_reflect_rip_to_eip(cpu);
+            new_eip = (new_eip + disp) & UINT16_MAX;
+            cpu_set_eip(cpu, new_eip);
         }
     }
     return 0;
@@ -1619,7 +1660,7 @@ static inline int EVAL_CC(cpu_state *cpu, int cc) {
         case 9: // xNS
             return (!cpu->SF);
 
-        case 0xA: // xP d8
+        case 0xA: // xP
             return (cpu->PF);
 
         case 0xB: // xNP
@@ -2395,6 +2436,7 @@ static int SCAS(cpu_state *cpu, sreg_t *_unused, int size, int prefix) {
 
 
 static int cpu_step(cpu_state *cpu) {
+    cpu_last_known_eip(cpu);
     operand_set set;
     uint32_t prefix = 0;
     sreg_t *seg = NULL;
@@ -3183,15 +3225,18 @@ static int cpu_step(cpu_state *cpu) {
 
             case 0xC2: // RET imm16
             {
-                uint32_t temp = POPW(cpu);
+                uint32_t new_eip = POPW(cpu);
                 cpu->SP += FETCH16(cpu);
-                cpu->EIP = temp;
+                cpu_set_eip(cpu, new_eip);
                 return CS_LIMIT_CHECK(cpu, 0);
             }
 
             case 0xC3: // RET
-                cpu->EIP = POPW(cpu);
+            {
+                uint32_t new_eip = POPW(cpu);
+                cpu_set_eip(cpu, new_eip);
                 return CS_LIMIT_CHECK(cpu, 0);
+            }
 
             case 0xC4: // LES reg, r/m
                 return LDS(cpu, seg, &cpu->ES);
@@ -3385,7 +3430,7 @@ static int cpu_step(cpu_state *cpu) {
             case 0xE8: // call imm16
             {
                 int disp = FETCHSW(cpu);
-                PUSHW(cpu, cpu->EIP);
+                PUSHW(cpu, cpu_reflect_rip_to_eip(cpu));
                 return JUMP_IF(cpu, disp, 1);
             }
 
@@ -3407,7 +3452,7 @@ static int cpu_step(cpu_state *cpu) {
                 int disp = FETCHSB(cpu);
                 if (disp == -2) {
                     // Reduce CPU power of forever loop
-                    cpu->EIP += disp;
+                    cpu->rip += disp;
                     if (cpu->IF) {
                         return cpu_status_pause;
                     } else {
@@ -3459,7 +3504,13 @@ static int cpu_step(cpu_state *cpu) {
 
             case 0xF4: // HLT
                 if (is_kernel(cpu)) {
-                    return cpu_status_halt;
+                    if (cpu->IF) {
+                        return cpu_status_halt;
+                    } else {
+                        // println("#### SYSTEM HALTED");
+                        // cpu_show_regs(cpu);
+                        return cpu_status_exit;
+                    }
                 } else {
                     return RAISE_GPF(0);
                 }
@@ -3708,13 +3759,17 @@ static int cpu_step(cpu_state *cpu) {
                         DEC(cpu, &set);
                         return 0;
                     case 2: // CALL r/m16
-                        PUSHW(cpu, cpu->EIP);
+                    {
+                        PUSHW(cpu, cpu_reflect_rip_to_eip(cpu));
+                        uint32_t new_eip;
                         if (cpu->cpu_context & CPU_CTX_DATA32) {
-                            cpu->EIP = READ_LE32(set.opr1);
+                            new_eip = READ_LE32(set.opr1);
                         } else {
-                            cpu->EIP = READ_LE16(set.opr1);
+                            new_eip = READ_LE16(set.opr1);
                         }
+                        cpu_set_eip(cpu, new_eip);
                         return CS_LIMIT_CHECK(cpu, 0);
+                    }
                     case 3: // CALL FAR m16:16
                     {
                         if (mod) return cpu_status_ud;
@@ -3729,12 +3784,16 @@ static int cpu_step(cpu_state *cpu) {
                         return FAR_CALL(cpu, new_sel, new_eip);
                     }
                     case 4: // JMP r/m 16
+                    {
+                        uint32_t new_eip;
                         if (cpu->cpu_context & CPU_CTX_DATA32) {
-                            cpu->EIP = READ_LE32(set.opr1);
+                            new_eip = READ_LE32(set.opr1);
                         } else {
-                            cpu->EIP = READ_LE16(set.opr1);
+                            new_eip = READ_LE16(set.opr1);
                         }
+                        cpu_set_eip(cpu, new_eip);
                         return CS_LIMIT_CHECK(cpu, 0);
+                    }
                     case 5: // JMP FAR m16:16
                     {
                         if (mod) return cpu_status_ud;
@@ -3954,21 +4013,21 @@ static int cpu_step(cpu_state *cpu) {
                         return 0;
                     }
 
-                    // case 0x21: // MOV reg, Dr
-                    // case 0x23: // MOV Dr, reg
-                    // {
-                    //     // TODO:
-                    //     if (cpu->cpu_gen < cpu_gen_80386) return cpu_status_ud;
-                    //     if (!is_kernel(cpu)) return RAISE_GPF(0);
-                    //     modrm_t modrm;
-                    //     if (!MODRM(cpu, NULL, &modrm)) return cpu_status_ud;
-                    //     if (inst & 2) {
-                    //         // DO NOTHING
-                    //     } else {
-                    //         cpu->gpr[modrm.rm] = 0;
-                    //     }
-                    //     return 0;
-                    // }
+                    case 0x21: // MOV reg, Dr
+                    case 0x23: // MOV Dr, reg
+                    {
+                        // TODO:
+                        if (cpu->cpu_gen < cpu_gen_80386) return cpu_status_ud;
+                        if (!is_kernel(cpu)) return RAISE_GPF(0);
+                        modrm_t modrm;
+                        if (!MODRM(cpu, NULL, &modrm)) return cpu_status_ud;
+                        if (inst & 2) {
+                            // DO NOTHING
+                        } else {
+                            cpu->gpr[modrm.rm] = 0;
+                        }
+                        return 0;
+                    }
 
                     case 0x30: // WRMSR
                     case 0x32: // RDMSR
@@ -4360,10 +4419,11 @@ char *dump_segment(char *p, sreg_t *seg) {
     return p;
 }
 
-void cpu_show_regs(cpu_state *cpu, uint32_t eip) {
+void cpu_show_regs(cpu_state *cpu) {
     static char buff[1024];
     char *p = buff;
 
+    cpu_update_eip(cpu);
     if (cpu->cpu_gen >= cpu_gen_80386) {
         p = dump_string(p, "EAX ");
         p = dump32(p, cpu->EAX);
@@ -4382,7 +4442,7 @@ void cpu_show_regs(cpu_state *cpu, uint32_t eip) {
         p = dump_string(p, " EDI ");
         p = dump32(p, cpu->EDI);
         p = dump_string(p, " EIP ");
-        p = dump32(p, cpu->EIP);
+        p = dump32(p, cpu->shadow_eip);
         p = dump_string(p, " EFLAGS ");
         p = dump32(p, cpu->eflags);
     } else {
@@ -4442,7 +4502,13 @@ void cpu_show_regs(cpu_state *cpu, uint32_t eip) {
     }
 
     *p++ = '\n';
-    p = dump_disasm(p, cpu, eip);
+
+    {
+        sreg_t *seg = &cpu->CS;
+        uint32_t eip = cpu->shadow_eip;
+        p = disasm_main(p, seg->sel, eip, seg->base + eip, seg->attr_D, NULL);
+    }
+
     *p = 0;
     println(buff);
 }
@@ -4472,7 +4538,7 @@ WASM_EXPORT void dump_regs(cpu_state *cpu) {
     p = dump_string(p, " EDI ");
     p = dump32(p, cpu->EDI);
     p = dump_string(p, " EIP ");
-    p = dump32(p, cpu->EIP);
+    p = dump32(p, cpu->shadow_eip);
     p = dump_string(p, " EFLAGS ");
     p = dump32(p, cpu->eflags);
     *p++ = ' ';
@@ -4512,8 +4578,6 @@ WASM_EXPORT void dump_regs(cpu_state *cpu) {
     p = dump_string(p, " CR3 ");
     p = dump32(p, cpu->CR3);
 
-    // *p++ = '\n';
-    // p = dump_disasm(p, cpu, eip);
     *p = 0;
     println(buff);
 }
@@ -4531,7 +4595,7 @@ void cpu_reset(cpu_state *cpu, int gen) {
 
     cpu->n_bps = 0;
     cpu->cpu_gen = new_gen;
-    cpu->cpuid_model_id = 0x00 | (new_gen << 8);
+    cpu->cpuid_model_id = 0x01 | (new_gen << 8);
 
     cpu->flags_mask = 0x003F7FD5;
     cpu->flags_mask1 = 0x00000002;
@@ -4574,7 +4638,7 @@ void cpu_reset(cpu_state *cpu, int gen) {
 
     cpu->RPL = 0;
     cpu->CPL = 0;
-    cpu->EIP = 0x0000FFF0;
+    cpu->shadow_eip = 0x0000FFF0;
     cpu->CS.sel = 0xF000;
     cpu->CS.base = 0x000F0000;
     cpu->CS.attrs = 0x009B;
@@ -4610,6 +4674,8 @@ static int check_irq(cpu_state *cpu) {
 static int cpu_block(cpu_state *cpu, int speed_status) {
     int periodic = speed_status;
 
+    cpu_reflect_rip(cpu);
+
     int status = check_irq(cpu);
     if (status) return status;
     int has_to_trace = 0;
@@ -4621,11 +4687,10 @@ static int cpu_block(cpu_state *cpu, int speed_status) {
     int is_debug = cpu->n_bps;
     if (is_debug) {
         for (; i < periodic; i++) {
-            if (cpu->bps[0].offset == cpu->EIP && cpu->bps[0].sel == cpu->CS.sel) {
+            if (cpu->bps[0] == cpu->rip) {
                 cpu->n_bps = 0;
                 return cpu_status_icebp;
             }
-            uint32_t last_known_eip = cpu->EIP;
             int status = cpu_step(cpu);
             if (status == cpu_status_periodic) continue;
 
@@ -4633,7 +4698,6 @@ static int cpu_block(cpu_state *cpu, int speed_status) {
                 status = check_irq(cpu);
                 if (status) return status;
                 if (cpu->TF) {
-                    last_known_eip = cpu->EIP;
                     status = cpu_step(cpu);
                     if (status) goto check1;
                     has_to_trace = 0;
@@ -4648,7 +4712,7 @@ static int cpu_block(cpu_state *cpu, int speed_status) {
                     return cpu_status_periodic;
                 case cpu_status_div:
                     if (cpu->cpu_gen >= cpu_gen_80286) {
-                        cpu->EIP = last_known_eip;
+                        cpu_recover_eip(cpu);
                     }
                     status = INVOKE_INT(cpu, 0, exception); // #DE
                     if (status) return status;
@@ -4660,13 +4724,12 @@ static int cpu_block(cpu_state *cpu, int speed_status) {
                     continue;
                 case cpu_status_ud:
                 default:
-                    cpu->EIP = last_known_eip;
+                    cpu_recover_eip(cpu);
                     return status;
             }
         }
     } else {
         for (; i < periodic; i++) {
-            uint32_t last_known_eip = cpu->EIP;
             int status = cpu_step(cpu);
             if (status == cpu_status_periodic) continue;
 
@@ -4674,7 +4737,6 @@ static int cpu_block(cpu_state *cpu, int speed_status) {
                 status = check_irq(cpu);
                 if (status) return status;
                 if (cpu->TF) {
-                    last_known_eip = cpu->EIP;
                     status = cpu_step(cpu);
                     if (status) goto check2;
                     has_to_trace = 0;
@@ -4689,7 +4751,7 @@ static int cpu_block(cpu_state *cpu, int speed_status) {
                     return cpu_status_periodic;
                 case cpu_status_div:
                     if (cpu->cpu_gen >= cpu_gen_80286) {
-                        cpu->EIP = last_known_eip;
+                        cpu_recover_eip(cpu);
                     }
                     status = INVOKE_INT(cpu, 0, exception); // #DE
                     if (status) return status;
@@ -4701,7 +4763,7 @@ static int cpu_block(cpu_state *cpu, int speed_status) {
                     continue;
                 case cpu_status_ud:
                 default:
-                    cpu->EIP = last_known_eip;
+                    cpu_recover_eip(cpu);
                     return status;
             }
         }
@@ -4735,33 +4797,28 @@ WASM_EXPORT cpu_state *alloc_cpu(int gen) {
  * 
  * @param cpu CPU context
  * @param speed_status CPU Speed
- * @return cpu status (see below)
+ * @return cpu status (see `step`)
  */
 WASM_EXPORT int run(cpu_state *cpu, int speed_status) {
     int status = cpu_block(cpu, speed_status);
+    cpu_update_eip(cpu);
     switch (status) {
         case cpu_status_periodic:
         case cpu_status_significant:
         case cpu_status_exit:
         case cpu_status_icebp:
-            return status;
         case cpu_status_halt:
-            if (cpu->IF) {
-                return cpu_status_halt;
-            } else {
-                println("#### SYSTEM HALTED");
-                cpu_show_regs(cpu, cpu->EIP);
-                return cpu_status_exit;
-            }
+            return status;
+
         case cpu_status_div:
-            println("#### DIVIDE ERROR");
-            cpu_show_regs(cpu, cpu->EIP);
+            println("#### INTEGER DIVIDE BY ZERO");
+            cpu_show_regs(cpu);
             return status;
 
         case cpu_status_ud:
             if (!cpu->VM) {
-                println("#### PANIC: UNDEFINED INSTRUCTION");
-                cpu_show_regs(cpu, cpu->EIP);
+                println("#### UNDEFINED INSTRUCTION");
+                cpu_show_regs(cpu);
                 return status;
             }
         default:
@@ -4780,8 +4837,8 @@ WASM_EXPORT int run(cpu_state *cpu, int speed_status) {
                     return 0;
                 }
             }
-            println("#### PANIC: TRIPLE FAULT!!!");
-            cpu_show_regs(cpu, cpu->EIP);
+            println("#### TRIPLE FAULT!!!");
+            cpu_show_regs(cpu);
             return status;
     }
 }
@@ -4803,10 +4860,10 @@ WASM_EXPORT int run(cpu_state *cpu, int speed_status) {
  * |3|INTA|Y|Interrupt acknowledge cycle|
  * |4|ICEBP|Y|CPU runs ICEBP instruction|
  * |0x1000|Halt|Y|CPU runs HLT instruction|
- * |>0x10000|Exit|N|CPU enters to shutdown|
- * |0x10001|Shutdown|N|shutdown|
+ * |>0x10000|Exit|N/A|CPU detects exception|
+ * |0x10001|Shutdown|N|CPU enters to shutdown|
  * |0x10002|#DE|conditional|Divide by zero|
- * |0x60000|#UD|conditional|Undefined instruction|
+ * |0x60000|#UD|conditional|Invalid opcode|
  * |0x70000|#NM|conditional|FPU Not Available|
  * |0x8XXXX|#DF|N|Double Fault|
  * |0xAXXXX|#TS|conditional|Invalid TSS|
@@ -4817,17 +4874,19 @@ WASM_EXPORT int run(cpu_state *cpu, int speed_status) {
  * 
  */
 WASM_EXPORT int step(cpu_state *cpu) {
-    uint32_t last_eip = cpu->EIP;
     cpu->time_stamp_counter++;
+    cpu_reflect_rip(cpu);
     int status = cpu_step(cpu);
     if (status >= cpu_status_exception) {
-        cpu->EIP = last_eip;
+        cpu_recover_eip(cpu);
+    } else {
+        cpu_update_eip(cpu);
     }
     return status;
 }
 
 
-static inline void cpu_set_bp(cpu_state *cpu, bp_vec_t bp) {
+static inline void cpu_set_bp(cpu_state *cpu, cpu_rip_t bp) {
     cpu->bps[0] = bp;
     cpu->n_bps = 1;
 }
@@ -4841,10 +4900,9 @@ static inline void cpu_set_bp(cpu_state *cpu, bp_vec_t bp) {
  * @param offset Offset Address
  */
 WASM_EXPORT void set_breakpoint(cpu_state *cpu, uint16_t sel, uint32_t offset) {
-    bp_vec_t bp = {
-        .offset = offset,
-        .sel = sel,
-    };
+    sreg_t temp = {0};
+    LOAD_DESCRIPTOR(cpu, &temp, sel, type_bitmap_SEG_ALL, 1, NULL);
+    cpu_rip_t bp = make_rip(temp.base, offset);
     cpu_set_bp(cpu, bp);
 }
 
@@ -4859,11 +4917,10 @@ WASM_EXPORT void set_breakpoint(cpu_state *cpu, uint16_t sel, uint32_t offset) {
  */
 WASM_EXPORT int prepare_step_over(cpu_state *cpu) {
     int needs_breakpoint = 0;
-    uint32_t rip = cpu->CS.base + cpu->EIP;
+    cpu_rip_t rip = make_rip_from_eip(cpu);
     uint32_t len = 0;
     for (;;) {
-        uint8_t opcode = mem[rip + len];
-        len++;
+        uint8_t opcode = *rip++;
         opmap_t map1 = opcode1[opcode];
         switch (map1.optype) {
             case optype_prefix:
@@ -4887,7 +4944,7 @@ WASM_EXPORT int prepare_step_over(cpu_state *cpu) {
             case 0xFF: // group
             {
                 modrm_t modrm;
-                modrm.modrm = mem[rip + len];
+                modrm.modrm = *rip++;
                 switch (modrm.reg) {
                     case 2: // CALLN Ev
                     case 3: // CALLF Mp
@@ -4901,11 +4958,7 @@ WASM_EXPORT int prepare_step_over(cpu_state *cpu) {
             //     return 0;
         }
         if (needs_breakpoint) {
-            bp_vec_t bp = {
-                .offset = cpu->EIP + get_inst_len(cpu),
-                .sel = cpu->CS.sel,
-            };
-            cpu_set_bp(cpu, bp);
+            cpu_set_bp(cpu, cpu->rip + get_inst_len(cpu));
         }
         return needs_breakpoint;
     }
@@ -4918,7 +4971,7 @@ WASM_EXPORT int prepare_step_over(cpu_state *cpu) {
  * @param cpu CPU context
  */
 WASM_EXPORT void show_regs(cpu_state *cpu) {
-    cpu_show_regs(cpu, cpu->EIP);
+    cpu_show_regs(cpu);
 }
 
 
@@ -4987,7 +5040,7 @@ WASM_EXPORT const char *debug_get_register_map(cpu_state *cpu) {
     p = dump_string(p, ",\"DI\":");
     p = dump_dec(p, (intptr_t)&cpu->DI);
     p = dump_string(p, ",\"IP\":");
-    p = dump_dec(p, (intptr_t)&cpu->EIP);
+    p = dump_dec(p, (intptr_t)&cpu->shadow_eip);
     p = dump_string(p, ",\"flags\":");
     p = dump_dec(p, (intptr_t)&cpu->eflags);
     p = dump_string(p, ",\"CS\":");
@@ -5615,12 +5668,6 @@ static inline char *disasm_main(char * p, uint16_t sel, uint32_t eip, uint32_t r
     return p;
 }
 
-char *dump_disasm(char *p, cpu_state *cpu, uint32_t eip) {
-    sreg_t *seg = &cpu->CS;
-    p = disasm_main(p, seg->sel, eip, seg->base + eip, seg->attr_D, NULL);
-    return p;
-}
-
 /**
  * disassemble
  * 
@@ -5652,9 +5699,22 @@ int get_inst_len(cpu_state *cpu) {
     char *p = buff;
     sreg_t seg = cpu->CS;
     int use32 = seg.attr_D;
-    uint32_t offset = cpu->EIP;
+    uint32_t offset = cpu->shadow_eip;
     uint32_t base = seg.base + offset;
     int len;
     disasm_main(p, seg.base, offset, base, use32, &len);
     return len;
+}
+
+WASM_EXPORT uint32_t test2(cpu_state *cpu) {
+    uint8_t b = FETCH8(cpu);
+    return b;
+}
+
+WASM_EXPORT uint32_t test(cpu_state *cpu) {
+    uint8_t b = FETCH8(cpu);
+    uint16_t w = FETCH16(cpu);
+    uint32_t d = FETCH32(cpu);
+
+    return d + w + b;
 }
