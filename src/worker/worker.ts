@@ -51,7 +51,7 @@ class WI implements WorkerInterface {
                 })
                 .then((buffer: ArrayBuffer) => {
                     const bios = new Uint8Array(buffer);
-                    env.fetchBIOS(bios);
+                    env.loadBIOS(bios);
                 })
         
             wi.postCommand('loaded', null);

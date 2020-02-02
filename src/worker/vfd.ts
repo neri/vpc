@@ -141,7 +141,7 @@ export class VFD {
             const image = new Uint8Array(blob);
             if (blob.byteLength == 512) {
                 // Boot Sector Only
-                const fullImage = new Uint8Array(2880*512);
+                const fullImage = new Uint8Array(2880 * 512);
                 fullImage.set(image);
                 this.image = fullImage;
                 this.maxLBA = 2880;
@@ -236,13 +236,15 @@ export class VFD {
                     console.log(`vfd_attach: ${kb}KB LBA:${this.maxLBA} [C:${this.n_cylinders} H:${this.n_heads} R:${this.n_sectors}]`)
                 } else if (kb <= 2880 && image[510] == 0x55 && image[511] == 0xAA) {
                     // treat as 2HD
-                    this.image = image;
-                    this.maxLBA = Math.ceil(this.image.byteLength / this.bytesPerSector);
+                    const fullImage = new Uint8Array(2880 * 512);
+                    fullImage.set(image);
+                    this.image = fullImage;
+                    this.maxLBA = 2880;
                     this.driveType = 4;
                     this.n_heads = 2;
                     this.n_sectors = 18;
                     this.n_cylinders = 80;
-                    console.log(`vfd_attach: UNKNOWN ${kb}KB LBA:${this.maxLBA}`);
+                    console.log(`vfd_attach: UNKNOWN ${kb}KB treat as 2HD`);
                 } else {
                     throw new Error ('Unexpected disk image format');
                 }

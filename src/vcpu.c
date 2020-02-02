@@ -380,7 +380,6 @@ typedef struct cpu_state {
     unsigned cpu_gen, cpu_context, default_context;
 
     cpu_rip_t last_known_rip;
-    cpu_rip_t cs_limit_rip;
     uint32_t shadow_eip;
 
 } cpu_state;
@@ -797,12 +796,6 @@ static int LOAD_DESCRIPTOR(cpu_state *cpu, desc_t *target, uint16_t selector, de
             set_flag_to(&cpu->default_context,
             CPU_CTX_ADDR32 | CPU_CTX_DATA32 | SEG_CTX_DEFAULT_ADDR32 | SEG_CTX_DEFAULT_DATA32,
             target->attr_D);
-
-            uint32_t limit_la = target->base + target->limit;
-            if (limit_la >= max_mem) {
-                limit_la = max_mem - 1;
-            }
-            cpu->cs_limit_rip = make_rip(limit_la, 0);
         }
     }
     if (cpu->CR0.PE && target == &cpu->SS) {
@@ -5328,10 +5321,10 @@ static inline char *disasm_main(char * p, uint16_t sel, uint32_t eip, uint32_t r
 
             switch (map1.optype) {
                 case optype_prefix66:
-                    use32 ^= 0x1;
+                    use32 ^= CPU_CTX_DATA32;
                     continue;
                 case optype_prefix67:
-                    use32 ^= 0x2;
+                    use32 ^= CPU_CTX_ADDR32;
                     continue;
                 case optype_extend_0F:
                     opcode = (opcode * 256) + mem[rip + len];
@@ -5342,7 +5335,7 @@ static inline char *disasm_main(char * p, uint16_t sel, uint32_t eip, uint32_t r
             }
 
             if (map1.name) {
-                if (use32 && map1.name32) {
+                if ((use32 & CPU_CTX_DATA32) && map1.name32) {
                     name_ptr = map1.name32;
                 } else {
                     name_ptr = map1.name;
@@ -5704,17 +5697,4 @@ int get_inst_len(cpu_state *cpu) {
     int len;
     disasm_main(p, seg.base, offset, base, use32, &len);
     return len;
-}
-
-WASM_EXPORT uint32_t test2(cpu_state *cpu) {
-    uint8_t b = FETCH8(cpu);
-    return b;
-}
-
-WASM_EXPORT uint32_t test(cpu_state *cpu) {
-    uint8_t b = FETCH8(cpu);
-    uint16_t w = FETCH16(cpu);
-    uint32_t d = FETCH32(cpu);
-
-    return d + w + b;
 }

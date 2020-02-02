@@ -1266,10 +1266,8 @@ _INIT:
 
     ;; BIOS Data Area
     mov di, 0x0400
-    mov ax, 0x3F8
-    stosw
     xor ax, ax
-    mov cx, 7
+    mov cx, 8
     rep stosw
     mov ax, 0x0225
     stosw
@@ -1769,7 +1767,7 @@ _palette_data:
     times SIZE_BIOS - 16 - ($-$$) db 0xFF
 __RESET:
     jmp SEG_BIOS:_INIT
-    db "06/16/19"
+    db "02/02/20"
     db 0
     db 0xFF
     db 0
