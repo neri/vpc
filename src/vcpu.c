@@ -910,13 +910,13 @@ typedef enum {
     external,
 } int_cause_t;
 
-static inline int INVOKE_INT_MAIN(cpu_state *cpu, int n, int_cause_t cause) {
+static inline int INVOKE_INT_MAIN(cpu_state *cpu, int n, int_cause_t cause, uint32_t old_eip) {
     int ext = (cause == external);
     uint32_t errcode = n * 8 + 2;
     if (ext) errcode |= 1;
 
     uint16_t old_csel = cpu->CS.sel, old_ssel = cpu->SS.sel;
-    uint32_t old_eip = cpu->shadow_eip, old_esp = cpu->ESP, old_eflags = cpu->eflags;
+    uint32_t old_esp = cpu->ESP, old_eflags = cpu->eflags;
 
     uint16_t new_csel, new_ssel;
     uint32_t new_eip, new_esp;
@@ -1011,7 +1011,7 @@ static int INVOKE_INT(cpu_state *cpu, int n, int_cause_t cause) {
     } else {
         uint16_t old_csel = cpu->CS.sel, old_ssel = cpu->SS.sel;
         uint32_t old_esp = cpu->ESP, old_eflags = cpu->eflags;
-        int status = INVOKE_INT_MAIN(cpu, n, cause);
+        int status = INVOKE_INT_MAIN(cpu, n, cause, old_eip);
         if (status >= cpu_status_exception) {
             int status2;
             status2 = LOAD_DESCRIPTOR(cpu, &cpu->SS, old_ssel, 0, 0, NULL);
