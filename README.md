@@ -6,7 +6,6 @@ A PC Emulator implemented by WebAssembly.
 - [Repository](https://github.com/neri/vpc)
 
 <img src="images/ss1.png" width="50%"><img src="images/ss2.png" width="50%">
-<img src="images/ss3.png" width="50%"><img src="images/ss4.png" width="50%">
 
 ## THIS VERSION
 
@@ -20,7 +19,7 @@ A PC Emulator implemented by WebAssembly.
 
 - IBM PC compatible
 - CPU: 486SX without Paging
-- Memory: 640KB ought to be enough for anybody.
+  - for details: [docs/cpu](docs/cpu.md)
 - I/O:
   - **i8259** PIC
   - **i8254** Timer & Sound
@@ -30,34 +29,7 @@ A PC Emulator implemented by WebAssembly.
   - **VGA** - mode 03 and 13 only
   - **FDC** (non standard interface)
     - Supported: 160KB, 360KB, 640KB, 720KB, 1.2MB, 1.4MB and 512 bytes (Boot Sector Only)
-
-|Feature|Status|
-|-|-|
-|Real Mode| ☑️ |
-|A20|Always ON|
-|FPU / MMX / SSE| - |
-|Protected Mode| ☑️ |
-|Segmentation| Partial |
-|Segment Limit| Partial |
-|CPL,DPL,RPL,IOPL| Partial |
-|TSS|32bit Only|
-|LDT| ☑️ |
-|Task Gate| - |
-|Interrupt / Trap Gate|32bit Only|
-|Call Gate| - |
-|Virtual 8086 Mode| WIP |
-|Paging| - |
-|CR0| works |
-|CR2,3,4| present |
-|DRn| - |
-|TRn| never |
-|TSC| present |
-|MSR| - |
-
-### How to detect this software in the virtual machine
-
-- In 486 mode, when the CPUID instruction is executed with EAX = 00000000, the result will be EBX = ECX = EDX = 0x4D534157 ('WASM')
-- Otherwise, undefined.
+  - for details: [docs/ioports](docs/ioports.md)
 
 ## Supported Software
 
