@@ -67,9 +67,10 @@ export class Debugger {
             // Register
             case 'r':
                 {
-                    let regName = args.shift();
-                    if (regName) {
-                        regName = regName.toUpperCase();
+                    const regToken = args.shift();
+                    if (regToken) {
+                        const regName = this.env.getCanonicalRegName(regToken);
+                        if (!regName) throw new Error(`Unknown register name: ${regToken}`);
                         const oldValue = this.env.getReg(regName);
                         let _newValue = args.shift();
                         if (_newValue) {
@@ -97,7 +98,7 @@ export class Debugger {
                     if (!seg_off) throw new Error('Missing address');
                     const base = this.getVectorToLinear(seg_off, 0);
                     if (!args.length) throw new Error('Missing arguments');
-                    let array = [];
+                    let array: Array<number|string> = [];
                     args.forEach((arg, index) => {
                         let v = parseInt(arg, 16);
                         if (isNaN(v) || v < -128 || v > 255) throw new Error(`Invalid argument ${index}:${arg}`);

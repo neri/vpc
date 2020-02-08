@@ -12,7 +12,7 @@ export interface WorkerInterface {
     bind(command: string, handler: WorkerMessageHandler): void;
 }
 
-export interface RuntimeEnvironmentInterface {
+interface RuntimeEnvironmentInterface {
     memoryBase: number;
     memory: WebAssembly.Memory;
 
@@ -104,7 +104,7 @@ export class RuntimeEnvironment {
     public loadCPU(wasm: WebAssembly.Instance): void {
         this.instance = wasm;
     }
-    public fetchBIOS(bios: Uint8Array) {
+    public loadBIOS(bios: Uint8Array): void {
         this.bios = bios;
     }
     public initMemory(size: number) {
@@ -116,10 +116,11 @@ export class RuntimeEnvironment {
             this.memoryConfig = new Uint16Array([640, size - 1024]);
         }
         this.vmem = this.instance.exports._init((size + 1023) / 1024);
-        this.loadBIOS();
+        this.locateBIOS();
     }
-    public loadBIOS(): void {
-        const bios_base = (this.bios[0] | (this.bios[1] << 8)) << 4;
+    public locateBIOS(): void {
+        const bios_base = 0x100000 - this.bios.length;
+        // (this.bios[0] | (this.bios[1] << 8)) << 4;
         this.dmaWrite(bios_base, this.bios);
     }
     public setTimer(period: number): void {
@@ -128,7 +129,7 @@ export class RuntimeEnvironment {
     public setSound(freq: number): void {
         this.worker.postCommand('beep', freq);
     }
-    public emit(to: number, from: Array<any>): void {
+    public emit(to: number, from: Array<number|string>): void {
         const l = from.length;
         let p = this.vmem + to;
         for (let i = 0; i < l; i++) {
@@ -173,7 +174,7 @@ export class RuntimeEnvironment {
     public reset(gen: number, br_mbr: boolean = false): void {
         if (!this.instance) return;
         console.log(`CPU restarted (${gen})`);
-        this.loadBIOS();
+        this.locateBIOS();
         this.instance.exports.reset(this.cpu, gen);
         if (br_mbr) {
             this.instance.exports.set_breakpoint(this.cpu, 0, 0x7C00);
@@ -208,6 +209,7 @@ export class RuntimeEnvironment {
         try {
             status = this.instance.exports.run(this.cpu, this.speed_status);
         } catch (e) {
+            this.isRunning = false;
             console.error(e);
             status = STATUS_EXCEPTION;
             this.worker.print(`#### Exception: ${ e.message }`);
@@ -218,6 +220,7 @@ export class RuntimeEnvironment {
         if (status >= STATUS_EXCEPTION) {
             this.isRunning = false;
             console.log(`CPU enters to shutdown (${status.toString(16)})`);
+            this.worker.postCommand('debugReaction', {});
         } else if (this.isDebugging || status == STATUS_ICEBP) {
             this.isRunning = false;
             this.isDebugging = true;
@@ -253,7 +256,7 @@ export class RuntimeEnvironment {
         if (!this.isRunning) {
             let status: number = this.instance.exports.step(this.cpu);
             if (status >= STATUS_EXCEPTION) {
-                this.worker.print(`#### Exception Occurred (${status.toString(16)})`);
+                this.worker.print(`#### Exception (${status.toString(16)})`);
             }
             this.instance.exports.show_regs(this.cpu);
         } else {
@@ -269,7 +272,7 @@ export class RuntimeEnvironment {
         } else if (!this.isRunning) {
             let status: number = this.instance.exports.step(this.cpu);
             if (status >= STATUS_EXCEPTION) {
-                this.worker.print(`#### Exception Occurred (${status.toString(16)})`);
+                this.worker.print(`#### Exception (${status.toString(16)})`);
             }
             this.instance.exports.show_regs(this.cpu);
         } else {
@@ -307,12 +310,21 @@ export class RuntimeEnvironment {
         if (!this.instance) return 0;
         return this.instance.exports.debug_get_segment_base(this.cpu, selector);
     }
+    public getCanonicalRegName(_token: string): string|null {
+        const token = _token.toUpperCase();
+        if (Object.keys(this.regmap).indexOf(token) >= 0) {
+            return token;
+        } else if (token[0] === 'E' && Object.keys(this.regmap).indexOf(token.substr(1)) >= 0) {
+            return token.substr(1);
+        } else {
+            return null;
+        }
+    }
     public regOrValue(_token: string): number {
         let token = _token.toUpperCase();
-        if (Object.keys(this.regmap).indexOf(token) >= 0) {
-            return this.getReg(token);
-        } else if (token[0] === 'E' && Object.keys(this.regmap).indexOf(token.substr(1)) >= 0) {
-            return this.getReg(token.substr(1));
+        const regName = this.getCanonicalRegName(token);
+        if (regName) {
+            return this.getReg(regName);
         } else if (token.match(/^([\dABCDEF]+)$/)) {
             return parseInt(token, 16) | 0;
         } else {
