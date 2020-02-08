@@ -256,7 +256,7 @@ export class RuntimeEnvironment {
         if (!this.isRunning) {
             let status: number = this.instance.exports.step(this.cpu);
             if (status >= STATUS_EXCEPTION) {
-                this.worker.print(`#### Exception Occurred (${status.toString(16)})`);
+                this.worker.print(`#### Exception (${status.toString(16)})`);
             }
             this.instance.exports.show_regs(this.cpu);
         } else {
@@ -272,7 +272,7 @@ export class RuntimeEnvironment {
         } else if (!this.isRunning) {
             let status: number = this.instance.exports.step(this.cpu);
             if (status >= STATUS_EXCEPTION) {
-                this.worker.print(`#### Exception Occurred (${status.toString(16)})`);
+                this.worker.print(`#### Exception (${status.toString(16)})`);
             }
             this.instance.exports.show_regs(this.cpu);
         } else {

@@ -260,18 +260,17 @@ typedef struct {
         uint16_t link;
         uint32_t _reserved;
     };
-    uint32_t ESP0;
-    uint32_t SS0;
-    uint32_t ESP1;
-    uint32_t SS1;
-    uint32_t ESP2;
-    uint32_t SS2;
+    struct {
+        uint32_t ESP, SS;
+    } stacks[3];
     uint32_t CR3;
     uint32_t EIP, eflags, EAX, ECX, EDX, EBX, ESP, EBP, ESI, EDI;
     uint32_t ES, CS, SS, DS, FS, GS;
     uint32_t LDT;
-    uint16_t _reserved64;
-    uint16_t IOPB;
+    struct {
+        uint32_t :16;
+        uint32_t IOPB:16;
+    };
 } tss32_t;
 
 typedef uint8_t * cpu_rip_t;
@@ -955,8 +954,8 @@ static inline int INVOKE_INT_MAIN(cpu_state *cpu, int n, int_cause_t cause, uint
 
     if (has_to_switch_esp) {
         tss32_t *tss = (tss32_t *)(mem + cpu->TSS.base);
-        new_esp = tss->ESP0;
-        new_ssel = tss->SS0;
+        new_esp = tss->stacks[new_rpl].ESP;
+        new_ssel = tss->stacks[new_rpl].SS;
         status = LOAD_DESCRIPTOR(cpu, &cpu->SS, new_ssel, type_bitmap_SEG_WRITE, 0, NULL);
         if (status) {
             return RAISE_INVALID_TSS((status & UINT16_MAX) | ext);
@@ -1338,7 +1337,7 @@ static inline int MODRM(cpu_state *cpu, sreg_t *seg_ovr, modrm_t *result) {
     return 0;
 }
 
-static inline void MODRM_W_D(cpu_state *cpu, sreg_t *seg, int w, int d, operand_set *set) {
+static inline void MODRM_W_D(cpu_state *cpu, sreg_t *seg, const int w, const int d, operand_set *set) {
     modrm_t modrm;
     void *opr1;
     void *opr2;
@@ -1371,19 +1370,16 @@ static inline void MODRM_W_D(cpu_state *cpu, sreg_t *seg, int w, int d, operand_
         set->size = 0;
     }
     set->opr1 = opr1;
-    if (opr2) {
-        switch (set->size) {
-        case 0:
-            set->opr2 = *(int8_t *)opr2;
-            break;
-        case 1:
-            set->opr2 = MOVSXW(READ_LE16(opr2));
-            break;
-        case 2:
-            set->opr2 = READ_LE32(opr2);
-        }
-    } else {
-        set->opr2 = VOID_MEMORY_VALUE;
+
+    switch (set->size) {
+    case 0:
+        set->opr2 = *(int8_t *)opr2;
+        break;
+    case 1:
+        set->opr2 = MOVSXW(READ_LE16(opr2));
+        break;
+    case 2:
+        set->opr2 = READ_LE32(opr2);
     }
 }
 
@@ -1612,8 +1608,8 @@ static inline int JUMP_IF(cpu_state *cpu, int disp, int cc) {
         if (cpu->cpu_context & CPU_CTX_DATA32) {
             cpu->rip += disp;
         } else {
-            uint32_t new_eip = cpu_reflect_rip_to_eip(cpu);
-            new_eip = (new_eip + disp) & UINT16_MAX;
+            const uint32_t old_eip = cpu_reflect_rip_to_eip(cpu);
+            const uint32_t new_eip = (old_eip + disp) & UINT16_MAX;
             cpu_set_eip(cpu, new_eip);
         }
     }
@@ -2695,8 +2691,8 @@ static int cpu_step(cpu_state *cpu) {
 
             // case 0x62: // BOUND or EVEX
 
-            case 0x63: // ARPL or MOVSXD
-                return cpu_status_ud;
+            // case 0x63: // ARPL or MOVSXD
+            //     return cpu_status_ud;
 
             case 0x64: // prefix FS:
                 seg = &cpu->FS;
@@ -2903,22 +2899,30 @@ static int cpu_step(cpu_state *cpu) {
             }
 
             case 0x88: // MOV rm, r8
+                MODRM_W_D(cpu, seg, 0, 0, &set);
+                *set.opr1b = set.opr2;
+                return 0;
+
             case 0x89: // MOV rm, r16
+                MODRM_W_D(cpu, seg, 1, 0, &set);
+                if (cpu->cpu_context & CPU_CTX_DATA32) {
+                    WRITE_LE32(set.opr1, set.opr2);
+                } else {
+                    WRITE_LE16(set.opr1, set.opr2);
+                }
+                return 0;
+
             case 0x8A: // MOV r8, rm
+                MODRM_W_D(cpu, seg, 0, 2, &set);
+                *set.opr1b = set.opr2;
+                return 0;
+
             case 0x8B: // MOV r16, rm
-                MODRM_W_D(cpu, seg, inst & 1, inst & 2, &set);
-                if (set.opr1) {
-                    switch (set.size) {
-                    case 0:
-                        *set.opr1b = set.opr2;
-                        break;
-                    case 1:
-                        WRITE_LE16(set.opr1, set.opr2);
-                        break;
-                    case 2:
-                        WRITE_LE32(set.opr1, set.opr2);
-                        break;
-                    }
+                MODRM_W_D(cpu, seg, 1, 1, &set);
+                if (cpu->cpu_context & CPU_CTX_DATA32) {
+                    WRITE_LE32(set.opr1, set.opr2);
+                } else {
+                    WRITE_LE16(set.opr1, set.opr2);
                 }
                 return 0;
 
@@ -4993,6 +4997,7 @@ WASM_EXPORT int debug_load_selector(cpu_state *cpu, sreg_t *seg, uint16_t select
     return LOAD_DESCRIPTOR(cpu, seg, selector, type_bitmap_SEG_ALL, 1, NULL);
 }
 
+
 /**
  * Get Base Address of the specified Segment Selector.
  * 
@@ -5006,6 +5011,7 @@ WASM_EXPORT uint32_t debug_get_segment_base(cpu_state *cpu, uint16_t selector) {
     if (status) return 0;
     return temp.base;
 }
+
 
 /**
  * Get JSON of register map for debugging.
