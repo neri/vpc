@@ -6,7 +6,7 @@
 |-|-|-|-|-|
 |0020-0021|BYTE|R/W|YES|i8259 PIC #1|
 |0040-0043|BYTE|R/W|YES|i8254 Timer|
-|0060|BYTE|R/W|YES|PS/2 Data (Dummy)|
+|0060|BYTE|R/W|YES|PS/2 Data|
 |0061|BYTE|R/W|YES|System Port (Beep)|
 |0064|BYTE|R/W|YES|PS/2 Command/Status|
 |0064|WORD|RO|NO|PS/2 Data (Native)|

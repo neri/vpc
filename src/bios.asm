@@ -445,15 +445,8 @@ i1006:
 
 i1007:
     or al, al
-    jz .cls
+    jz i1006
     ;; TODO:
-    ret
-.cls:
-    mov ah, bh
-    push ax
-    push cx
-    push dx
-    call _scroll@6
     ret
 
 

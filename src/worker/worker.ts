@@ -41,10 +41,10 @@ class WI implements WorkerInterface {
                     return res.blob()
                 })
                 .then(blob => {
-                    return new Promise(resolve => {
+                    return new Promise<ArrayBuffer>(resolve => {
                         const reader = new FileReader();
                         reader.onloadend = () => {
-                            resolve(reader.result);
+                            resolve(reader.result as ArrayBuffer);
                         };
                         reader.readAsArrayBuffer(blob);
                     });

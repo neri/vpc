@@ -66,6 +66,7 @@ typedef enum cpu_status_t {
     cpu_status_pause,
     cpu_status_inta,
     cpu_status_icebp,
+    cpu_status_tsc,
     cpu_status_halt = 0x1000,
     cpu_status_exception = 0x10000,
     cpu_status_exit,
@@ -2012,7 +2013,7 @@ typedef union {
     uint32_t regs[4 * 3];
 } cpuid_brand_string_t;
 
-cpuid_brand_string_t cpuid_brand_string = { "Virtual CPU by WebAssembly @ 3.14MHz" };
+cpuid_brand_string_t cpuid_brand_string = { "Virtual CPU on WebAssembly @ 3.14MHz" };
 
 static int CPUID(cpu_state *cpu) {
     const uint32_t cpuid_manufacturer_id = 0x4D534157;
@@ -2421,6 +2422,14 @@ static int SCAS(cpu_state *cpu, sreg_t *_unused, int size, int prefix) {
     }
 
     return 0;
+}
+
+
+static inline int RDTSC(cpu_state *cpu) {
+    uint64_t tsc = cpu->time_stamp_counter;
+    cpu->EAX = tsc;
+    cpu->EDX = tsc >> 32;
+    return cpu_status_tsc;
 }
 
 
@@ -4036,12 +4045,7 @@ static int cpu_step(cpu_state *cpu) {
                         return cpu_status_ud;
 
                     case 0x31: // RDTSC
-                    {
-                        uint64_t tsc = cpu->time_stamp_counter;
-                        cpu->EAX = tsc;
-                        cpu->EDX = tsc >> 32;
-                        return 0;
-                    }
+                        return RDTSC(cpu);
 
                     // case 0x38: // SSE 3byte op
                     // case 0x3A: // SSE 3byte op
@@ -4665,11 +4669,14 @@ static int check_irq(cpu_state *cpu) {
 }
 
 
+
+
 /**
  * Run CPU for a while
  */
 static int cpu_block(cpu_state *cpu, int speed_status) {
     int periodic = speed_status;
+    int tsc_adjustment = 0;
 
     cpu_reflect_rip(cpu);
 
@@ -4705,6 +4712,11 @@ static int cpu_block(cpu_state *cpu, int speed_status) {
             }
     check1:
             switch (status) {
+                case cpu_status_tsc:
+                    cpu->time_stamp_counter += (i - tsc_adjustment);
+                    tsc_adjustment = i;
+                    RDTSC(cpu);
+                    continue;
                 case cpu_status_pause:
                     return cpu_status_periodic;
                 case cpu_status_div:
@@ -4744,6 +4756,11 @@ static int cpu_block(cpu_state *cpu, int speed_status) {
             }
     check2:
             switch (status) {
+                case cpu_status_tsc:
+                    cpu->time_stamp_counter += (i - tsc_adjustment);
+                    tsc_adjustment = i;
+                    RDTSC(cpu);
+                    continue;
                 case cpu_status_pause:
                     return cpu_status_periodic;
                 case cpu_status_div:
@@ -4763,10 +4780,10 @@ static int cpu_block(cpu_state *cpu, int speed_status) {
                     cpu_recover_eip(cpu);
                     return status;
             }
-        }
+        }   
     }
 
-    cpu->time_stamp_counter += (i + 1);
+    cpu->time_stamp_counter += (i - tsc_adjustment);
 
     // status = check_irq(cpu);
     // if (status) return status;
