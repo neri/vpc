@@ -4675,12 +4675,13 @@ static int check_irq(cpu_state *cpu) {
  * Run CPU for a while
  */
 static int cpu_block(cpu_state *cpu, int speed_status) {
+    int status = 0;
     int periodic = speed_status;
     int tsc_adjustment = 0;
 
     cpu_reflect_rip(cpu);
 
-    int status = check_irq(cpu);
+    status = check_irq(cpu);
     if (status) return status;
     int has_to_trace = 0;
     if (cpu->TF) {
@@ -4695,18 +4696,18 @@ static int cpu_block(cpu_state *cpu, int speed_status) {
                 cpu->n_bps = 0;
                 return cpu_status_icebp;
             }
-            int status = cpu_step(cpu);
+            status = cpu_step(cpu);
             if (status == cpu_status_periodic) continue;
 
             if (status == cpu_status_inta) {
                 status = check_irq(cpu);
-                if (status) return status;
+                if (status) goto error_exit;
                 if (cpu->TF) {
                     status = cpu_step(cpu);
                     if (status) goto check1;
                     has_to_trace = 0;
                     status = INVOKE_INT(cpu, 1, exception);
-                    if (status) return status;
+                    if (status) goto error_exit;
                 }
                 continue;
             }
@@ -4718,39 +4719,39 @@ static int cpu_block(cpu_state *cpu, int speed_status) {
                     RDTSC(cpu);
                     continue;
                 case cpu_status_pause:
-                    return cpu_status_periodic;
+                    goto exit;
                 case cpu_status_div:
                     if (cpu->cpu_gen >= cpu_gen_80286) {
                         cpu_recover_eip(cpu);
                     }
                     status = INVOKE_INT(cpu, 0, exception); // #DE
-                    if (status) return status;
+                    if (status) goto error_exit;
                     continue;
                 case cpu_status_halt:
                 case cpu_status_icebp:
-                    return status;
+                    goto error_exit;
                 case cpu_status_fpu:
                     continue;
                 case cpu_status_ud:
                 default:
                     cpu_recover_eip(cpu);
-                    return status;
+                    goto error_exit;
             }
         }
     } else {
         for (; i < periodic; i++) {
-            int status = cpu_step(cpu);
+            status = cpu_step(cpu);
             if (status == cpu_status_periodic) continue;
 
             if (status == cpu_status_inta) {
                 status = check_irq(cpu);
-                if (status) return status;
+                if (status) goto error_exit;
                 if (cpu->TF) {
                     status = cpu_step(cpu);
                     if (status) goto check2;
                     has_to_trace = 0;
                     status = INVOKE_INT(cpu, 1, exception);
-                    if (status) return status;
+                    if (status) goto error_exit;
                 }
                 continue;
             }
@@ -4762,27 +4763,27 @@ static int cpu_block(cpu_state *cpu, int speed_status) {
                     RDTSC(cpu);
                     continue;
                 case cpu_status_pause:
-                    return cpu_status_periodic;
+                    goto exit;
                 case cpu_status_div:
                     if (cpu->cpu_gen >= cpu_gen_80286) {
                         cpu_recover_eip(cpu);
                     }
                     status = INVOKE_INT(cpu, 0, exception); // #DE
-                    if (status) return status;
+                    if (status) goto error_exit;
                     continue;
                 case cpu_status_halt:
                 case cpu_status_icebp:
-                    return status;
+                    goto error_exit;
                 case cpu_status_fpu:
                     continue;
                 case cpu_status_ud:
                 default:
                     cpu_recover_eip(cpu);
-                    return status;
+                    goto error_exit;
             }
-        }   
+        }
     }
-
+exit:
     cpu->time_stamp_counter += (i - tsc_adjustment);
 
     // status = check_irq(cpu);
@@ -4791,6 +4792,11 @@ static int cpu_block(cpu_state *cpu, int speed_status) {
         INVOKE_INT(cpu, 1, exception);
     }
     return cpu_status_periodic;
+
+error_exit:
+    cpu->time_stamp_counter += (i - tsc_adjustment);
+    return status;
+
 }
 
 
@@ -4836,7 +4842,7 @@ WASM_EXPORT int run(cpu_state *cpu, int speed_status) {
                 return status;
             }
         default:
-            if (cpu->CR0.PE && status > cpu_status_exception_base) {
+            if (status >= cpu_status_exception_base && cpu->CR0.PE) {
                 int status2 = INVOKE_INT(cpu, status >> 16, exception);
                 if (status2) { // DOUBLE FAULT
                     status2 = INVOKE_INT(cpu, 8, exception);
