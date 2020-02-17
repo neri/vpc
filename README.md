@@ -1,6 +1,6 @@
 # Virtual Playground
 
-A PC Emulator by WebAssembly
+A PC Emulator on WebBrowser
 
 - [Preview website](https://nerry.jp/vpc/)
 - [Repository](https://github.com/neri/vpc/)
