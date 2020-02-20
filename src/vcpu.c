@@ -3232,9 +3232,14 @@ static int cpu_step(cpu_state *cpu) {
             case 0xC2: // RET imm16
             {
                 uint32_t new_eip = POPW(cpu);
+                uint32_t imm = FETCH16(cpu);
+                if (cpu->cpu_context & CPU_CTX_ADDR32) {
+                    cpu->ESP += imm;
+                } else {
                 cpu->SP += FETCH16(cpu);
-                cpu_set_eip(cpu, new_eip);
-                return CS_LIMIT_CHECK(cpu, 0);
+                    cpu->SP += imm;
+                }
+                return 0;
             }
 
             case 0xC3: // RET
@@ -3275,16 +3280,32 @@ static int cpu_step(cpu_state *cpu) {
                 uint32_t param1 = FETCH16(cpu);
                 int param2 = FETCH8(cpu);
                 if (param2 != 0) return cpu_status_ud;
-                PUSHW(cpu, cpu->BP);
-                cpu->BP = cpu->SP;
-                cpu->SP -= param1;
+                if (cpu->cpu_context & CPU_CTX_DATA32) {
+                    PUSHW(cpu, cpu->EBP);
+                    cpu->EBP = cpu->ESP;
+                    cpu->ESP -= param1;
+                } else {
+                    PUSHW(cpu, cpu->BP);
+                    cpu->BP = cpu->SP;
+                    cpu->SP -= param1;
+                }
                 return 0;
             }
 
             case 0xC9: // LEAVE
-                cpu->SP = cpu->BP;
-                cpu->BP = POPW(cpu);
+            {
+                if (cpu->cpu_context & CPU_CTX_ADDR32) {
+                    cpu->ESP = cpu->EBP;
+                } else {
+                    cpu->SP = cpu->BP;
+                }
+                if (cpu->cpu_context & CPU_CTX_DATA32) {
+                    cpu->EBP = POPW(cpu);
+                } else {
+                    cpu->BP = POPW(cpu);
+                }
                 return 0;
+            }
 
             case 0xCA: // RETF imm16
                 return RETF(cpu, FETCH16(cpu));
