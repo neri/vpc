@@ -3236,9 +3236,9 @@ static int cpu_step(cpu_state *cpu) {
                 if (cpu->cpu_context & CPU_CTX_ADDR32) {
                     cpu->ESP += imm;
                 } else {
-                cpu->SP += FETCH16(cpu);
                     cpu->SP += imm;
                 }
+                cpu_set_eip(cpu, new_eip);
                 return 0;
             }
 
@@ -3246,7 +3246,7 @@ static int cpu_step(cpu_state *cpu) {
             {
                 uint32_t new_eip = POPW(cpu);
                 cpu_set_eip(cpu, new_eip);
-                return CS_LIMIT_CHECK(cpu, 0);
+                return 0;
             }
 
             case 0xC4: // LES reg, r/m
