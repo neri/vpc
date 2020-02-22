@@ -116,12 +116,6 @@ export class RuntimeEnvironment {
             this.memoryConfig = new Uint16Array([640, size - 1024]);
         }
         this.vmem = this.instance.exports._init((size + 1023) / 1024);
-        this.locateBIOS();
-    }
-    public locateBIOS(): void {
-        const bios_base = 0x100000 - this.bios.length;
-        // (this.bios[0] | (this.bios[1] << 8)) << 4;
-        this.dmaWrite(bios_base, this.bios);
     }
     public setTimer(period: number): void {
         this.period = period;
@@ -171,13 +165,11 @@ export class RuntimeEnvironment {
             return String.fromCharCode.apply(String, bytes);
         }
     }
-    public reset(gen: number, br_mbr: boolean = false): void {
-        if (!this.instance) return;
-        console.log(`CPU restarted (${gen})`);
-        this.locateBIOS();
-        this.instance.exports.reset(this.cpu, gen);
+    private afterReset(br_mbr: boolean): void {
+        const bios_base = 0x100000 - this.bios.length;
+        this.dmaWrite(bios_base, this.bios);
         if (br_mbr) {
-            this.instance.exports.set_breakpoint(this.cpu, 0, 0x7C00);
+            this.setBreakpoint(0, 0x7C00);
         }
         if (!this.isRunning || this.isDebugging) {
             this.isDebugging = false;
@@ -185,16 +177,18 @@ export class RuntimeEnvironment {
             this.cont();
         }
     }
-    public run(gen: number, br_mbr: boolean = false): void {
+    public reset(gen: number, br_mbr: boolean = false): void {
+        if (!this.instance) return;
+        this.instance.exports.reset(this.cpu, gen);
+        console.log(`CPU restarted (${gen})`);
+        this.afterReset(br_mbr);
+    }
+    public start(gen: number, br_mbr: boolean = false): void {
         if (!this.instance) throw new Error('Instance not initialized');
         this.cpu = this.instance.exports.alloc_cpu(gen);
         this.regmap = JSON.parse(this.getCString(this.instance.exports.debug_get_register_map(this.cpu)));
         console.log(`CPU started (${gen})`);
-        if (br_mbr) {
-            this.instance.exports.set_breakpoint(this.cpu, 0, 0x7C00);
-        }
-        this.isRunning = true;
-        this.cont();
+        this.afterReset(br_mbr);
     }
     private cont(): void {
         if (!this.instance) return;
@@ -294,7 +288,11 @@ export class RuntimeEnvironment {
             this.cont();
         }
     }
-    public setReg(regName: string, value: number) {
+    public setBreakpoint(seg: number, off: number): void {
+        if (!this.instance) return;
+        this.instance.exports.set_breakpoint(this.cpu, seg, off);
+    }
+    public setReg(regName: string, value: number): void {
         const reg: number = this.regmap[regName];
         if (!reg) throw new Error(`Unexpected Register Name: ${regName}`);
         let a = new Uint32Array(this.env.memory.buffer, reg, 1);
