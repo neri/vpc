@@ -1432,25 +1432,13 @@ _clear_vram:
     mov cx, 0x0607
     int 0x10
 
-_init_palette:
-    mov dx, 0x03C8
-    xor ax, ax
-    out dx, al
-    inc dx
-    mov bx, 16
-.loop1:
-    mov si, _palette_data
-    mov cx, 256
-.loop0:
-    lodsb
-    out dx, al
-    lodsb
-    out dx, al
-    lodsb
-    out dx, al
-    loop .loop0
-    dec bx
-    jnz .loop1
+    push cs
+    pop es
+    mov ax, 0x1012
+    xor bx, bx
+    xor cx, cx
+    mov dx, _palette_data
+    int 0x10
 
     ; mov si, banner
     ; call puts
