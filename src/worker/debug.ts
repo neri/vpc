@@ -5,7 +5,7 @@ import { RuntimeEnvironment, WorkerInterface } from './env';
 type Vector = [number, number]; // [offset, selector]
 
 const HELP_MESSAGE = `\
-Continue        G
+Continue        G [breakpoint]
 Step Into       T
 Step Over       P
 Register        R [register [value]]
@@ -60,9 +60,16 @@ export class Debugger {
 
             // Continue
             case 'g':
-                this.env.debugContinue();
-                this.cursor_u = undefined;
-                break;
+                {
+                    const seg_off = args.shift();
+                    if (seg_off) {
+                        const vec = this.getVector(seg_off, this.env.getReg('CS'));
+                        this.env.setBreakpoint(vec[1], vec[0]);
+                    }
+                    this.env.debugContinue();
+                    this.cursor_u = undefined;
+                    break;
+                }
 
             // Register
             case 'r':

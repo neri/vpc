@@ -5167,6 +5167,7 @@ WASM_EXPORT int prepare_step_over(cpu_state *cpu) {
             case 0xE0: // LOOPNZ Jbs
             case 0xE1: // LOOPZ Jbs
             case 0xE2: // LOOP Jbs
+            case 0xF4: // HLT
                 needs_breakpoint = 1;
                 break;
 
