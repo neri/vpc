@@ -475,6 +475,7 @@ class VideoDevice {
     }
     setMode(e) {
         const { ctx, fontWidth, fontHeight, scale } = this;
+        const TOOLBAR_HEIGHT = 32;
         this.bpp = e.bpp;
         this.grapihicsMode = e.mode;
         this.dim = { width: e.dim[0], height: e.dim[1] };
@@ -497,6 +498,9 @@ class VideoDevice {
         }
         this.ctx.fillStyle = '#000';
         this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+        if (window.innerHeight < this.vdim.height + TOOLBAR_HEIGHT) {
+            window.resizeBy(0, this.vdim.height + TOOLBAR_HEIGHT - window.innerHeight);
+        }
     }
     showProgress (value) {
         const { ctx, scale } = this;

@@ -18,7 +18,7 @@
   "homepage": "https://github.com/neri/vpc#readme",
   "dependencies": {},
   "devDependencies": {
-    "electron": "*",
+    "electron": "latest",
     "expect": "*",
     "lodash": "*",
     "mocha": "*",

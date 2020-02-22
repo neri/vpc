@@ -21,7 +21,7 @@ class WI implements WorkerInterface {
             if (args.midi) {
                 (self as any).midi = new MPU401(env, 0x330);
             }
-            setTimeout(() => env.run(args.gen, args.br_mbr), 100);
+            setTimeout(() => env.start(args.gen, args.br_mbr), 100);
         });
 
         (async function() {
@@ -41,10 +41,10 @@ class WI implements WorkerInterface {
                     return res.blob()
                 })
                 .then(blob => {
-                    return new Promise(resolve => {
+                    return new Promise<ArrayBuffer>(resolve => {
                         const reader = new FileReader();
                         reader.onloadend = () => {
-                            resolve(reader.result);
+                            resolve(reader.result as ArrayBuffer);
                         };
                         reader.readAsArrayBuffer(blob);
                     });
