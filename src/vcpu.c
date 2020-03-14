@@ -3014,7 +3014,7 @@ static int cpu_step(cpu_state *cpu) {
             case 0x83: // alu r/m16, imm8 (sign extended)
             {
                 MODRM_W(cpu, seg, inst & 1, &set);
-                int opc = set.opr2;
+                const int opc = set.opr2;
                 if (inst == 0x81) {
                     set.opr2 = FETCHW(cpu);
                 } else {
