@@ -126,7 +126,7 @@ export class VGA {
         }
         return value;
     }
-    setVGAMode(value: number) {
+    setVGAMode(value: number): void {
         switch (value) {
             case 0x03:
                 this.vram_base = SEGMENT_B800;
@@ -175,13 +175,13 @@ export class VGA {
         this.env.worker.postCommand('vga_mode', { dim: dim, vdim: vdim ? vdim : dim, bpp: bpp, mode: mode});
         this.timer = setInterval(() => this.transferVGA(), vtInterval);
     }
-    clearTimer() {
+    clearTimer(): void {
         if (this.timer) {
             clearInterval(this.timer);
             this.timer = undefined;
         }
     }
-    transferVGA() {
+    transferVGA(): void {
         this.vtrace_time = new Date().valueOf();
         this.vtrace = true;
         this.updateCursor();
