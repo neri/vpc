@@ -1,5 +1,5 @@
-; Virtual Playground Basic I/O System
-; Copyright (C) 2019 Nerry
+; Basic I/O System for Virtual Playground
+; Copyright (C) 2019, 2020 Nerry
 
 [CPU 8086]
 [BITS 16]
@@ -68,33 +68,7 @@
 %define ARGV 0x0080
 
 _HEAD:
-    dw SEG_BIOS, SIZE_BIOS
-
-_isr_table:
-    dw _iret, _iret, _iret, _iret, _iret, _iret, _iret
-    dw _irq0, _irq1, _irq_dummy, _irq_dummy, _irq_dummy, _irq_dummy, _irq_dummy, _irq_dummy
-    dw _int10, _int11, _int12, _int13, _int14, _int15, _int16, _int17
-    dw _int18, _int19, _int1A, _iret, _iret
-_end_isr_table:
-
-_int10_ftbl:
-    dw i1000, i1001, i1002, i1003, i1004, i1005, i1006, i1007
-    dw i1008, i1009, i100A, i100B, i100C, i100D, i100E, i100F
-    dw i1010, i1011, i1012, i1013, i1014, i1015, i1016, i1017
-    dw i1018, i1019, i101A, i101B, i101C, i101D, i101E, i101F
-_int10_etbl:
-
-_int104F_ftbl:
-    dw i104F00, i104F01, i104F02
-_int104F_etbl:
-
-_int16_ftbl:
-    dw i1600, i1601, i1602
-_int16_etbl:
-
-_int1A_ftbl:
-    dw i1A00, _ret, i1A02, _ret, i1A04
-_int1A_etbl:
+    times 16 db 0xFF
 
 
 
@@ -1507,7 +1481,7 @@ _repl:
     sti
     mov di, ARGV
     mov al, '#'
-    call _aux_out
+    call _con_out
 .loop:
     xor ah, ah
     int 0x16
@@ -1516,19 +1490,19 @@ _repl:
     cmp al, 127
     jz .del
     ss stosb
-    call _aux_out
+    call _con_out
     jmp .loop
 .del:
     mov al, 8
-    call _aux_out
+    call _con_out
     jmp .loop
 .crlf:
     xor al, al
     ss stosb
     mov al, 13
-    call _aux_out
+    call _con_out
     mov al, 10
-    call _aux_out
+    call _con_out
 
     mov si, ARGV
 .loop_cmd:
@@ -1552,10 +1526,13 @@ _repl:
     jmp .prompt
 
 
-_aux_out:
+
+
+_con_out:
     mov ah, 0x0E
     int 0x10
     ret
+
 
 _bios_beep:
     pushf
@@ -1657,16 +1634,39 @@ puts:
     lodsb
     or al, al
     jz .end
-    call _aux_out
+    call _con_out
     jmp .loop
 .end:
     ret
 
 
-boot_fail_msg:
-    db 10, "Operating System not found", 10, 0
-
     alignb 2
+_isr_table:
+    dw _iret, _iret, _iret, _iret, _iret, _iret, _iret
+    dw _irq0, _irq1, _irq_dummy, _irq_dummy, _irq_dummy, _irq_dummy, _irq_dummy, _irq_dummy
+    dw _int10, _int11, _int12, _int13, _int14, _int15, _int16, _int17
+    dw _int18, _int19, _int1A, _iret, _iret
+_end_isr_table:
+
+_int10_ftbl:
+    dw i1000, i1001, i1002, i1003, i1004, i1005, i1006, i1007
+    dw i1008, i1009, i100A, i100B, i100C, i100D, i100E, i100F
+    dw i1010, i1011, i1012, i1013, i1014, i1015, i1016, i1017
+    dw i1018, i1019, i101A, i101B, i101C, i101D, i101E, i101F
+_int10_etbl:
+
+_int104F_ftbl:
+    dw i104F00, i104F01, i104F02
+_int104F_etbl:
+
+_int16_ftbl:
+    dw i1600, i1601, i1602
+_int16_etbl:
+
+_int1A_ftbl:
+    dw i1A00, _ret, i1A02, _ret, i1A04
+_int1A_etbl:
+
 _beep_sound_data:
     dw 1000, 100
     dw 0xFFFF
@@ -1745,6 +1745,11 @@ _palette_data:
     db 0x00,0x00,0x00, 0x00,0x00,0x00, 0x00,0x00,0x00, 0x00,0x00,0x00,
     db 0x00,0x00,0x00, 0x00,0x00,0x00, 0x00,0x00,0x00, 0x00,0x00,0x00
 
+boot_fail_msg:
+    db 10, "Operating System not found", 10, 0
+
+
+    ;; RESET Vector
     times SIZE_BIOS - 16 - ($-$$) db 0xFF
 __RESET:
     jmp SEG_BIOS:_INIT

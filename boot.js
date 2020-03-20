@@ -24,7 +24,7 @@ const createWindow = () => {
   }));
 
   mainWindow.setMenuBarVisibility(false)
-  mainWindow.setAutoHideMenuBar(true)
+  mainWindow.autoHideMenuBar = true
   if (process.env.NODE_ENV === 'development') {
     mainWindow.openDevTools()
   }
