@@ -153,9 +153,9 @@ typedef struct opmap_t {
     const char * name32;
     optype_t optype;
     struct opmap_t *group;
-    int n_oplands;
-    const char *oplands1;
-    const char *oplands2;
+    int n_operands;
+    const char *operands1;
+    const char *operands2;
 } opmap_t;
 
 static opmap_t opcode_80[8] = {

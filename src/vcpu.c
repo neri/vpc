@@ -5424,19 +5424,19 @@ static inline int parse_modrm(int use32, uint32_t rip, int *_skip, modrm_t *resu
     return (result->mod == 3) ? 3 : 0;
 }
 
-static inline char *disasm_separator(char *p, int *n_opl) {
-    if (*n_opl) {
+static inline char *disasm_separator(char *p, int *n_opr) {
+    if (*n_opr) {
         p = dump_string(p, ", ");
     } else {
         p = dump_string(p, "\t");
     }
-    *n_opl += 1;
+    *n_opr += 1;
     return p;
 }
 
 
-static inline char *disasm_reg(char *p, int *n_opl, int index, disasm_reg_type type) {
-    p = disasm_separator(p, n_opl);
+static inline char *disasm_reg(char *p, int *n_opr, int index, disasm_reg_type type) {
+    p = disasm_separator(p, n_opr);
     switch (type) {
         case reg_type_al:
             p = dump_string(p, reg_names_AL[index]);
@@ -5462,9 +5462,9 @@ static inline char *disasm_reg(char *p, int *n_opl, int index, disasm_reg_type t
     return p;
 }
 
-static inline char *disasm_Ib(char *p, int *n_opl, uint32_t base, int *_len) {
+static inline char *disasm_Ib(char *p, int *n_opr, uint32_t base, int *_len) {
     int len = *_len;
-    p = disasm_separator(p, n_opl);
+    p = disasm_separator(p, n_opr);
     int8_t i = mem[base + len];
     p = dump8(p, i);
     len++;
@@ -5472,9 +5472,9 @@ static inline char *disasm_Ib(char *p, int *n_opl, uint32_t base, int *_len) {
     return p;
 }
 
-static inline char *disasm_Iw(char *p, int *n_opl, uint32_t base, int *_len) {
+static inline char *disasm_Iw(char *p, int *n_opr, uint32_t base, int *_len) {
     int len = *_len;
-    p = disasm_separator(p, n_opl);
+    p = disasm_separator(p, n_opr);
     int16_t i = READ_LE16(mem + base + len);
     p = dump16(p, i);
     len += 2;
@@ -5482,9 +5482,9 @@ static inline char *disasm_Iw(char *p, int *n_opl, uint32_t base, int *_len) {
     return p;
 }
 
-static inline char *disasm_Iz(char *p, int *n_opl, uint32_t base, int *_len, int use32) {
+static inline char *disasm_Iz(char *p, int *n_opr, uint32_t base, int *_len, int use32) {
     int len = *_len;
-    p = disasm_separator(p, n_opl);
+    p = disasm_separator(p, n_opr);
     if (use32) {
         int32_t i = READ_LE32(mem + base + len);
         p = dump32(p, i);
@@ -5498,30 +5498,30 @@ static inline char *disasm_Iz(char *p, int *n_opl, uint32_t base, int *_len, int
     return p;
 }
 
-static inline char *disasm_dump_Gx(char *p, int *n_opl, modrm_t modrm, optype_t optype, int use32) {
+static inline char *disasm_dump_Gx(char *p, int *n_opr, modrm_t modrm, optype_t optype, int use32) {
     int type_gx = optype & opa_Gmask;
     switch (type_gx) {
         case opa_Gb:
-            p = disasm_reg(p, n_opl, modrm.reg, reg_type_al);
+            p = disasm_reg(p, n_opr, modrm.reg, reg_type_al);
             break;
         case opa_Gw:
-            p = disasm_reg(p, n_opl, modrm.reg, reg_type_ax);
+            p = disasm_reg(p, n_opr, modrm.reg, reg_type_ax);
             break;
         case opa_Gv:
-            p = disasm_reg(p, n_opl, modrm.reg, reg_type_ax + !!(use32 & CPU_CTX_DATA32));
+            p = disasm_reg(p, n_opr, modrm.reg, reg_type_ax + !!(use32 & CPU_CTX_DATA32));
             break;
         default:
         {
             int type_Ox = optype & opa_Omask;
             switch (type_Ox) {
                 case opa_Sw:
-                    p = disasm_reg(p, n_opl, modrm.reg, reg_type_sreg);
+                    p = disasm_reg(p, n_opr, modrm.reg, reg_type_sreg);
                     break;
                 case opa_RdCd:
-                    p = disasm_reg(p, n_opl, modrm.reg, reg_type_creg);
+                    p = disasm_reg(p, n_opr, modrm.reg, reg_type_creg);
                     break;
                 case opa_RdDd:
-                    p = disasm_reg(p, n_opl, modrm.reg, reg_type_dreg);
+                    p = disasm_reg(p, n_opr, modrm.reg, reg_type_dreg);
                     break;
                 default: break;
             }
@@ -5605,11 +5605,11 @@ static inline char *disasm_main(char * p, uint16_t sel, uint32_t eip, uint32_t r
                 p = dump_string(p, "???");
             }
 
-            int n_oplands = 0;
+            int n_operands = 0;
 
-            if ((map1.n_oplands & 1) != 0) {
-                p = disasm_separator(p, &n_oplands);
-                p = dump_string(p, map1.oplands1);
+            if ((map1.n_operands & 1) != 0) {
+                p = disasm_separator(p, &n_operands);
+                p = dump_string(p, map1.operands1);
             }
 
             switch (map1.optype) {
@@ -5618,58 +5618,58 @@ static inline char *disasm_main(char * p, uint16_t sel, uint32_t eip, uint32_t r
                     break;
 
                 case optype_Zb:
-                    p = disasm_reg(p, &n_oplands, opcode & 7, reg_type_al);
+                    p = disasm_reg(p, &n_operands, opcode & 7, reg_type_al);
                     break;
 
                 case optype_ZbIb:
-                    p = disasm_reg(p, &n_oplands, opcode & 7, reg_type_al);
-                    p = disasm_Ib(p, &n_oplands, rip, &len);
+                    p = disasm_reg(p, &n_operands, opcode & 7, reg_type_al);
+                    p = disasm_Ib(p, &n_operands, rip, &len);
                     break;
 
                 case optype_Zv:
-                    p = disasm_reg(p, &n_oplands, opcode & 7, reg_type_ax + !!(use32 & CPU_CTX_DATA32));
+                    p = disasm_reg(p, &n_operands, opcode & 7, reg_type_ax + !!(use32 & CPU_CTX_DATA32));
                     break;
 
                 case optype_ZvIv:
-                    p = disasm_reg(p, &n_oplands, opcode & 7, reg_type_ax + !!(use32 & CPU_CTX_DATA32));
-                    p = disasm_Iz(p, &n_oplands, rip, &len, use32 & CPU_CTX_DATA32);
+                    p = disasm_reg(p, &n_operands, opcode & 7, reg_type_ax + !!(use32 & CPU_CTX_DATA32));
+                    p = disasm_Iz(p, &n_operands, rip, &len, use32 & CPU_CTX_DATA32);
                     break;
 
                 case optype_Ib:
-                    p = disasm_Ib(p, &n_oplands, rip, &len);
+                    p = disasm_Ib(p, &n_operands, rip, &len);
                     break;
 
                 case optype_ALIb:
-                    p = disasm_reg(p, &n_oplands, index_AL, reg_type_al);
-                    p = disasm_Ib(p, &n_oplands, rip, &len);
+                    p = disasm_reg(p, &n_operands, index_AL, reg_type_al);
+                    p = disasm_Ib(p, &n_operands, rip, &len);
                     break;
 
                 case optype_IbAL:
-                    p = disasm_Ib(p, &n_oplands, rip, &len);
-                    p = disasm_reg(p, &n_oplands, index_AL, reg_type_al);
+                    p = disasm_Ib(p, &n_operands, rip, &len);
+                    p = disasm_reg(p, &n_operands, index_AL, reg_type_al);
                     break;
 
                 case optype_Iw:
-                    p = disasm_Iw(p, &n_oplands, rip, &len);
+                    p = disasm_Iw(p, &n_operands, rip, &len);
                     break;
 
                 case optype_Iz:
-                    p = disasm_Iz(p, &n_oplands, rip, &len, use32 & CPU_CTX_DATA32);
+                    p = disasm_Iz(p, &n_operands, rip, &len, use32 & CPU_CTX_DATA32);
                     break;
 
                 case optype_IwIb:
-                    p = disasm_Iw(p, &n_oplands, rip, &len);
-                    p = disasm_Ib(p, &n_oplands, rip, &len);
+                    p = disasm_Iw(p, &n_operands, rip, &len);
+                    p = disasm_Ib(p, &n_operands, rip, &len);
                     break;
 
                 case optype_AXIz:
-                    p = disasm_reg(p, &n_oplands, index_AX, reg_type_ax + !!(use32 & CPU_CTX_DATA32));
-                    p = disasm_Iz(p, &n_oplands, rip, &len, use32 & CPU_CTX_DATA32);
+                    p = disasm_reg(p, &n_operands, index_AX, reg_type_ax + !!(use32 & CPU_CTX_DATA32));
+                    p = disasm_Iz(p, &n_operands, rip, &len, use32 & CPU_CTX_DATA32);
                     break;
 
                 case optype_Jb:
                 {
-                    p = disasm_separator(p, &n_oplands);
+                    p = disasm_separator(p, &n_operands);
                     int8_t j = mem[rip + len];
                     len++;
                     if (use32 & CPU_CTX_ADDR32) {
@@ -5677,13 +5677,13 @@ static inline char *disasm_main(char * p, uint16_t sel, uint32_t eip, uint32_t r
                     } else {
                         p = dump16(p, eip + len + j);
                     }
-                    n_oplands++;
+                    n_operands++;
                     break;
                 }
 
                 case optype_Jz:
                 {
-                    p = disasm_separator(p, &n_oplands);
+                    p = disasm_separator(p, &n_operands);
                     if (use32 & CPU_CTX_ADDR32) {
                         int32_t j = READ_LE32(mem + rip + len);
                         len += 4;
@@ -5693,14 +5693,14 @@ static inline char *disasm_main(char * p, uint16_t sel, uint32_t eip, uint32_t r
                         len += 2;
                         p = dump16(p, eip + len + j);
                     }
-                    n_oplands++;
+                    n_operands++;
                     break;
                 }
 
                 case optype_Ap:
                 {
-                    p = disasm_separator(p, &n_oplands);
-                    n_oplands++;
+                    p = disasm_separator(p, &n_operands);
+                    n_operands++;
 
                     uint32_t offset;
                     if (use32 & CPU_CTX_DATA32) {
@@ -5730,15 +5730,15 @@ static inline char *disasm_main(char * p, uint16_t sel, uint32_t eip, uint32_t r
                 {
                     switch (map1.optype) {
                     case optype_ALOb:
-                        p = disasm_reg(p, &n_oplands, index_AL, reg_type_al);
+                        p = disasm_reg(p, &n_operands, index_AL, reg_type_al);
                         break;
                     case optype_AXOv:
-                        p = disasm_reg(p, &n_oplands, index_AX, reg_type_ax + !!(use32 & CPU_CTX_DATA32));
+                        p = disasm_reg(p, &n_operands, index_AX, reg_type_ax + !!(use32 & CPU_CTX_DATA32));
                         break;
                     default: break;
                     }
 
-                    p = disasm_separator(p, &n_oplands);
+                    p = disasm_separator(p, &n_operands);
                     *p++ = '[';
                     if (use32 & CPU_CTX_ADDR32) {
                         int32_t i = READ_LE32(mem + rip + len);
@@ -5753,10 +5753,10 @@ static inline char *disasm_main(char * p, uint16_t sel, uint32_t eip, uint32_t r
 
                     switch (map1.optype) {
                     case optype_ObAL:
-                        p = disasm_reg(p, &n_oplands, index_AL, reg_type_al);
+                        p = disasm_reg(p, &n_operands, index_AL, reg_type_al);
                         break;
                     case optype_OvAX:
-                        p = disasm_reg(p, &n_oplands, index_AX, reg_type_ax + !!(use32 & CPU_CTX_DATA32));
+                        p = disasm_reg(p, &n_operands, index_AX, reg_type_ax + !!(use32 & CPU_CTX_DATA32));
                         break;
                     default: break;
                     }
@@ -5770,19 +5770,19 @@ static inline char *disasm_main(char * p, uint16_t sel, uint32_t eip, uint32_t r
                         int reverse = map1.optype & opa_reverse;
 
                         if (reverse != 0) {
-                            p = disasm_dump_Gx(p, &n_oplands, modrm, map1.optype, use32);
+                            p = disasm_dump_Gx(p, &n_operands, modrm, map1.optype, use32);
                         }
 
                         if (modrm.mod == 3) {
                             switch (map1.optype & opa_Emask) {
                                 case opa_Eb:
-                                    p = disasm_reg(p, &n_oplands, modrm.rm, reg_type_al);
+                                    p = disasm_reg(p, &n_operands, modrm.rm, reg_type_al);
                                     break;
                                 case opa_Ew:
-                                    p = disasm_reg(p, &n_oplands, modrm.rm, reg_type_ax);
+                                    p = disasm_reg(p, &n_operands, modrm.rm, reg_type_ax);
                                     break;
                                 case opa_Ev:
-                                    p = disasm_reg(p, &n_oplands, modrm.rm, reg_type_ax + !!(use32 & CPU_CTX_DATA32));
+                                    p = disasm_reg(p, &n_operands, modrm.rm, reg_type_ax + !!(use32 & CPU_CTX_DATA32));
                                     break;
                                 default:
                                 {
@@ -5790,7 +5790,7 @@ static inline char *disasm_main(char * p, uint16_t sel, uint32_t eip, uint32_t r
                                     switch (type_Ox) {
                                         case opa_RdCd:
                                         case opa_RdDd:
-                                            p = disasm_reg(p, &n_oplands, modrm.rm, reg_type_eax);
+                                            p = disasm_reg(p, &n_operands, modrm.rm, reg_type_eax);
                                             break;
                                         default: break;
                                     }
@@ -5806,7 +5806,7 @@ static inline char *disasm_main(char * p, uint16_t sel, uint32_t eip, uint32_t r
                                 name_table = reg_names_AX;
                             }
 
-                            p = disasm_separator(p, &n_oplands);
+                            p = disasm_separator(p, &n_operands);
                             *p++ = '[';
                             if (modrm.parsed.has_base) {
                                 p = dump_string(p, name_table[modrm.parsed.base]);
@@ -5847,35 +5847,35 @@ static inline char *disasm_main(char * p, uint16_t sel, uint32_t eip, uint32_t r
                         }
 
                         if (reverse == 0) {
-                            p = disasm_dump_Gx(p, &n_oplands, modrm, map1.optype, use32);
+                            p = disasm_dump_Gx(p, &n_operands, modrm, map1.optype, use32);
                         }
 
                         int ix = map1.optype & opa_Imask;
                         if (ix) {
                             switch (ix) {
                                 case opa_Ib:
-                                    p = disasm_Ib(p, &n_oplands, rip, &len);
+                                    p = disasm_Ib(p, &n_operands, rip, &len);
                                     break;
                                 case opa_Iw:
-                                    p = disasm_Iw(p, &n_oplands, rip, &len);
+                                    p = disasm_Iw(p, &n_operands, rip, &len);
                                     break;
                                 case opa_Iz:
-                                    p = disasm_Iz(p, &n_oplands, rip, &len, !!(use32 & CPU_CTX_DATA32));
+                                    p = disasm_Iz(p, &n_operands, rip, &len, !!(use32 & CPU_CTX_DATA32));
                                     break;
                             }
                         }
 
                     } else {
-                        p = disasm_separator(p, &n_oplands);
+                        p = disasm_separator(p, &n_operands);
                         p = dump_string(p, "???");
                     }
                     break;
                 }
             }
 
-            if ((map1.n_oplands & 2) != 0) {
-                p = disasm_separator(p, &n_oplands);
-                p = dump_string(p, map1.oplands2);
+            if ((map1.n_operands & 2) != 0) {
+                p = disasm_separator(p, &n_operands);
+                p = dump_string(p, map1.operands2);
             }
 
             break;
