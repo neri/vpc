@@ -23,8 +23,8 @@
     "lodash": "*",
     "mocha": "*",
     "typescript": "*",
+    "webassembly": "*",
     "webpack": "*",
-    "webpack-cli": "*",
-    "webassembly": "*"
+    "webpack-cli": "*"
   }
 }
