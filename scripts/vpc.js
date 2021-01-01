@@ -70,11 +70,11 @@ const startEmu = () => {
     }
     const keyEvent = (e) => {
         // console.log('key', e);
-        const event = [ 'type', 'code', 'key', 'keyCode', 'ctrlKey', 'altKey' ].reduce((a, b) => {
+        const event = ['type', 'code', 'key', 'keyCode', 'ctrlKey', 'altKey'].reduce((a, b) => {
             a[b] = e[b];
             return a;
         }, {});
-        window.worker.postMessage({command: 'key', data: event});
+        window.worker.postMessage({ command: 'key', data: event });
     }
     term.addEventListener('keydown', e => {
         if (e.metaKey) return;
@@ -105,43 +105,44 @@ const startSecond = () => {
     const worker = new Worker('lib/worker.js');
     window.worker = worker;
     window.vga.showProgress(0.25);
-    
+
     worker.onmessage = message => {
         switch (message.data.command) {
             case 'loaded':
-            {
-                window.vga.showProgress(0.5);
-                loadDiskImage((blob) => {
-                    $('#frameFD').removeAttribute('disabled');
-                    window.vga.showProgress(1);
-                    let cmd = { command: 'start',
-                        gen: parseInt($('#selCpuGen').value),
-                        mem: parseInt($('#selMemory').value),
-                        br_mbr: $('#optionDebugMBR').checked,
-                    };
-                    if (window.attach) {
-                        window.worker.postMessage({command: 'attach', blob: window.attach});
-                        window.attach = undefined;
-                    } else if (blob != null) {
-                        window.worker.postMessage({command: 'attach', blob: blob});
-                    }
-                    window.worker.postMessage(devmgr.connect(cmd));
-                })
-                break;
-            }
+                {
+                    window.vga.showProgress(0.5);
+                    loadDiskImage((blob) => {
+                        $('#frameFD').removeAttribute('disabled');
+                        window.vga.showProgress(1);
+                        let cmd = {
+                            command: 'start',
+                            gen: parseInt($('#selCpuGen').value),
+                            mem: parseInt($('#selMemory').value),
+                            br_mbr: $('#optionDebugMBR').checked,
+                        };
+                        if (window.attach) {
+                            window.worker.postMessage({ command: 'attach', blob: window.attach });
+                            window.attach = undefined;
+                        } else if (blob != null) {
+                            window.worker.postMessage({ command: 'attach', blob: blob });
+                        }
+                        window.worker.postMessage(devmgr.connect(cmd));
+                    })
+                    break;
+                }
             case 'alert':
                 alert(message.data.data);
                 break;
             case 'write':
-                // window.term.write(message.data.data);
-                // break;
+            // window.term.write(message.data.data);
+            // break;
             case 'devWrite':
-            {
-                const terminal = $('#devTerminal');
-                terminal.value += `${message.data.data}\n`;
-                terminal.scrollTop = terminal.scrollHeight;
-                break;
-            }
+                {
+                    const terminal = $('#devTerminal');
+                    terminal.value += `${message.data.data}\n`;
+                    terminal.scrollTop = terminal.scrollHeight;
+                    break;
+                }
             case 'debugReaction':
                 $('#devTool').open = true;
                 break;
@@ -153,7 +154,7 @@ const startSecond = () => {
 
 // Device Manager
 class DeviceManager {
-    constructor () {
+    constructor() {
         this.ioMap = [];
         this.ioRedirectMap = new Uint32Array(2048);
         this.msgMap = {};
@@ -162,17 +163,17 @@ class DeviceManager {
             this.outb(data.port, data.data)
         });
     }
-    on (port, callback) {
+    on(port, callback) {
         this.ioMap[port & 0xFFFF] = callback;
         this.ioRedirectMap[port >> 5] |= (1 << (port & 31));
     }
-    onCommand (command, callback) {
+    onCommand(command, callback) {
         this.msgMap[command] = callback;
     }
-    onConnect (name, data) {
+    onConnect(name, data) {
         this.connectMap[name] = data;
     }
-    outb (port, data) {
+    outb(port, data) {
         try {
             const handler = this.ioMap[port & 0xFFFF];
             if (handler) {
@@ -184,7 +185,7 @@ class DeviceManager {
             console.error('front_outb()', e);
         }
     }
-    connect (map) {
+    connect(map) {
         this.connectMap.ioRedirectMap = this.ioRedirectMap;
         return Object.assign(map, this.connectMap);
     }
@@ -201,12 +202,12 @@ window.devmgr = new DeviceManager();
 
 // i8254 Beep Sound Driver
 class i8254Sound {
-    constructor (devmgr) {
+    constructor(devmgr) {
         this.audioContext = window.AudioContext || window.webkitAudioContext;
         if (!this.audioContext) return;
         this.context = null;
         this.src = null;
-        
+
         $('#volumeControl').style.display = 'inline-block';
         $('#inputVolume').addEventListener('change', e => {
             this.adjustGain();
@@ -214,7 +215,7 @@ class i8254Sound {
 
         devmgr.onCommand('beep', data => this.sound(data));
     }
-    createAudioContext () {
+    createAudioContext() {
         this.context = new this.audioContext();
         this.context.createOscillator();
     }
@@ -226,10 +227,10 @@ class i8254Sound {
     }
     noteOn(freq) {
         // this.noteOff();
-        
+
         this.gain = this.context.createGain();
         this.adjustGain();
-        
+
         this.src = this.context.createOscillator();
         this.src.type = 'square';
         this.src.frequency.value = freq;
@@ -258,17 +259,17 @@ class i8254Sound {
 // Virtual MIDI Device
 const PORT_NOT_SELECTED = -1;
 class VirtualMidiDevice {
-    constructor (devmgr, div) {
+    constructor(devmgr, div) {
         if (!navigator.requestMIDIAccess) return;
 
-        (function() {
+        (function () {
             return new Promise(async (resolve, reject) => {
                 let midi;
                 try {
-                    midi = await navigator.requestMIDIAccess({sysex: true});
-                } catch(e) { };
+                    midi = await navigator.requestMIDIAccess({ sysex: true });
+                } catch (e) { };
                 if (!midi) {
-                    midi = await navigator.requestMIDIAccess({sysex: false});
+                    midi = await navigator.requestMIDIAccess({ sysex: false });
                 }
                 if (midi) resolve(midi);
                 else reject();
@@ -281,12 +282,12 @@ class VirtualMidiDevice {
             this.outputs = [];
             if (typeof midi.outputs === 'function') {
                 const ot = midi.outputs();
-                for(let i = 0; i < ot.length ; i++){
+                for (let i = 0; i < ot.length; i++) {
                     this.outputs.push(ot[i]);
                 }
             } else {
                 const ot = midi.outputs.values();
-                for(let o = ot.next(); !o.done; o = ot.next()){
+                for (let o = ot.next(); !o.done; o = ot.next()) {
                     this.outputs.push(o.value);
                 }
             }
@@ -303,7 +304,7 @@ class VirtualMidiDevice {
                 // option.appendChild(document.createTextNode(''));
                 select.appendChild(option);
             }
-            for(let i = 0; i < this.outputs.length; i++){
+            for (let i = 0; i < this.outputs.length; i++) {
                 const output = this.outputs[i];
                 console.log('midi_out', output);
                 let option = document.createElement('option');
@@ -346,10 +347,10 @@ class VirtualMidiDevice {
             devmgr.onCommand('midi', data => this.midiOut(data));
             devmgr.onConnect('midi', true);
         })
-        .catch(reason => console.error(reason));
+            .catch(reason => console.error(reason));
     }
-    midiOut (messages) {
-        if (this.selectedIndex != PORT_NOT_SELECTED){
+    midiOut(messages) {
+        if (this.selectedIndex != PORT_NOT_SELECTED) {
             if (messages[0] == 0xF0) {
                 if (this.parseSysEx(messages)) {
                     this.outputs[this.selectedIndex].send(messages);
@@ -363,23 +364,23 @@ class VirtualMidiDevice {
         if (!(sysex.length > 0) || (sysex[0] != 0xF0)) throw new Error(`SysEx: Parse Error: ${sysex}`);
         if (!this.midi.sysexEnabled) return false;
         if (sysex.length >= 6
-        && sysex[1] == 0x7E && sysex[2] == 0x7F && sysex[3] == 0x09) {
+            && sysex[1] == 0x7E && sysex[2] == 0x7F && sysex[3] == 0x09) {
             switch (sysex[4]) {
-            case 0x01: // F0 7E 7F 09 01 F7 GM System ON
-                console.log('midi_sysex', 'GM System ON');
-                $('#midiMode').innerText = 'GM';
-                break;
-            case 0x02: // F0 7E 7F 09 02 F7 GM System OFF
-                console.log('midi_sysex', 'GM System OFF');
-                $('#midiMode').innerText = '';
-                break;
-            case 0x03: // F0 7E 7F 09 03 F7 GM2 System ON
-                console.log('midi_sysex', 'GM2 System ON');
-                $('#midiMode').innerText = 'GM2';
-                break;
+                case 0x01: // F0 7E 7F 09 01 F7 GM System ON
+                    console.log('midi_sysex', 'GM System ON');
+                    $('#midiMode').innerText = 'GM';
+                    break;
+                case 0x02: // F0 7E 7F 09 02 F7 GM System OFF
+                    console.log('midi_sysex', 'GM System OFF');
+                    $('#midiMode').innerText = '';
+                    break;
+                case 0x03: // F0 7E 7F 09 03 F7 GM2 System ON
+                    console.log('midi_sysex', 'GM2 System ON');
+                    $('#midiMode').innerText = 'GM2';
+                    break;
             }
         } else if (sysex.length >= 11
-        && sysex[1] == 0x41 && sysex[3] == 0x42 && sysex[4] == 0x12) {
+            && sysex[1] == 0x41 && sysex[3] == 0x42 && sysex[4] == 0x12) {
             if (sysex[5] == 0x40 && sysex[6] == 0x00 && sysex[7] == 0x7F && sysex[8] == 0x00) {
                 // F0 41 10 42 12 40 00 7F 00 41 F7 GS Reset
                 console.log('midi_sysex', 'GS Reset');
@@ -398,20 +399,20 @@ class VirtualMidiDevice {
         }
         return true;
     }
-    midiTest () {
+    midiTest() {
         if (this.selectedIndex != PORT_NOT_SELECTED) {
             const testNote = 69;
             this.midiOut([0x90, testNote, 40 + Math.random() * 80]);
             setTimeout(() => this.midiOut([0x90, testNote, 0]), 500);
         }
     }
-    midiPanic () {
+    midiPanic() {
         if (this.selectedIndex != PORT_NOT_SELECTED) {
             this.outputs[this.selectedIndex].send([
-            0xB0, 0x78, 0, 0xB1, 0x78, 0, 0xB2, 0x78, 0, 0xB3, 0x78, 0, 
-            0xB4, 0x78, 0, 0xB5, 0x78, 0, 0xB6, 0x78, 0, 0xB7, 0x78, 0, 
-            0xB8, 0x78, 0, 0xB9, 0x78, 0, 0xBA, 0x78, 0, 0xBB, 0x78, 0,
-            0xBC, 0x78, 0, 0xBD, 0x78, 0, 0xBE, 0x78, 0, 0xBF, 0x78, 0,
+                0xB0, 0x78, 0, 0xB1, 0x78, 0, 0xB2, 0x78, 0, 0xB3, 0x78, 0,
+                0xB4, 0x78, 0, 0xB5, 0x78, 0, 0xB6, 0x78, 0, 0xB7, 0x78, 0,
+                0xB8, 0x78, 0, 0xB9, 0x78, 0, 0xBA, 0x78, 0, 0xBB, 0x78, 0,
+                0xBC, 0x78, 0, 0xBD, 0x78, 0, 0xBE, 0x78, 0, 0xBF, 0x78, 0,
             ]);
         }
     }
@@ -419,7 +420,7 @@ class VirtualMidiDevice {
 
 // Virtual Video Device
 class VideoDevice {
-    constructor (devmgr, dom, scale) {
+    constructor(devmgr, dom, scale) {
         this.BLACK = 0xFF000000;
         this.WHITE = 0xFFFFFFFF;
         this.scale = scale;
@@ -427,8 +428,8 @@ class VideoDevice {
         this.fontHeight = 16;
         this.lineHeight = this.fontHeight + 4;
         this.pal16 = [
-                '#000', '#009', '#090', '#099', '#900', '#909', '#990', '#CCC',
-                '#999', '#00F', '#0F0', '#0FF', '#F00', '#F0F', '#FF0', '#FFF', ];
+            '#000', '#009', '#090', '#099', '#900', '#909', '#990', '#CCC',
+            '#999', '#00F', '#0F0', '#0FF', '#F00', '#F0F', '#FF0', '#FFF',];
         this.font = "15px/16px 'TerminalWebFont', 'Menlo', 'Monaco', 'Consolas', 'Courier New', 'Courier', monospace";
         this.cursor = 0xFFFF;
         this.pal = new Uint32Array(256);
@@ -467,10 +468,10 @@ class VideoDevice {
             }
         });
         devmgr.onCommand('vga_cursor', e => {
-            this.updateCursor(e / 2);
+            this.updateCursor(e);
         });
 
-        this.setMode({ dim:[640 * scale, 400 * scale], vdim: [640, 400], bpp: 8, mode: 1 });
+        this.setMode({ dim: [640 * scale, 400 * scale], vdim: [640, 400], bpp: 8, mode: 1 });
         this.showProgress(0);
     }
     setMode(e) {
@@ -502,7 +503,7 @@ class VideoDevice {
             window.resizeBy(0, this.vdim.height + TOOLBAR_HEIGHT - window.innerHeight);
         }
     }
-    showProgress (value) {
+    showProgress(value) {
         const { ctx, scale } = this;
         const { width, height } = this.canvas;
         const pw = 160 * scale, ph = 12 * scale;
@@ -535,23 +536,23 @@ class VideoDevice {
 
         // CP437 to Unicode
         const unicodeMap = [
-0x0000, 0x263A, 0x263B, 0x2665, 0x2666, 0x2663, 0x2660, 0x2022, 0x25D8, 0x25CB, 0x25D9, 0x2642, 0x2640, 0x266A, 0x266B, 0x263C,
-0x25BA, 0x25C4, 0x2195, 0x203C, 0x00B6, 0x00A7, 0x25AC, 0x21A8, 0x2191, 0x2193, 0x2192, 0x2190, 0x221F, 0x2194, 0x25B2, 0x25BC,
-0x0020, 0x0021, 0x0022, 0x0023, 0x0024, 0x0025, 0x0026, 0x0027, 0x0028, 0x0029, 0x002A, 0x002B, 0x002C, 0x002D, 0x002E, 0x002F,
-0x0030, 0x0031, 0x0032, 0x0033, 0x0034, 0x0035, 0x0036, 0x0037, 0x0038, 0x0039, 0x003A, 0x003B, 0x003C, 0x003D, 0x003E, 0x003F,
-0x0040, 0x0041, 0x0042, 0x0043, 0x0044, 0x0045, 0x0046, 0x0047, 0x0048, 0x0049, 0x004A, 0x004B, 0x004C, 0x004D, 0x004E, 0x004F,
-0x0050, 0x0051, 0x0052, 0x0053, 0x0054, 0x0055, 0x0056, 0x0057, 0x0058, 0x0059, 0x005A, 0x005B, 0x005C, 0x005D, 0x005E, 0x005F,
-0x0060, 0x0061, 0x0062, 0x0063, 0x0064, 0x0065, 0x0066, 0x0067, 0x0068, 0x0069, 0x006A, 0x006B, 0x006C, 0x006D, 0x006E, 0x006F,
-0x0070, 0x0071, 0x0072, 0x0073, 0x0074, 0x0075, 0x0076, 0x0077, 0x0078, 0x0079, 0x007A, 0x007B, 0x007C, 0x007D, 0x007E, 0x2302,
-0x00C7, 0x00FC, 0x00E9, 0x00E2, 0x00E4, 0x00E0, 0x00E5, 0x00E7, 0x00EA, 0x00EB, 0x00E8, 0x00EF, 0x00EE, 0x00EC, 0x00C4, 0x00C5,
-0x00C9, 0x00E6, 0x00C6, 0x00F4, 0x00F6, 0x00F2, 0x00FB, 0x00F9, 0x00FF, 0x00D6, 0x00DC, 0x00A2, 0x00A3, 0x00A5, 0x20A7, 0x0192,
-0x00E1, 0x00ED, 0x00F3, 0x00FA, 0x00F1, 0x00D1, 0x00AA, 0x00BA, 0x00BF, 0x2310, 0x00AC, 0x00BD, 0x00BC, 0x00A1, 0x00AB, 0x00BB,
-0x2591, 0x2592, 0x2593, 0x2502, 0x2524, 0x2561, 0x2562, 0x2556, 0x2555, 0x2563, 0x2551, 0x2557, 0x255D, 0x255C, 0x255B, 0x2510,
-0x2514, 0x2534, 0x252C, 0x251C, 0x2500, 0x253C, 0x255E, 0x255F, 0x255A, 0x2554, 0x2569, 0x2566, 0x2560, 0x2550, 0x256C, 0x2567,
-0x2568, 0x2564, 0x2565, 0x2559, 0x2558, 0x2552, 0x2553, 0x256B, 0x256A, 0x2518, 0x250C, 0x2588, 0x2584, 0x258C, 0x2590, 0x2580,
-0x03B1, 0x00DF, 0x0393, 0x03C0, 0x03A3, 0x03C3, 0x00B5, 0x03C4, 0x03A6, 0x0398, 0x03A9, 0x03B4, 0x221E, 0x03C6, 0x03B5, 0x2229,
-0x2261, 0x00B1, 0x2265, 0x2264, 0x2320, 0x2321, 0x00F7, 0x2248, 0x00B0, 0x2219, 0x00B7, 0x221A, 0x207F, 0x00B2, 0x25A0, 0x00A0,
-];
+            0x0000, 0x263A, 0x263B, 0x2665, 0x2666, 0x2663, 0x2660, 0x2022, 0x25D8, 0x25CB, 0x25D9, 0x2642, 0x2640, 0x266A, 0x266B, 0x263C,
+            0x25BA, 0x25C4, 0x2195, 0x203C, 0x00B6, 0x00A7, 0x25AC, 0x21A8, 0x2191, 0x2193, 0x2192, 0x2190, 0x221F, 0x2194, 0x25B2, 0x25BC,
+            0x0020, 0x0021, 0x0022, 0x0023, 0x0024, 0x0025, 0x0026, 0x0027, 0x0028, 0x0029, 0x002A, 0x002B, 0x002C, 0x002D, 0x002E, 0x002F,
+            0x0030, 0x0031, 0x0032, 0x0033, 0x0034, 0x0035, 0x0036, 0x0037, 0x0038, 0x0039, 0x003A, 0x003B, 0x003C, 0x003D, 0x003E, 0x003F,
+            0x0040, 0x0041, 0x0042, 0x0043, 0x0044, 0x0045, 0x0046, 0x0047, 0x0048, 0x0049, 0x004A, 0x004B, 0x004C, 0x004D, 0x004E, 0x004F,
+            0x0050, 0x0051, 0x0052, 0x0053, 0x0054, 0x0055, 0x0056, 0x0057, 0x0058, 0x0059, 0x005A, 0x005B, 0x005C, 0x005D, 0x005E, 0x005F,
+            0x0060, 0x0061, 0x0062, 0x0063, 0x0064, 0x0065, 0x0066, 0x0067, 0x0068, 0x0069, 0x006A, 0x006B, 0x006C, 0x006D, 0x006E, 0x006F,
+            0x0070, 0x0071, 0x0072, 0x0073, 0x0074, 0x0075, 0x0076, 0x0077, 0x0078, 0x0079, 0x007A, 0x007B, 0x007C, 0x007D, 0x007E, 0x2302,
+            0x00C7, 0x00FC, 0x00E9, 0x00E2, 0x00E4, 0x00E0, 0x00E5, 0x00E7, 0x00EA, 0x00EB, 0x00E8, 0x00EF, 0x00EE, 0x00EC, 0x00C4, 0x00C5,
+            0x00C9, 0x00E6, 0x00C6, 0x00F4, 0x00F6, 0x00F2, 0x00FB, 0x00F9, 0x00FF, 0x00D6, 0x00DC, 0x00A2, 0x00A3, 0x00A5, 0x20A7, 0x0192,
+            0x00E1, 0x00ED, 0x00F3, 0x00FA, 0x00F1, 0x00D1, 0x00AA, 0x00BA, 0x00BF, 0x2310, 0x00AC, 0x00BD, 0x00BC, 0x00A1, 0x00AB, 0x00BB,
+            0x2591, 0x2592, 0x2593, 0x2502, 0x2524, 0x2561, 0x2562, 0x2556, 0x2555, 0x2563, 0x2551, 0x2557, 0x255D, 0x255C, 0x255B, 0x2510,
+            0x2514, 0x2534, 0x252C, 0x251C, 0x2500, 0x253C, 0x255E, 0x255F, 0x255A, 0x2554, 0x2569, 0x2566, 0x2560, 0x2550, 0x256C, 0x2567,
+            0x2568, 0x2564, 0x2565, 0x2559, 0x2558, 0x2552, 0x2553, 0x256B, 0x256A, 0x2518, 0x250C, 0x2588, 0x2584, 0x258C, 0x2590, 0x2580,
+            0x03B1, 0x00DF, 0x0393, 0x03C0, 0x03A3, 0x03C3, 0x00B5, 0x03C4, 0x03A6, 0x0398, 0x03A9, 0x03B4, 0x221E, 0x03C6, 0x03B5, 0x2229,
+            0x2261, 0x00B1, 0x2265, 0x2264, 0x2320, 0x2321, 0x00F7, 0x2248, 0x00B0, 0x2219, 0x00B7, 0x221A, 0x207F, 0x00B2, 0x25A0, 0x00A0,
+        ];
 
         this.canvasBG = document.createElement('canvas');
         do {
@@ -628,7 +629,7 @@ class VideoDevice {
                         ctx.drawImage(this.canvasBG, fgColor * fontWS, 0, fontWS, fontHS, cx, cy, fontWS, fontHS);
                         ctx.drawImage(this.canvasFont, char * fontWS, bgColor * lineHS, fontWS, fontHS, cx, cy, fontWS, fontHS);
                     } else {
-                        ctx.drawImage(this.canvasBG, bgColor * fontWS, 0, fontWS, fontHS, cx, cy , fontWS, fontHS);
+                        ctx.drawImage(this.canvasBG, bgColor * fontWS, 0, fontWS, fontHS, cx, cy, fontWS, fontHS);
                         ctx.drawImage(this.canvasFont, char * fontWS, fgColor * lineHS, fontWS, fontHS, cx, cy, fontWS, fontHS);
                     }
                 }
@@ -707,7 +708,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
     $('#buttonReset').addEventListener('click', e => {
         if (window.worker) {
-            worker.postMessage({command: 'reset', gen: parseInt($('#selCpuGen').value), br_mbr: $('#optionDebugMBR').checked});
+            worker.postMessage({ command: 'reset', gen: parseInt($('#selCpuGen').value), br_mbr: $('#optionDebugMBR').checked });
             window.term.focus();
         }
     });
@@ -719,7 +720,7 @@ window.addEventListener('DOMContentLoaded', () => {
         $('#selDiskImage').value = "";
         $('#labelLocal').value = name.slice(1 + name.lastIndexOf('\\'));
         if (window.worker) {
-            worker.postMessage({command: 'attach', blob: blob});
+            worker.postMessage({ command: 'attach', blob: blob });
         } else {
             window.attach = blob;
         }
@@ -735,7 +736,7 @@ window.addEventListener('DOMContentLoaded', () => {
         if (window.worker) {
             $('#labelLocal').value = '';
             loadDiskImage((blob) => {
-                worker.postMessage({command: 'attach', blob: blob});
+                worker.postMessage({ command: 'attach', blob: blob });
             })
         }
     });
@@ -767,7 +768,7 @@ window.addEventListener('DOMContentLoaded', () => {
     });
     const debugCommand = cmdline => {
         if (window.worker) {
-            worker.postMessage({command: 'debug', cmdline: cmdline});
+            worker.postMessage({ command: 'debug', cmdline: cmdline });
             $('#debugCmdline').value = '';
         }
     }
@@ -893,7 +894,7 @@ class VirtualTrackPad {
         devmgr.onCommand('mouse', args => {
             const enabled = args.enabled;
             this.mouseEnabled = enabled;
-            try { dom.exitPointerLock(); } catch(e) { }
+            try { dom.exitPointerLock(); } catch (e) { }
         });
     }
     isPointerMouse(e) {
@@ -901,13 +902,13 @@ class VirtualTrackPad {
     }
     sendPointerChanged(array) {
         if (window.worker && array) {
-            worker.postMessage({command: 'pointer', move: array});
+            worker.postMessage({ command: 'pointer', move: array });
         }
     }
     sendButtonStateChanged(button, pressed) {
         if (window.worker && button) {
-            worker.postMessage({command: 'pointer', button: button, pressed: pressed});
-        } 
+            worker.postMessage({ command: 'pointer', button: button, pressed: pressed });
+        }
     }
     getPointerMovements(e) {
         const ex = e.movementX | 0, ey = e.movementY | 0;
@@ -926,7 +927,7 @@ class VirtualTrackPad {
             if (t.identifier === this.touchIdentifier) {
                 const ex = (t.clientX - tr.left) | 0;
                 const ey = (t.clientY - tr.top) | 0;
-                return {ex, ey};
+                return { ex, ey };
             }
         }
         return undefined;

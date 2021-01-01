@@ -106,16 +106,13 @@ _irq1:
     push di
     mov ax, BDA_SEG
     mov ds, ax
-.loop:
-    in al, 0x64
-    and al, 0x01
-    jz .end
+
     in ax, 0x64
     mov bx, ax
     mov ah, 0x4F
     stc
     int 0x15
-    jnc .loop
+    jnc .end
     cmp al, 0xE1
     jz .E1
     cmp al, 0xE0
@@ -131,7 +128,7 @@ _irq1:
     cmp al, 0x38
     jz .alt1
     or bl, bl
-    js .loop
+    js .end
     mov ax, bx
     xchg al, ah
     and byte [BDA_KBD_MODE_TYPE], KBD_MODE_CLEAR_MASK
@@ -144,13 +141,13 @@ _irq1:
     jz .end
     mov [di], ax
     mov [BDA_KBD_BUFF_TAIL], cx
-    jmp .loop
+    jmp .end
 .E1:
     or byte [BDA_KBD_MODE_TYPE], KBD_MODE_LAST_E1
-    jmp .loop
+    jmp .end
 .E0:
     or byte [BDA_KBD_MODE_TYPE], KBD_MODE_LAST_E0
-    jmp .loop
+    jmp .end
 .ctrl1:
     mov al, 0x04
     jmp .shift_mask
@@ -167,11 +164,10 @@ _irq1:
     or bl, bl
     js .shift_up
     or [BDA_KBD_SHIFT], al
-    jmp .loop
+    jmp .end
 .shift_up:
     not al
     and [BDA_KBD_SHIFT], al
-    jmp .loop
 .end:
     mov al, 0x20
     out 0x20, al
@@ -633,6 +629,7 @@ _bios_set_cursor:
     push dx
     call _bios_cursor_addr
     mov cx, ax
+    shr cx, 1
     mov dx, CRTC_PORT
     mov al, 0x0E
     out dx, al

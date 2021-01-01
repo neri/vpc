@@ -23,13 +23,14 @@ A PC Emulator on WebBrowser
 
 ## Supported Software
 
-|Software|Kind|Status|
-|-|-|-|
-|osz|System|It seems working|
-|FreeDOS|Kernel|It seems working|
-|haribote OS|System|It seems working|
-|elks|System|failed|
-|BootChess|Game|buggy|
+| Software    | Kind   | Status              |
+| ----------- | ------ | ------------------- |
+| osz         | System | It seems working    |
+| FreeDOS     | Kernel | It seems working    |
+| haribote OS | System | It seems working    |
+| BASIC-DOS   | System | It works, but weird |
+| elks        | System | failed              |
+| BootChess   | Game   | buggy               |
 
 ## License
 
