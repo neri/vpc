@@ -1,12 +1,15 @@
 <!DOCTYPE html>
 <html>
+
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=640">
     <title>Virtual Playground</title>
     <link rel="stylesheet" href="styles/vpc.css">
     <script src="scripts/vpc.js"></script>
+    <script src="select.js"></script>
 </head>
+
 <body>
     <div id="emulatorFrame">
         <div id="screen_container">
@@ -14,7 +17,9 @@
             <canvas id="canvasVGA"></canvas>
             <div id="videoOverlay"></div>
         </div>
-        <div id="click_to_start"><p>はじめるときはここをクリック...</p></div>
+        <div id="click_to_start">
+            <p>はじめるときはここをクリック...</p>
+        </div>
 
         <div id="virtualTrackpad" style="display: none;">
             <span class="vPadButton" id="vPadBtnL">&nbsp;</span>
@@ -87,13 +92,10 @@
             <a id="buttonReset" class="buttonFace destructiveButton">RESET</a>
             <select id="selDiskImage">
                 <option value=""></option>
-                <option value="./bin/fdos.img" selected>FreeDOS</option>
-                <option value="./bin/haribote.img">Haribote OS</option>
-                <option value="./bin/osz.img">osz</option>
             </select>
             <input id="fileLocal" type="file" style="position: absolute; width:0px; height:0px; z-index: -1;">
             <label>
-                <input id="labelLocal" type="text" readonly="readonly" placeholder="file:">
+                <input id="labelLocal" type="text" readonly="readonly" placeholder="(Floppy Image)">
             </label>
             <label id="volumeControl">
                 &#x1F50A;<input id="inputVolume" type="range" min="0" max="10" step="1" value="5" style="width: 5em;">
@@ -109,16 +111,17 @@
         <details id="devTool">
             <summary class="buttonFace">DevTool</summary>
             <article>
-                    <a id="buttonStep" class="buttonFace">Step</a>
-                    <a id="buttonDevCLS" class="buttonFace destructiveButton">&#x1f5d1;</a>
-                    <input id="debugCmdline" type="text" placeholder="Command (HELP=?)" size="40">
-                    <a id="debugEnter" class="buttonFace activeButton">Enter</a>
-                    <br>
-                    <textarea id="devTerminal" cols="80" rows="20" readonly></textarea>
+                <a id="buttonStep" class="buttonFace">Step</a>
+                <a id="buttonDevCLS" class="buttonFace destructiveButton">&#x1f5d1;</a>
+                <input id="debugCmdline" type="text" placeholder="Command (HELP=?)" size="40">
+                <a id="debugEnter" class="buttonFace activeButton">Enter</a>
+                <br>
+                <textarea id="devTerminal" cols="80" rows="20" readonly></textarea>
             </article>
             <address>POWERED by <a href="https://github.com/neri/vpc">Virtual Playground</a></address>
         </details>
     </div>
 
 </body>
+
 </html>

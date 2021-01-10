@@ -10,7 +10,7 @@ const loadDiskImage = async (callback) => {
         return;
     }
     target.setAttribute('disabled', true);
-    $('#labelLocal').value = 'Loading...';
+    $('#labelLocal').value = 'LOADING...';
     console.log(`Loading image ${imageName}...`)
     return fetch(imageName)
         .then(res => {
@@ -32,7 +32,7 @@ const loadDiskImage = async (callback) => {
             if (pos > 0) {
                 name = name.slice(0, pos);
             }
-            $('#labelLocal').value = `file: ${name}`;
+            $('#labelLocal').value = `${name}`;
             target.removeAttribute('disabled');
             callback(buffer);
         })
