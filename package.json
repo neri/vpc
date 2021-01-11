@@ -21,7 +21,7 @@
     "electron": "latest",
     "expect": "*",
     "lodash": "*",
-    "mocha": "*",
+    "mocha": "^8.2.1",
     "typescript": "*",
     "webassembly": "*",
     "webpack": "*",
