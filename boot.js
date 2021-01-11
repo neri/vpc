@@ -10,17 +10,20 @@ const createWindow = () => {
   mainWindow = new BrowserWindow(
     {
       useContentSize: true,
-      width: 640, 
+      width: 640,
       height: 432,
       minWidth: 640,
       maxWidth: 640,
       minHeight: 400,
+      webPreferences: {
+        contextIsolation: true,
+      }
     });
 
   mainWindow.loadURL(url.format({
-      pathname: path.join(__dirname, '/index.html'),
-      protocol: 'file:',
-      slashes: true
+    pathname: path.join(__dirname, '/index.html'),
+    protocol: 'file:',
+    slashes: true
   }));
 
   mainWindow.setMenuBarVisibility(false)
@@ -48,7 +51,7 @@ app.on('ready', () => {
   //   },
   //   {label: "Edit", role: "editMenu"}
   // ]
-  
+
   // const menu = Menu.buildFromTemplate(template)
   // Menu.setApplicationMenu(menu)
 
@@ -57,7 +60,7 @@ app.on('ready', () => {
 
 app.on('window-all-closed', () => {
   // if (process.platform !== 'darwin') {
-    app.quit();
+  app.quit();
   // }
 });
 

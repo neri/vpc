@@ -894,7 +894,7 @@ class VirtualTrackPad {
         devmgr.onCommand('mouse', args => {
             const enabled = args.enabled;
             this.mouseEnabled = enabled;
-            try { dom.exitPointerLock(); } catch (e) { }
+            try { document.exitPointerLock(); } catch (e) { }
         });
     }
     isPointerMouse(e) {
