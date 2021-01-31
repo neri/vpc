@@ -2357,7 +2357,7 @@ static int SHIFT(cpu_state *cpu, operand_set *set, int c)
     }
 
     case 4: // SHL
-            // case 6: // SHL?
+        // case 6: // SHL?
         if (c > 0)
         {
             uint32_t value;
@@ -5652,6 +5652,7 @@ void cpu_reset(cpu_state *cpu, int gen)
 
     cpu->cr4_valid = 0x00000009;
 
+    cpu->CR[0] = 0x00000010 & cpu->cr0_valid;
     cpu->RPL = 0;
     cpu->CPL = 0;
     cpu->shadow_eip = 0x0000FFF0;
@@ -5664,12 +5665,12 @@ void cpu_reset(cpu_state *cpu, int gen)
     LOAD_SEL8086(cpu, &cpu->ES, 0);
     LOAD_SEL8086(cpu, &cpu->FS, 0);
     LOAD_SEL8086(cpu, &cpu->GS, 0);
-    cpu->CR[0] = 0x00000010 & cpu->cr0_valid;
     cpu->GDT.limit = 0xFFFF;
     cpu->IDT.limit = 0xFFFF;
     cpu->LDT.limit = 0xFFFF;
     cpu->TSS.limit = 0xFFFF;
     cpu->EDX = cpu->cpuid_model_id;
+    cpu_reflect_rip(cpu);
 }
 
 /**

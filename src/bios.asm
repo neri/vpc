@@ -351,9 +351,9 @@ i1000: ;; SET VIDEO MODE
     cmp al, 0x06
     jz .mode_cga
     cmp al, 0x11
-    jz .mode_graph
+    jz .mode_vga
     cmp al, 0x13
-    jz .mode_graph
+    jz .mode_vga
     ; db 0xf1
     xor al, al
     ret
@@ -385,7 +385,7 @@ i1000: ;; SET VIDEO MODE
     pop ax
     jmp .set_mode
 
-.mode_graph:
+.mode_vga:
     push ax
     mov ax, 0xA000
     mov es, ax

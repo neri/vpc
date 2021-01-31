@@ -57,7 +57,7 @@ const codeTable: { [key: string]: number } = {
     'KeyC': 0x2E,
     'KeyV': 0x2f,
     'KeyB': 0x30,
-    'KeyN': 0x31, 
+    'KeyN': 0x31,
     'KeyM': 0x32,
     'Comma': 0x33,
     'Period': 0x34,
@@ -85,6 +85,7 @@ const codeTable: { [key: string]: number } = {
     'ArrowRight': 0xE04D,
     'End': 0xE04F,
     'ArrowDown': 0xE050,
+    'PageDown': 0xE051,
     'Insert': 0xE052,
     'Delete': 0xE053,
     'IntlRo': 0x73,
@@ -137,7 +138,7 @@ export class PS2 {
     private isKeyboardEnabled = true;
     private isMouseEnabled = false;
 
-    constructor (env: RuntimeEnvironment) {
+    constructor(env: RuntimeEnvironment) {
         this.env = env;
         this.iram = new Uint8Array(32);
 
@@ -165,21 +166,21 @@ export class PS2 {
             this.postKeyData(this.iram[data & 0x1F]);
         } else {
             switch (data) {
-            case 0x55:
-                this.postKeyData(0xAA);
-                break;
-            case 0xA7:
-            case 0xA8:
-            case 0xAD:
-            case 0xAE:
-                // TODO:
-                break;
-            case 0xA9:
-            case 0xAB:
-                this.postKeyData(0x00);
-                break;
-            default:
-                this.lastCmd = data;
+                case 0x55:
+                    this.postKeyData(0xAA);
+                    break;
+                case 0xA7:
+                case 0xA8:
+                case 0xAD:
+                case 0xAE:
+                    // TODO:
+                    break;
+                case 0xA9:
+                case 0xAB:
+                    this.postKeyData(0x00);
+                    break;
+                default:
+                    this.lastCmd = data;
             }
         }
     }
@@ -191,47 +192,47 @@ export class PS2 {
             switch (cmd) {
                 case 0xD4: // Send mouse
                     switch (data) {
-                    case 0xF2:
-                        this.postMouseACK(PS2_ACK);
-                        this.postMouseACK(0);
-                        break;
-                    case 0xF4:
-                        this.setMouseEnabled(true);
-                        this.postMouseACK(PS2_ACK);
-                        break;
-                    case 0xF5:
-                        this.setMouseEnabled(false);
-                        this.postMouseACK(PS2_ACK);
-                        break;
-                    case 0xFF:
-                        this.env.pic.clearPendingIRQ(IRQ_MOUSE);
-                        this.m_fifo = [];
-                        this.setMouseEnabled(false);
-                        this.postMouseACK(0xAA);
-                        break;
+                        case 0xF2:
+                            this.postMouseACK(PS2_ACK);
+                            this.postMouseACK(0);
+                            break;
+                        case 0xF4:
+                            this.setMouseEnabled(true);
+                            this.postMouseACK(PS2_ACK);
+                            break;
+                        case 0xF5:
+                            this.setMouseEnabled(false);
+                            this.postMouseACK(PS2_ACK);
+                            break;
+                        case 0xFF:
+                            this.env.pic.clearPendingIRQ(IRQ_MOUSE);
+                            this.m_fifo = [];
+                            this.setMouseEnabled(false);
+                            this.postMouseACK(0xAA);
+                            break;
                     }
                     break;
                 default:
                     switch (data) {
-                    case 0xF2:
-                        this.postKeyData(PS2_ACK);
-                        this.postKeyData(0xAB);
-                        this.postKeyData(0x83);
-                        break;
-                    case 0xF4:
-                        this.isKeyboardEnabled = true;
-                        this.postKeyData(PS2_ACK);
-                        break;
-                    case 0xF5:
-                        this.isKeyboardEnabled = false;
-                        this.postKeyData(PS2_ACK);
-                        break;
-                    case 0xFF:
-                        this.env.pic.clearPendingIRQ(IRQ_KEY);
-                        this.k_fifo = [];
-                        this.isKeyboardEnabled = false;
-                        this.postKeyData(0xAA);
-                        break;
+                        case 0xF2:
+                            this.postKeyData(PS2_ACK);
+                            this.postKeyData(0xAB);
+                            this.postKeyData(0x83);
+                            break;
+                        case 0xF4:
+                            this.isKeyboardEnabled = true;
+                            this.postKeyData(PS2_ACK);
+                            break;
+                        case 0xF5:
+                            this.isKeyboardEnabled = false;
+                            this.postKeyData(PS2_ACK);
+                            break;
+                        case 0xFF:
+                            this.env.pic.clearPendingIRQ(IRQ_KEY);
+                            this.k_fifo = [];
+                            this.isKeyboardEnabled = false;
+                            this.postKeyData(0xAA);
+                            break;
                     }
             }
         }
@@ -243,7 +244,7 @@ export class PS2 {
     }
     private setMouseEnabled(enabled: boolean): void {
         this.isMouseEnabled = enabled;
-        this.env.worker.postCommand('mouse', {enabled: enabled});
+        this.env.worker.postCommand('mouse', { enabled: enabled });
     }
     private postMouseACK(data: number): void {
         this.m_fifo.push(data);
@@ -279,12 +280,12 @@ export class PS2 {
             scancode |= (ascii << 8);
         } else {
             switch (keyCode) {
-            case 0x08:
-            case 0x09:
-            case 0x0D:
-            case 0x1B:
+                case 0x08:
+                case 0x09:
+                case 0x0D:
+                case 0x1B:
                     scancode |= (keyCode << 8);
-                break;
+                    break;
             }
         }
         if (altKey) {
@@ -292,11 +293,11 @@ export class PS2 {
         }
 
         switch (type) {
-        case 'keydown':
-            break;
-        case 'keyup':
-            scancode |= 0x80;
-            break;
+            case 'keydown':
+                break;
+            case 'keyup':
+                scancode |= 0x80;
+                break;
         }
 
         // console.log('key', e, scancode.toString(16));
