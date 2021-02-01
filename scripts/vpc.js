@@ -801,6 +801,17 @@ window.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    $('#optionVPAD').addEventListener('change', e => {
+        if (e.target.checked) {
+            $('#virtualTrackpad').classList.remove('hidden');
+        } else {
+            $('#virtualTrackpad').classList.add('hidden');
+        }
+    });
+    $('#vPadButton').addEventListener('click', e => {
+        $('#optionVPAD').click();
+    });
+
 });
 
 class VirtualTrackPad {
@@ -817,28 +828,49 @@ class VirtualTrackPad {
             domTerm.focus();
         });
 
-        dom.addEventListener('pointerenter', e => {
-            if (!this.isPointerMouse(e)) return;
+        // dom.addEventListener('pointerenter', e => {
+        //     if (!this.isPointerMouse(e)) return;
+        //     e.preventDefault();
+        // });
+        // dom.addEventListener('pointerdown', e => {
+        //     if (!this.isPointerMouse(e)) return;
+        //     dom.requestPointerLock();
+        //     this.sendButtonStateChanged(this.convertPointerButton(e), true);
+        //     e.preventDefault();
+        // });
+        // dom.addEventListener('pointermove', e => {
+        //     if (!this.isPointerMouse(e)) return;
+        //     this.sendPointerChanged(this.getPointerMovements(e));
+        //     e.preventDefault();
+        // });
+        // dom.addEventListener('pointerup', e => {
+        //     if (!this.isPointerMouse(e)) return;
+        //     this.sendButtonStateChanged(this.convertPointerButton(e), false);
+        //     e.preventDefault();
+        // });
+        // dom.addEventListener('pointercancel', e => {
+        //     if (!this.isPointerMouse(e)) return;
+        //     e.preventDefault();
+        // });
+
+        dom.addEventListener('mouseenter', e => {
+            if (!this.mouseEnabled) return;
             e.preventDefault();
         });
-        dom.addEventListener('pointerdown', e => {
-            if (!this.isPointerMouse(e)) return;
+        dom.addEventListener('mousedown', e => {
+            if (!this.mouseEnabled) return;
             dom.requestPointerLock();
             this.sendButtonStateChanged(this.convertPointerButton(e), true);
             e.preventDefault();
         });
-        dom.addEventListener('pointermove', e => {
-            if (!this.isPointerMouse(e)) return;
+        dom.addEventListener('mousemove', e => {
+            if (!this.mouseEnabled) return;
             this.sendPointerChanged(this.getPointerMovements(e));
             e.preventDefault();
         });
-        dom.addEventListener('pointerup', e => {
-            if (!this.isPointerMouse(e)) return;
+        dom.addEventListener('mouseup', e => {
+            if (!this.mouseEnabled) return;
             this.sendButtonStateChanged(this.convertPointerButton(e), false);
-            e.preventDefault();
-        });
-        dom.addEventListener('pointercancel', e => {
-            if (!this.isPointerMouse(e)) return;
             e.preventDefault();
         });
 

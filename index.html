@@ -16,25 +16,19 @@
             <textarea id="terminal"></textarea>
             <canvas id="canvasVGA"></canvas>
             <div id="videoOverlay"></div>
+            <div id="virtualTrackpad" class="hidden">
+                <span class="vPadButton" id="vPadBtnL">&nbsp;</span>
+                <span class="vPadButton" id="vPadBtnR">&nbsp;</span>
+            </div>
         </div>
         <div id="click_to_start">
             <p>はじめるときはここをクリック...</p>
         </div>
 
-        <div id="virtualTrackpad" style="display: none;">
-            <span class="vPadButton" id="vPadBtnL">&nbsp;</span>
-            <span class="vPadButton" id="vPadBtnR">&nbsp;</span>
-        </div>
-
         <div id="biosPanel" style="display: none;">
             <article>
                 <div class="controlFrame">
-                    &#x1f4bb; System
-                    <br>
-                    <label>
-                        Performance:
-                        <input type="range" min="0" max="10" step="1" value="5" disabled>
-                    </label>
+                    General
                     <br>
                     <label>
                         CPU:
@@ -55,14 +49,14 @@
                             <option value="65536">64MB</option>
                         </select>
                     </label>
+                    <br>
+                    <label>
+                        <input type="checkbox" value="1" id="optionVPAD">
+                        Tablet vPad
+                    </label>
                 </div>
                 <div class="controlFrame">
                     Video Option
-                    <br>
-                    <label>
-                        Performance:
-                        <input type="range" min="0" max="10" step="1" value="5" disabled>
-                    </label>
                     <br>
                     <label>
                         <input type="checkbox" value="1" id="optionNNI">
@@ -87,9 +81,8 @@
     </div>
 
     <div id="controlPanel">
-
         <span id="frameFD" class="leftFrame">
-            <a id="buttonReset" class="buttonFace destructiveButton">RESET</a>
+            <a id="buttonReset" class="buttonFace destructiveButton" title="Restart">&#x267A;</a>
             <select id="selDiskImage">
                 <option value=""></option>
             </select>
@@ -97,19 +90,22 @@
             <label>
                 <input id="labelLocal" type="text" readonly="readonly" placeholder="(Floppy Image)">
             </label>
-            <label id="volumeControl">
+            <label id="volumeControl" title="Volume">
                 &#x1F50A;<input id="inputVolume" type="range" min="0" max="10" step="1" value="5" style="width: 5em;">
             </label>
             <label>
-                <a id="keyFocusButton" class="buttonFace activeButton">&#x2328;&#xFE0F;</a>
+                <a id="keyFocusButton" class="buttonFace" title="Keyboard Focus">&#x2328;&#xFE0F;</a>
             </label>
             <label>
-                <a id="biosButton" class="buttonFace activeButton">Config</a>
+                <a id="vPadButton" class="buttonFace" title="Touch Pad">&#x1F446;</a>
+            </label>
+            <label>
+                <a id="biosButton" class="buttonFace" title="Config">&#x1F527;</a>
             </label>
         </span>
 
         <details id="devTool">
-            <summary class="buttonFace">DevTool</summary>
+            <summary class="buttonFace" title="Developper Tool">&#x1F41C;</summary>
             <article>
                 <a id="buttonStep" class="buttonFace">Step</a>
                 <a id="buttonDevCLS" class="buttonFace destructiveButton">&#x1f5d1;</a>

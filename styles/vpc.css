@@ -176,16 +176,15 @@ address {
 
 .buttonFace, .thinButton {
     display: inline-block;
-    /* min-height: 16px; */
     line-height: var(--button-height);
     vertical-align: middle;
     font-size: 12px;
     border: solid 1px transparent;
-    background: var(--system-gray1);
-    color: var(--system-gray6);
+    background: transparent;
+    color: var(--system-gray1);
     border-radius: 4px;
     cursor: pointer;
-    box-shadow: 1px 1px 4px 2px var(--shadow-color);
+    box-shadow: 1px 1px 2px 2px var(--shadow-color);
 }
 
 .buttonFace {
@@ -202,10 +201,12 @@ address {
 
 .activeButton {
     background: var(--system-blue) ;
+    color: var(--system-gray6);
 }
 
 .destructiveButton {
     background: var(--system-red);
+    color: var(--system-gray6);
 }
 
 select {
@@ -272,12 +273,16 @@ input[readonly] {
     display: inline-block;
     margin: 4px;
     width: 150px;
-    line-height: 40px;
+    line-height: 48px;
     background: rgba(160, 160, 160, 0.5);
     cursor: pointer;
     text-align: center;
     color: black;
     border-radius: 8px;
+}
+
+.hidden {
+    display: none;
 }
 
 .nearest_neighbor {
