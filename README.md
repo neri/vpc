@@ -32,6 +32,12 @@ A PC Emulator on WebBrowser
 | elks        | System | failed              |
 | BootChess   | Game   | buggy               |
 
+## Test
+
+```
+$ npm run test
+```
+
 ## License
 
 MIT License
