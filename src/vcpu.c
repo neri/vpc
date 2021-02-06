@@ -5198,8 +5198,63 @@ static int cpu_step(cpu_state *cpu)
                     }
                 }
 
-                    // case 0xB0: // CMPXCHG r/m, AL, r8
-                    // case 0xB1: // CMPXCHG r/m, AX, r16
+                case 0xB0: // CMPXCHG r/m, AL, r8
+                case 0xB1: // CMPXCHG r/m, AX, r16
+                {
+                    int src, dst, value;
+                    MODRM_W(cpu, seg, inst & 1, &set);
+                    switch (set.size)
+                    {
+                    case 0:
+                    {
+                        uint8_t *opr2b = LEA_REG8(cpu, set.opr2);
+                        uint8_t temp = *set.opr1b;
+                        if (temp == cpu->AL)
+                        {
+                            cpu->ZF = 1;
+                            *set.opr1b = *opr2b;
+                        }
+                        else
+                        {
+                            cpu->ZF = 0;
+                            cpu->AL = temp;
+                        }
+                        return 0;
+                    }
+                    case 1:
+                    {
+                        uint16_t opr2 = cpu->gpr[set.opr2];
+                        uint16_t temp = READ_LE16(set.opr1);
+                        if (temp == cpu->AX)
+                        {
+                            cpu->ZF = 1;
+                            WRITE_LE16(set.opr1, opr2);
+                        }
+                        else
+                        {
+                            cpu->ZF = 0;
+                            cpu->AX = temp;
+                        }
+                        return 0;
+                    }
+                    case 2:
+                    {
+                        uint32_t opr2 = cpu->gpr[set.opr2];
+                        uint32_t temp = READ_LE32(set.opr1);
+                        if (temp == cpu->EAX)
+                        {
+                            cpu->ZF = 1;
+                            WRITE_LE32(set.opr1, opr2);
+                        }
+                        else
+                        {
+                            cpu->ZF = 0;
+                            cpu->EAX = temp;
+                        }
+                        return 0;
+                    }
+                    }
+                }
 
                 case 0xB2: // LSS reg, r/m
                     return LDS(cpu, seg, &cpu->SS);
@@ -5880,7 +5935,11 @@ WASM_EXPORT int run(cpu_state *cpu, int speed_status)
         return status;
 
     case cpu_status_ud:
-        if (!cpu->VM)
+        if (cpu->CR0.PE && INVOKE_INT(cpu, 6, exception) == 0)
+        {
+            return 0;
+        }
+        else
         {
             println("#### UNDEFINED INSTRUCTION");
             cpu_show_regs(cpu);
