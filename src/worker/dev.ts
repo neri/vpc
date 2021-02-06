@@ -16,7 +16,7 @@ export class VPIC {
     private ICW: Uint8Array;
     private intCount: number[];
 
-    constructor (iomgr: IOManager) {
+    constructor(iomgr: IOManager) {
         this.irq = [];
         this.phase = [0, 0];
         this.IMR = new Uint8Array([0xFF, 0xFF]);
@@ -24,7 +24,7 @@ export class VPIC {
         this.ISR = new Uint8Array(2);
         this.ICW = new Uint8Array(PIC_PHASE_MAX * 2);
         this.intCount = [];
-        for (let i = 0; i< 16; i++) {
+        for (let i = 0; i < 16; i++) {
             this.intCount[i] = 0;
         }
 
@@ -39,6 +39,10 @@ export class VPIC {
             this.phase[port] = 1;
             this.ICW[port * 4] = data;
             this.ISR[port] = 0;
+            for (let i = 0; i < 8; i++) {
+                this.intCount[i + port * 8] = 0;
+            }
+            this.irq = [];
         } else if ((data & 0xF8) == 0x20) { // auto EOI
             for (let i = 0; i < 8; i++) {
                 const mask = (1 << i);
@@ -124,7 +128,7 @@ export class VPIT {
     private p0061_data: number;
     private env: RuntimeEnvironment;
 
-    constructor (env: RuntimeEnvironment) {
+    constructor(env: RuntimeEnvironment) {
         this.env = env;
         this.cntModes = new Uint8Array(3);
         this.cntPhases = [0, 0, 0];
@@ -159,10 +163,10 @@ export class VPIT {
             const old_data = this.p0061_data;
             this.p0061_data = data;
             const chg_value = old_data ^ data;
-            if (chg_value & 0x02){
-                if (data & 0x02){
+            if (chg_value & 0x02) {
+                if (data & 0x02) {
                     this.noteOn();
-                }else{
+                } else {
                     this.noteOff();
                 }
             }
@@ -227,7 +231,7 @@ export class UART {
     private irq: number;
     private IER: number = 0;
 
-    constructor (env: RuntimeEnvironment, base: number, irq: number) {
+    constructor(env: RuntimeEnvironment, base: number, irq: number) {
         this.env = env;
         this.irq = irq;
         this.fifo_o = [];
@@ -258,7 +262,7 @@ export class RTC {
     public index: number = 0;
     private ram: Uint8Array;
 
-    constructor (env: RuntimeEnvironment) {
+    constructor(env: RuntimeEnvironment) {
         this.ram = new Uint8Array(128);
         this.ram[0x0B] = 0x02;
         env.iomgr.on(0x70, (_, data) => this.index = data, (_) => this.index);
@@ -276,24 +280,24 @@ export class RTC {
         const index = this.index & 0x7F;
         const now = new Date();
         switch (index) {
-        case 0:
-            return toBCD(now.getSeconds());
-        case 2:
-            return toBCD(now.getMinutes());
-        case 4:
-            return toBCD(now.getHours());
-        case 6:
-            return now.getDay();
-        case 7:
-            return toBCD(now.getDate());
-        case 8:
-            return toBCD(1 + now.getMonth());
-        case 9:
-            return toBCD(now.getFullYear() % 100);
-        case 0x32:
+            case 0:
+                return toBCD(now.getSeconds());
+            case 2:
+                return toBCD(now.getMinutes());
+            case 4:
+                return toBCD(now.getHours());
+            case 6:
+                return now.getDay();
+            case 7:
+                return toBCD(now.getDate());
+            case 8:
+                return toBCD(1 + now.getMonth());
+            case 9:
+                return toBCD(now.getFullYear() % 100);
+            case 0x32:
                 return toBCD(Math.floor(now.getFullYear() / 100));
-        default:
-            return this.ram[index];
+            default:
+                return this.ram[index];
         }
     }
 }
@@ -304,9 +308,9 @@ export class RTC {
 export class PCI {
     private lastAddress = 0;
 
-    constructor (env: RuntimeEnvironment) {
+    constructor(env: RuntimeEnvironment) {
         // TODO: everything
         env.iomgr.ond(0xCF8, (_, data) => this.lastAddress = data, (_) => this.lastAddress);
-        env.iomgr.ond(0xCFC, (_, _data) => {}, (_) => 0xFFFFFFFF);
+        env.iomgr.ond(0xCFC, (_, _data) => { }, (_) => 0xFFFFFFFF);
     }
 }
