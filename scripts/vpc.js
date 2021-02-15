@@ -853,6 +853,9 @@ class VirtualTrackPad {
         //     e.preventDefault();
         // });
 
+        dom.addEventListener('contextmenu', e => {
+            e.preventDefault();
+        }, true);
         dom.addEventListener('mouseenter', e => {
             if (!this.mouseEnabled) return;
             e.preventDefault();
@@ -933,7 +936,7 @@ class VirtualTrackPad {
         return this.mouseEnabled && e.pointerType === 'mouse'
     }
     sendPointerChanged(array) {
-        if (window.worker && array) {
+        if (window.worker && (array[0] || array[1])) {
             worker.postMessage({ command: 'pointer', move: array });
         }
     }

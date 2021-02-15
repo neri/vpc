@@ -133,7 +133,6 @@ export class PS2 {
     private k_fifo: number[] = [];
     private m_fifo: number[] = [];
     private i_fifo: number[] = [];
-    private coords = new Coords();
     private buttons = new Buttons();
     private isKeyboardEnabled = true;
     private isMouseEnabled = false;
@@ -256,9 +255,8 @@ export class PS2 {
         if (px < -255) px = -255
         if (py > 255) py = 255;
         if (py < -255) py = -255;
-        this.m_fifo.push(buttons.toInt() | (px < 0 ? 0x10 : 0) | (py < 0 ? 0x20 : 0));
-        this.m_fifo.push(px & 0xFF);
-        this.m_fifo.push(py & 0xFF);
+        let leading = buttons.toInt() | (px < 0 ? 0x10 : 0) | (py < 0 ? 0x20 : 0);
+        this.m_fifo.push(leading, px & 0xFF, py & 0xFF);
         this.env.pic.raiseIRQ(IRQ_MOUSE, 3);
     }
     private onKey(e: any): void {
@@ -273,7 +271,7 @@ export class PS2 {
         let ascii: number = (key.length === 1) ? key.charCodeAt(0) : 0;
         if (ascii === 0xA5) ascii = 0x5C; // IntlYen
         if (ascii >= 0x80) ascii = 0;
-        if (ctrlKey && ascii >= 0x40 && ascii <= 0x80) {
+        if (ctrlKey && ascii >= 0x40 && ascii < 0x80) {
             ascii &= 0x1F;
         }
         if (ascii) {
@@ -310,16 +308,16 @@ export class PS2 {
     }
     private onPointer(move?: number[], button?: string, pressed?: boolean) {
         if (!this.isMouseEnabled) return;
+        let coords = new Coords();
         if (move) {
-            this.coords.x += move[0];
-            this.coords.y -= move[1];
+            coords.x += move[0];
+            coords.y -= move[1];
         }
         if (button) {
             (this.buttons as any)[button] = pressed ? true : false;
         }
-        if (move || button) {
-            this.postMouseData(this.coords, this.buttons);
-            this.coords = new Coords();
+        if (coords.x || coords.y || button) {
+            this.postMouseData(coords, this.buttons);
         }
     }
 }
