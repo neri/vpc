@@ -862,7 +862,9 @@ class VirtualTrackPad {
         });
         dom.addEventListener('mousedown', e => {
             if (!this.mouseEnabled) return;
-            dom.requestPointerLock();
+            if (e.button === 2) {
+                dom.requestPointerLock();
+            }
             this.sendButtonStateChanged(this.convertPointerButton(e), true);
             e.preventDefault();
         });
