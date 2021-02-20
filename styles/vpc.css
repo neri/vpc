@@ -7,6 +7,8 @@
 
     --bg-color: rgb(255, 255, 255);
     --fg-color: #555;
+    --control-bg: rgba(242, 242, 247, 0.9);
+
     --system-blue: rgb(0, 122, 255);
     --system-red:  rgb(255, 59, 48);
     --system-gray1: rgb(142, 142, 147);
@@ -19,6 +21,8 @@
     :root {
         --bg-color: #111;
         --fg-color: #6C6;
+        --control-bg: rgb(28, 28, 30, 0.9);
+
         --system-blue: rgb(10, 132, 255);
         --system-red:  rgb(255, 69, 58);
         --system-gray1: rgb(142, 142, 147);
@@ -56,6 +60,9 @@ html, body {
     min-height: var(--main-screen-height);
     line-height: 0;
 }
+.dimScreen {
+    filter: blur(2px) grayscale(50%) brightness(75%);
+}
 
 #click_to_start {
     background: var(--system-gray5);
@@ -79,7 +86,6 @@ html, body {
     top: 0px;
     width: var(--main-screen-width);
     height: var(--main-screen-height);
-    background: rgba(0, 0, 0, 0.5);
 }
 
 #biosPanel article {
@@ -99,13 +105,13 @@ html, body {
     display: inline-block;
     margin: 4px;
     padding: 4px 8px;
-    background: rgba(63, 63, 63, 0.9);
-    color: #CCC;
+    background: var(--control-bg);
+    color: var(--fg-color);
     border-radius: 8px;
     min-height: 24px;
     vertical-align: top;
-    border: transparent dashed 2px;
     font-size: 14px;
+    box-shadow: 1px 1px 4px 2px var(--shadow-color);
 }
 
 .leftFrame {
@@ -216,7 +222,7 @@ select {
     border-radius: 4px;
     padding: 0 8px;
     line-height: var(--button-height);
-    border: none;
+    border: #999 solid 1px;
     box-shadow: 1px 1px 4px 2px var(--shadow-color);
 
     background: transparent;
@@ -242,10 +248,7 @@ input[readonly] {
     color: var(--system-gray1);
 }
 
-.controlFrame select {
-    color: #FFF;
-    background: #333;
-}
+/* .controlFrame select {} */
 
 .controlFrame select[disabled] {
     color: #777;

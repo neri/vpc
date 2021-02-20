@@ -3,11 +3,16 @@
 
 <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=640">
+    <meta name="viewport" content="width=device-width" id="viewport">
     <title>Virtual Playground</title>
     <link rel="stylesheet" href="styles/vpc.css">
     <script src="scripts/vpc.js"></script>
     <script src="select.js"></script>
+    <script>
+        if (screen.width < 640) {
+            document.getElementById('viewport').setAttribute('content', 'width=640');
+        }
+    </script>
 </head>
 
 <body>
@@ -36,7 +41,7 @@
                             <option value="0">8086</option>
                             <option value="1">80186</option>
                             <option value="2">80286</option>
-                            <option value="3">386SX</option>
+                            <option value="3">80386</option>
                             <option value="4" selected>486SX</option>
                         </select>
                     </label>
@@ -49,6 +54,16 @@
                             <option value="65536">64MB</option>
                         </select>
                     </label>
+                </div>
+                <div class="controlFrame">
+                    Pointer
+                    <br>
+                    <label>
+                        Capture:
+                        <select>
+                            <option>Right Click</option>
+                        </select>
+                    </label>
                     <br>
                     <label>
                         <input type="checkbox" value="1" id="optionVPAD">
@@ -56,7 +71,7 @@
                     </label>
                 </div>
                 <div class="controlFrame">
-                    Video Option
+                    Video
                     <br>
                     <label>
                         <input type="checkbox" value="1" id="optionNNI">
