@@ -16,15 +16,14 @@
     "url": "https://github.com/neri/vpc/issues"
   },
   "homepage": "https://github.com/neri/vpc#readme",
-  "dependencies": {},
   "devDependencies": {
     "electron": "latest",
-    "expect": "*",
-    "lodash": "*",
-    "mocha": "^8.2.1",
-    "typescript": "*",
-    "webassembly": "*",
-    "webpack": "*",
-    "webpack-cli": "*"
+    "expect": "latest",
+    "lodash": "latest",
+    "mocha": "latest",
+    "typescript": "latest",
+    "webassembly": "latest",
+    "webpack": "latest",
+    "webpack-cli": "latest"
   }
 }
