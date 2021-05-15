@@ -1,5 +1,7 @@
 # Virtual Playground
 
+**No new features will be developed in the future, only bug fixes.**
+
 A PC Emulator on WebBrowser
 
 - [Preview website](https://nerry.jp/vpc/)
