@@ -38,7 +38,7 @@ export class RuntimeEnvironment {
     public iomgr: IOManager;
     public pic: VPIC;
     public pit: VPIT;
-    public uart: UART;
+    // public uart: UART;
     public rtc: RTC;
     public pci: PCI;
 
@@ -115,7 +115,7 @@ export class RuntimeEnvironment {
         } else {
             this.memoryConfig = new Uint16Array([640, size - 1024]);
         }
-        this.vmem = this.instance.exports._init((size + 1023) / 1024);
+        this.vmem = this.invokeWasm('_init')((size + 1023) / 1024);
     }
     public setTimer(period: number): void {
         this.period = period;
@@ -123,21 +123,21 @@ export class RuntimeEnvironment {
     public setSound(freq: number): void {
         this.worker.postCommand('beep', freq);
     }
-    public emit(to: number, from: Array<number|string>): void {
+    public emit(to: number, from: Array<number | string>): void {
         const l = from.length;
         let p = this.vmem + to;
         for (let i = 0; i < l; i++) {
             const v = from[i];
-            if (typeof(v) === 'string') {
+            if (typeof (v) === 'string') {
                 for (let j = 0; j < v.length; j++) {
                     this._memory[p] = v.charCodeAt(j);
                     p++;
                 }
-            } else if (typeof(v) === 'number') {
+            } else if (typeof (v) === 'number') {
                 this._memory[p] = v;
                 p++;
             } else {
-                throw `Unexpected type ${typeof(v)}`;
+                throw `Unexpected type ${typeof (v)}`;
             }
         }
     }
@@ -179,14 +179,14 @@ export class RuntimeEnvironment {
     }
     public reset(gen: number, br_mbr: boolean = false): void {
         if (!this.instance) return;
-        this.instance.exports.reset(this.cpu, gen);
+        this.invokeWasm('reset')(this.cpu, gen);
         console.log(`CPU restarted (${gen})`);
         this.afterReset(br_mbr);
     }
     public start(gen: number, br_mbr: boolean = false): void {
         if (!this.instance) throw new Error('Instance not initialized');
-        this.cpu = this.instance.exports.alloc_cpu(gen);
-        this.regmap = JSON.parse(this.getCString(this.instance.exports.debug_get_register_map(this.cpu)));
+        this.cpu = this.invokeWasm('alloc_cpu')(gen);
+        this.regmap = JSON.parse(this.getCString(this.invokeWasm('debug_get_register_map')(this.cpu)));
         console.log(`CPU started (${gen})`);
         this.afterReset(br_mbr);
     }
@@ -201,13 +201,13 @@ export class RuntimeEnvironment {
         }
         let status: number;
         try {
-            status = this.instance.exports.run(this.cpu, this.speed_status);
+            status = this.invokeWasm('run')(this.cpu, this.speed_status);
         } catch (e) {
             this.isRunning = false;
             console.error(e);
             status = STATUS_EXCEPTION;
-            this.worker.print(`#### Exception: ${ e.message }`);
-            this.instance.exports.show_regs(this.cpu);
+            this.worker.print(`#### Exception: ${e.message}`);
+            this.invokeWasm('show_regs')(this.cpu);
             this.worker.postCommand('debugReaction', {});
         }
         this.dequeueUART();
@@ -218,7 +218,7 @@ export class RuntimeEnvironment {
         } else if (this.isDebugging || status == STATUS_ICEBP) {
             this.isRunning = false;
             this.isDebugging = true;
-            this.instance.exports.show_regs(this.cpu);
+            this.invokeWasm('show_regs')(this.cpu);
             this.worker.postCommand('debugReaction', {});
         } else {
             let timer = 1;
@@ -230,29 +230,29 @@ export class RuntimeEnvironment {
                     if (timer < 0) timer = 0;
                     break;
                 default:
-                    // timer = 1;
+                // timer = 1;
             }
             setTimeout(() => this.cont(), timer);
         }
     }
     public dequeueUART(): void {
-        if (this.uart) {
-            const cout = this.uart.dequeueTX();
-            if (cout.length > 0) {
-                this.worker.print(String.fromCharCode(...cout));
-            }
-        }
+        // if (this.uart) {
+        //     const cout = this.uart.dequeueTX();
+        //     if (cout.length > 0) {
+        //         this.worker.print(String.fromCharCode(...cout));
+        //     }
+        // }
     }
     public step(): void {
         if (!this.instance) return;
         this.dequeueUART();
         this.worker.postCommand('debugReaction', {});
         if (!this.isRunning) {
-            let status: number = this.instance.exports.step(this.cpu);
+            let status: number = this.invokeWasm('step')(this.cpu);
             if (status >= STATUS_EXCEPTION) {
                 this.worker.print(`#### Exception (${status.toString(16)})`);
             }
-            this.instance.exports.show_regs(this.cpu);
+            this.invokeWasm('show_regs')(this.cpu);
         } else {
             this.isDebugging = true;
         }
@@ -261,25 +261,25 @@ export class RuntimeEnvironment {
         if (!this.instance) return;
         this.dequeueUART();
         this.worker.postCommand('debugReaction', {});
-        if (this.instance.exports.prepare_step_over(this.cpu)) {
+        if (this.invokeWasm('prepare_step_over')(this.cpu)) {
             this.debugContinue();
         } else if (!this.isRunning) {
-            let status: number = this.instance.exports.step(this.cpu);
+            let status: number = this.invokeWasm('step')(this.cpu);
             if (status >= STATUS_EXCEPTION) {
                 this.worker.print(`#### Exception (${status.toString(16)})`);
             }
-            this.instance.exports.show_regs(this.cpu);
+            this.invokeWasm('show_regs')(this.cpu);
         } else {
             this.isDebugging = true;
         }
     }
     public showRegs(): void {
         if (!this.instance) return;
-        this.instance.exports.show_regs(this.cpu);
+        this.invokeWasm('show_regs')(this.cpu);
     }
     public showDesc(): void {
         if (!this.instance) return;
-        this.instance.exports.dump_regs(this.cpu);
+        this.invokeWasm('dump_regs')(this.cpu);
     }
     public debugContinue(): void {
         if (this.isDebugging) {
@@ -290,7 +290,7 @@ export class RuntimeEnvironment {
     }
     public setBreakpoint(seg: number, off: number): void {
         if (!this.instance) return;
-        this.instance.exports.set_breakpoint(this.cpu, seg, off);
+        this.invokeWasm('set_breakpoint')(this.cpu, seg, off);
     }
     public setReg(regName: string, value: number): void {
         const reg: number = this.regmap[regName];
@@ -306,9 +306,9 @@ export class RuntimeEnvironment {
     }
     public getSegmentBase(selector: number): number {
         if (!this.instance) return 0;
-        return this.instance.exports.debug_get_segment_base(this.cpu, selector);
+        return this.invokeWasm('debug_get_segment_base')(this.cpu, selector);
     }
-    public getCanonicalRegName(_token: string): string|null {
+    public getCanonicalRegName(_token: string): string | null {
         const token = _token.toUpperCase();
         if (Object.keys(this.regmap).indexOf(token) >= 0) {
             return token;
@@ -329,7 +329,7 @@ export class RuntimeEnvironment {
             throw new Error('BAD TOKEN');
         }
     }
-    public dump(address: number, count: number): number|undefined {
+    public dump(address: number, count: number): number | undefined {
         if (!this.instance) return;
         const addrToHex = (n: number) => ('00000000' + n.toString(16)).substr(-8);
         const toHex = (n: number) => ('00' + n.toString(16)).substr(-2);
@@ -370,12 +370,20 @@ export class RuntimeEnvironment {
         this.worker.print(lines.join('\n'));
         return address + count;
     }
-    public disasm(seg: number, off: number, count: number): number|undefined {
+    public disasm(seg: number, off: number, count: number): number | undefined {
         if (!this.instance) return;
-        return this.instance.exports.disasm(this.cpu, seg, off, count);
+        return this.invokeWasm('disasm')(this.cpu, seg, off, count);
     }
     public getVramSignature(base: number, size: number): number {
         if (!this.instance) return 0;
-        return this.instance.exports.get_vram_signature(base, size);
+        return this.invokeWasm('get_vram_signature')(base, size);
+    }
+    private invokeWasm(name: string): Function {
+        const result = this.instance?.exports[name];
+        if (typeof result === 'function') {
+            return result;
+        } else {
+            throw new Error(`${name} is not function`);
+        }
     }
 }

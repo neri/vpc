@@ -22,7 +22,8 @@ lib/bios.bin: src/bios.asm
 	nasm -f bin $? -o $@
 
 tmp/worker.js: src/worker/worker.ts src/worker/iomgr.ts src/worker/env.ts src/worker/dev.ts src/worker/vfd.ts src/worker/ps2.ts src/worker/vga.ts src/worker/mpu.ts src/worker/debug.ts
-	npx tsc $< --outDir tmp
+	npx tsc $< --outDir ./tmp
 
-lib/worker.js: tmp/worker.js
-	npx webpack $? -o $@ --mode production
+lib/worker.js: ./tmp/worker.js
+	npx webpack ./tmp/worker.js -o ./lib/ --mode production
+	mv lib/main.js lib/worker.js

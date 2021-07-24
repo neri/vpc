@@ -22,7 +22,6 @@
     "lodash": "latest",
     "mocha": "latest",
     "typescript": "latest",
-    "webassembly": "latest",
     "webpack": "latest",
     "webpack-cli": "latest"
   }
