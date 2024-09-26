@@ -1,3 +1,5 @@
+# THIS REPOSITORY WILL BE CLOSED BY THE END OF THE YEAR
+
 # Virtual Playground
 
 **No new features will be developed in the future, only bug fixes.**
